@@ -76,6 +76,7 @@ addLstItem lst itm = addToList lst itm =<< (plainText . bestTitle $ itm)
 
 data HocketGUI = HocketGUI { unreadLst :: Widget (List PocketItem FormattedText)
                            , toArchiveLst :: Widget (List PocketItem FormattedText)
+                           , helpBar :: Widget FormattedText
                            , statusBar :: Widget FormattedText
                            , guiCreds :: PocketCredentials
                            , launchCommand :: String
@@ -107,13 +108,19 @@ extractAndClear lst = do
   clearList lst
   return itms
 
+updateStatusBar :: HocketGUI -> T.Text -> IO ()
+updateStatusBar gui txt = setText (statusBar gui) txt
+
 retrieveNewItems :: HocketGUI -> IO ()
-retrieveNewItems gui = void . forkIO $ do
-  oldPIs <- (++) <$> (getAllItems $ unreadLst gui) <*> (getAllItems $ toArchiveLst gui)
-  pis <- runHocket (guiCreds gui, def) $ performGet Nothing
-  schedule $ do
-    insertPocketItems (unreadLst gui) $ pis \\ oldPIs
-    sortList (unreadLst gui)
+retrieveNewItems gui = do
+  updateStatusBar gui "Updating "
+  void . forkIO $ do
+    oldPIs <- (++) <$> (getAllItems $ unreadLst gui) <*> (getAllItems $ toArchiveLst gui)
+    pis <- runHocket (guiCreds gui, def) $ performGet Nothing
+    schedule $ do
+      insertPocketItems (unreadLst gui) $ pis \\ oldPIs
+      sortList (unreadLst gui)
+      updateStatusBar gui ""
 
 removeItemFromLst :: Eq a => Widget (List a b) -> a -> IO ()
 removeItemFromLst lst itm = do
@@ -121,14 +128,17 @@ removeItemFromLst lst itm = do
   traverse_ (removeFromList lst) maybePos
 
 executeArchiveAction :: HocketGUI -> IO ()
-executeArchiveAction gui = void . forkIO $ do
-  let archiveLst = toArchiveLst gui
-  toArchiveItms <- getAllItems archiveLst
-  runHocket (guiCreds gui, def) $ do
-    for_ toArchiveItms $ \itm -> do
-      successful <- archive . encodeUtf8 . itemId $ itm
-      liftIO . when successful . schedule $
-        removeItemFromLst archiveLst itm
+executeArchiveAction gui = do
+  updateStatusBar gui "Archiving "
+  void . forkIO $ do
+    let archiveLst = toArchiveLst gui
+    toArchiveItms <- getAllItems archiveLst
+    runHocket (guiCreds gui, def) $ do
+      for_ toArchiveItms $ \itm -> do
+        successful <- archive . encodeUtf8 . itemId $ itm
+        liftIO . when successful . schedule $
+          removeItemFromLst archiveLst itm
+    schedule $ updateStatusBar gui ""
 
 boldWhiteOnBlack :: Attr
 boldWhiteOnBlack = white `on` black `mergeAttr` style bold
@@ -141,26 +151,30 @@ createGUI :: PocketCredentials -> IO (HocketGUI, Collection)
 createGUI cred = do
    gui <- HocketGUI <$> (newList boldWhiteOnBlack 1)
                     <*> (newList boldWhiteOnBlack 1)
-                   <*> (plainText . T.intercalate " " $ [ "[q:Quit]"
-                                                        , "[j:Down]"
-                                                        , "[k:Up]"
-                                                        , "[J:Fast down]"
-                                                        , "[K:Fast up]"
-                                                        , "[g:Top]"
-                                                        , "[G:Bottom]"
-                                                        , "[d:Shift item]"
-                                                        , "[D:Shift all]"
-                                                        , "[s:Sort]"
-                                                        , "[u:Update]"
-                                                        , "[A:Archive pending]"
-                                                        , "[Enter:Launch]"
-                                                        ])
+                    <*> (plainText . T.intercalate " | " $ [ "q:Quit"
+                                                           , "j:Down"
+                                                           , "k:Up"
+                                                           , "J:Fast down"
+                                                           , "K:Fast up"
+                                                           , "g:Top"
+                                                           , "G:Bottom"
+                                                           , "d:Shift item"
+                                                           , "D:Shift all"
+                                                           , "s:Sort"
+                                                           , "u:Update"
+                                                           , "A:Archive pending"
+                                                           , "Enter:Launch"
+                                                           ])
+                   <*> plainText ""
                    <*> pure cred
                    <*> pure (credShellCmd cred)
                    <*> newFocusGroup
    setFocusAttribute (unreadLst gui) boldBlackOnOrange
    setFocusAttribute (toArchiveLst gui) boldBlackOnOrange
-   ui <- centered =<< (pure $ unreadLst gui) <--> hBorder <--> (vFixed 10 (toArchiveLst gui)) <--> (return $ statusBar gui)
+   ui <- centered =<< (pure $ unreadLst gui)
+                 <--> hBorder
+                 <--> (vFixed 10 (toArchiveLst gui))
+                 <--> ((pure $ helpBar gui) <++> hFill ' ' 1 <++> (pure $ statusBar gui))
    let fg = mainFocusGroup gui
    void $ addToFocusGroup fg (unreadLst gui)
    void $ addToFocusGroup fg (toArchiveLst gui)
