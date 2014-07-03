@@ -42,7 +42,7 @@ main = do
       res <- archive x
       liftIO . putStrLn . show $ res
       mapM_ archive rest
-    "gui" -> liftIO . vty creds =<< performGet Nothing
+    "gui" -> liftIO . vty creds $ []
     _ -> fail "Invalid args."
 
 performGet :: Maybe (Natural,Natural) -> Hocket (PocketCredentials, PocketAPIUrls) [PocketItem]
@@ -213,6 +213,7 @@ vty cred  pis = do
 
     _ -> return False
 
+  retrieveNewItems gui
   runUi c defaultContext
 
 lstKeyPressedHandler :: Widget (List PocketItem FormattedText) -> Key -> t -> IO Bool
