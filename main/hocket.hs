@@ -144,7 +144,7 @@ boldWhiteOnBlack :: Attr
 boldWhiteOnBlack = white `on` black `mergeAttr` style bold
 
 boldBlackOnOrange :: Attr
-boldBlackOnOrange = realBlack `on` yellow `mergeAttr` style bold
+boldBlackOnOrange = realBlack `on` (Color240 147) `mergeAttr` style bold
   where realBlack = rgb_color (0::Int) 0 0
 
 createGUI :: PocketCredentials -> IO (HocketGUI, Collection)
