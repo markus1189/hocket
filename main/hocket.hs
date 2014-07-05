@@ -2,6 +2,7 @@
 
 import           Control.Applicative ((<*>), pure)
 import           Control.Concurrent (forkIO)
+import           Control.Exception.Base (try)
 import           Control.Monad (join, void, replicateM_, when)
 import           Control.Monad.Error (runErrorT)
 import           Control.Monad.IO.Class (liftIO)
@@ -19,6 +20,7 @@ import           Data.Text.Encoding (encodeUtf8)
 import           Data.Traversable (Traversable, for)
 import           Graphics.Vty
 import           Graphics.Vty.Widgets.All
+import           Network.HTTP.Conduit (HttpException)
 import           Numeric.Natural
 import           System.Exit (exitSuccess)
 import           System.Posix.Env.ByteString (getArgs)
@@ -72,7 +74,7 @@ browseItem shellCmd url = do
   void $ createProcess spec'
 
 addLstItem :: Widget (List PocketItem FormattedText) -> PocketItem -> IO ()
-addLstItem lst itm = addToList lst itm =<< (plainText . T.append " " . bestTitle $ itm)
+addLstItem lst itm = addToList lst itm =<< (plainText . bestTitle $ itm)
 
 data HocketGUI = HocketGUI { unreadLst :: Widget (List PocketItem FormattedText)
                            , toArchiveLst :: Widget (List PocketItem FormattedText)
@@ -117,11 +119,14 @@ retrieveNewItems gui = do
   updateStatusBar gui "Updating "
   void . forkIO $ do
     oldPIs <- (++) <$> (getAllItems $ unreadLst gui) <*> (getAllItems $ toArchiveLst gui)
-    pis <- runHocket (guiCreds gui, def) $ performGet Nothing
-    schedule $ do
-      insertPocketItems (unreadLst gui) $ pis \\ oldPIs
-      sortList (unreadLst gui)
-      updateStatusBar gui ""
+    eitherErrorPIs <-
+      try $ runHocket (guiCreds gui, def) $ performGet Nothing :: IO (Either HttpException [PocketItem])
+    case eitherErrorPIs of
+      Right pis -> schedule $ do
+        insertPocketItems (unreadLst gui) $ pis \\ oldPIs
+        sortList (unreadLst gui)
+        updateStatusBar gui ""
+      Left _ -> updateStatusBar gui "Updating failed"
 
 removeItemFromLst :: Eq a => Widget (List a b) -> a -> IO ()
 removeItemFromLst lst itm = do
@@ -133,16 +138,21 @@ executeArchiveAction gui = do
   updateStatusBar gui "Archiving "
   void . forkIO $ do
     let archiveLst = toArchiveLst gui
-    toArchiveItms <- getAllItems archiveLst
-    runHocket (guiCreds gui, def) $ do
-      for_ toArchiveItms $ \itm -> do
-        successful <- archive . encodeUtf8 . itemId $ itm
-        liftIO . when successful . schedule $
-          removeItemFromLst archiveLst itm
-    schedule $ updateStatusBar gui ""
+    itms <- getAllItems archiveLst
+    res <- performArchive itms archiveLst
+    case res of
+      Right _ -> schedule $ updateStatusBar gui ""
+      Left _ -> schedule $ updateStatusBar gui "Archieving failed"
+  where performArchive :: [PocketItem] -> Widget (List PocketItem FormattedText) -> IO (Either HttpException ())
+        performArchive itms archiveLst = try $ runHocket (guiCreds gui, def) $ do
+          for_ itms $ \itm -> do
+            successful <- archive . encodeUtf8 . itemId $ itm
+            liftIO . when successful . schedule $
+              removeItemFromLst archiveLst itm
 
-boldWhiteOnBlack :: Attr
-boldWhiteOnBlack = white `on` black `mergeAttr` style bold
+
+keepCurrent :: Attr
+keepCurrent = Attr KeepCurrent KeepCurrent KeepCurrent
 
 boldBlackOnOrange :: Attr
 boldBlackOnOrange = realBlack `on` (Color240 147) `mergeAttr` style bold
@@ -150,8 +160,8 @@ boldBlackOnOrange = realBlack `on` (Color240 147) `mergeAttr` style bold
 
 createGUI :: PocketCredentials -> IO (HocketGUI, Collection)
 createGUI cred = do
-   gui <- HocketGUI <$> (newList boldWhiteOnBlack 1)
-                    <*> (newList boldWhiteOnBlack 1)
+   gui <- HocketGUI <$> (newList keepCurrent 1)
+                    <*> (newList keepCurrent 1)
                     <*> (plainText . T.intercalate " | " $ [ "q:Quit"
                                                            , "j:Down"
                                                            , "k:Up"
@@ -177,6 +187,8 @@ createGUI cred = do
 
    setNormalAttribute (bottomBar) $ Attr KeepCurrent KeepCurrent (SetTo black)
    setNormalAttribute (topBar) $ Attr KeepCurrent KeepCurrent (SetTo black)
+   setNormalAttribute (statusBar gui) $ Attr (SetTo bold) KeepCurrent KeepCurrent
+
    setFocusAttribute (unreadLst gui) boldBlackOnOrange
    setFocusAttribute (toArchiveLst gui) boldBlackOnOrange
    for_ [unreadLst,toArchiveLst] $ \selector ->
@@ -189,9 +201,11 @@ createGUI cred = do
                  <--> hBorder
                  <--> (vFixed 10 (toArchiveLst gui))
                  <--> pure bottomBar
+
    let fg = mainFocusGroup gui
    void $ addToFocusGroup fg (unreadLst gui)
    void $ addToFocusGroup fg (toArchiveLst gui)
+
    fg `onKeyPressed` \_ k _ -> case k of
      (KASCII 'q') -> exitSuccess
      (KASCII 'u') -> retrieveNewItems gui >> return True
