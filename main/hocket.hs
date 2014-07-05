@@ -72,7 +72,7 @@ browseItem shellCmd url = do
   void $ createProcess spec'
 
 addLstItem :: Widget (List PocketItem FormattedText) -> PocketItem -> IO ()
-addLstItem lst itm = addToList lst itm =<< (plainText . bestTitle $ itm)
+addLstItem lst itm = addToList lst itm =<< (plainText . T.append " " . bestTitle $ itm)
 
 data HocketGUI = HocketGUI { unreadLst :: Widget (List PocketItem FormattedText)
                            , toArchiveLst :: Widget (List PocketItem FormattedText)
@@ -81,6 +81,7 @@ data HocketGUI = HocketGUI { unreadLst :: Widget (List PocketItem FormattedText)
                            , guiCreds :: PocketCredentials
                            , launchCommand :: String
                            , mainFocusGroup :: Widget FocusGroup
+                           , titleText :: Widget FormattedText
                            }
 
 insertPocketItems :: Traversable f =>
@@ -169,12 +170,25 @@ createGUI cred = do
                    <*> pure cred
                    <*> pure (credShellCmd cred)
                    <*> newFocusGroup
+                   <*> plainText "Hocket"
+
+   bottomBar <- ((pure $ helpBar gui) <++> hFill ' ' 1 <++> (pure $ statusBar gui))
+   topBar <- ((pure $ titleText gui) <++> hFill ' ' 1)
+
+   setNormalAttribute (bottomBar) $ Attr KeepCurrent KeepCurrent (SetTo black)
+   setNormalAttribute (topBar) $ Attr KeepCurrent KeepCurrent (SetTo black)
    setFocusAttribute (unreadLst gui) boldBlackOnOrange
    setFocusAttribute (toArchiveLst gui) boldBlackOnOrange
-   ui <- centered =<< (pure $ unreadLst gui)
+   for_ [unreadLst,toArchiveLst] $ \selector ->
+     setNormalAttribute (selector gui) $ Attr KeepCurrent (SetTo white) KeepCurrent
+   for_ [helpBar, statusBar] $ \selector ->
+     setNormalAttribute (selector gui) $ Attr KeepCurrent (SetTo white) KeepCurrent
+
+   ui <- centered =<< pure topBar
+                 <--> (pure $ unreadLst gui)
                  <--> hBorder
                  <--> (vFixed 10 (toArchiveLst gui))
-                 <--> ((pure $ helpBar gui) <++> hFill ' ' 1 <++> (pure $ statusBar gui))
+                 <--> pure bottomBar
    let fg = mainFocusGroup gui
    void $ addToFocusGroup fg (unreadLst gui)
    void $ addToFocusGroup fg (toArchiveLst gui)
