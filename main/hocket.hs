@@ -32,6 +32,9 @@ import           Pocket
 import           Parsing
 import           Printing
 
+tryHttpException :: IO a -> IO (Either HttpException a)
+tryHttpException = try
+
 main :: IO ()
 main = do
   creds <- readFromConfig "hocket.cfg"
@@ -120,7 +123,7 @@ retrieveNewItems gui = do
   void . forkIO $ do
     oldPIs <- (++) <$> (getAllItems $ unreadLst gui) <*> (getAllItems $ toArchiveLst gui)
     eitherErrorPIs <-
-      try $ runHocket (guiCreds gui, def) $ performGet Nothing :: IO (Either HttpException [PocketItem])
+      tryHttpException $ runHocket (guiCreds gui, def) $ performGet Nothing
     case eitherErrorPIs of
       Right pis -> schedule $ do
         insertPocketItems (unreadLst gui) $ pis \\ oldPIs
@@ -143,12 +146,12 @@ executeArchiveAction gui = do
     case res of
       Right _ -> schedule $ updateStatusBar gui ""
       Left _ -> schedule $ updateStatusBar gui "Archieving failed"
-  where performArchive :: [PocketItem] -> Widget (List PocketItem FormattedText) -> IO (Either HttpException ())
-        performArchive itms archiveLst = try $ runHocket (guiCreds gui, def) $ do
-          for_ itms $ \itm -> do
-            successful <- archive . encodeUtf8 . itemId $ itm
-            liftIO . when successful . schedule $
-              removeItemFromLst archiveLst itm
+  where performArchive itms archiveLst =
+          tryHttpException $ runHocket (guiCreds gui, def) $ do
+            for_ itms $ \itm -> do
+              successful <- archive . encodeUtf8 . itemId $ itm
+              liftIO . when successful . schedule $
+                removeItemFromLst archiveLst itm
 
 
 keepCurrent :: Attr
