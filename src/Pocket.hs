@@ -47,13 +47,11 @@ retrieveList maybeOffsetCount = do
                                      , ("sort", "newest")
                                      ]
 
-addItem :: BS.ByteString -> HocketCA ()
+addItem :: BS.ByteString -> HocketCA Bool
 addItem url = do
   (ckey,token,reqUrl) <- getDetails addEndpoint
   response <- liftIO $ requestSkeleton reqUrl (keyValuePairs ckey token)
-  liftIO $ CS.putStrLn (if HC.responseStatus response == ok200
-                        then BS.append "Success: " url
-                        else BS.append "Failed to add: " url)
+  return $ HC.responseStatus response == ok200
   where keyValuePairs ckey token = [ ("consumer_key", ckey)
                                    , ("access_token", token)
                                    , ("url", url)
