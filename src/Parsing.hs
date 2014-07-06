@@ -83,9 +83,7 @@ parseItem :: BL.ByteString -> Maybe PocketItem
 parseItem = decode
 
 parseItems :: BL.ByteString -> Maybe (M.Map String PocketItem)
-parseItems content = case eitherDecode content of
-  Right result -> parseMaybe (.: "list") result
-  Left err -> fail err
+parseItems content = either fail (parseMaybe (.: "list")) $ eitherDecode content
 
 parseItemsFile :: FilePath -> IO (Maybe (M.Map String PocketItem))
 parseItemsFile file = parseItems <$> BL.readFile file

@@ -143,9 +143,9 @@ executeArchiveAction gui = do
     let archiveLst = toArchiveLst gui
     itms <- getAllItems archiveLst
     res <- performArchive itms archiveLst
-    case res of
-      Right _ -> schedule $ updateStatusBar gui ""
-      Left _ -> schedule $ updateStatusBar gui "Archieving failed"
+    schedule . updateStatusBar gui
+             . either (const "Archieving failed") (const "")
+             $ res
   where performArchive itms archiveLst =
           tryHttpException $ runHocket (guiCreds gui, def) $ do
             for_ itms $ \itm -> do
