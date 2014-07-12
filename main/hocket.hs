@@ -162,18 +162,12 @@ createGUI cred = do
    gui <- HocketGUI <$> (newList keepCurrent 1)
                     <*> (newList keepCurrent 1)
                     <*> (plainText . T.intercalate " | " $ [ "q:Quit"
-                                                           , "j:Down"
-                                                           , "k:Up"
-                                                           , "J:Fast down"
-                                                           , "K:Fast up"
-                                                           , "g:Top"
-                                                           , "G:Bottom"
                                                            , "d:Shift item"
                                                            , "D:Shift all"
-                                                           , "s:Sort"
                                                            , "u:Update"
                                                            , "A:Archive pending"
-                                                           , "Enter:Launch"
+                                                           , "SPC: Launch"
+                                                           , "Enter:Launch & Shift"
                                                            ])
                    <*> plainText ""
                    <*> pure cred
@@ -221,7 +215,7 @@ vty cred  pis = do
 
   for_ [unreadLst gui, toArchiveLst gui] $ \x -> do
     x `onItemActivated` (lstItemActivatedHandler gui x)
-    x `onKeyPressed` lstKeyPressedHandler
+    x `onKeyPressed` lstKeyPressedHandler gui
 
   (unreadLst gui) `onKeyPressed` \this key _ -> case key of
     (KASCII 'd') -> shiftSelected this (toArchiveLst gui) >> return True
@@ -243,8 +237,12 @@ vty cred  pis = do
   retrieveNewItems gui
   runUi c defaultContext
 
-lstKeyPressedHandler :: Widget (List PocketItem FormattedText) -> Key -> t -> IO Bool
-lstKeyPressedHandler this key _ = case key of
+lstKeyPressedHandler :: HocketGUI
+                     -> Widget (List PocketItem FormattedText)
+                     -> Key
+                     -> t
+                     -> IO Bool
+lstKeyPressedHandler gui this key _ = case key of
   (KASCII 'j') -> scrollDown this >> return True
   (KASCII 'k') -> scrollUp this >> return True
   (KASCII 'J') -> replicateM_ 3 (scrollDown this) >> return True
@@ -252,6 +250,10 @@ lstKeyPressedHandler this key _ = case key of
   (KASCII 's') -> sortList this >> return True
   (KASCII 'g') -> scrollToBeginning this >> return True
   (KASCII 'G') -> scrollToEnd this >> return True
+  (KASCII ' ') -> do
+    sel <- getSelected this
+    traverse_ (browseItem (launchCommand gui) . givenUrl . fst . snd) sel
+    return True
   _ -> return False
 
 lstItemActivatedHandler :: HocketGUI
