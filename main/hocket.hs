@@ -2,7 +2,6 @@
 
 import           Control.Applicative ((<*>), pure)
 import           Control.Concurrent (forkIO)
-import           Control.Exception.Base (try)
 import           Control.Monad (join, void, replicateM_, when)
 import           Control.Monad.Error (runErrorT)
 import           Control.Monad.IO.Class (liftIO)
@@ -20,20 +19,17 @@ import           Data.Text.Encoding (encodeUtf8)
 import           Data.Traversable (Traversable, for)
 import           Graphics.Vty
 import           Graphics.Vty.Widgets.All
-import           Network.HTTP.Conduit (HttpException)
 import           Numeric.Natural
 import           System.Exit (exitSuccess)
 import           System.Posix.Env.ByteString (getArgs)
 import           System.Process
 import           Text.Printf (printf)
 
-import           Types
-import           Pocket
 import           Parsing
+import           Pocket
 import           Printing
-
-tryHttpException :: IO a -> IO (Either HttpException a)
-tryHttpException = try
+import           Types
+import           Util
 
 main :: IO ()
 main = do

@@ -6,12 +6,15 @@ module Util (
   toLazyBS,
   extractValue,
   useHttps,
-  setTimeOut
+  setTimeOut,
+  tryHttpException
 ) where
 
+import           Control.Exception (try)
 import qualified Data.ByteString as BS
 import qualified Data.ByteString.Lazy as BL
 import qualified Data.ByteString.Lazy.Char8 as CL
+import           Network.HTTP.Conduit (HttpException)
 import qualified Network.HTTP.Conduit as HC
 
 requestSkeleton :: String
@@ -44,3 +47,7 @@ useHttps req = req { HC.secure = True }
 
 setTimeOut :: Int -> HC.Request -> HC.Request
 setTimeOut n req = req { HC.responseTimeout = Just n }
+
+
+tryHttpException :: IO a -> IO (Either HttpException a)
+tryHttpException = try
