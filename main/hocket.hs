@@ -273,3 +273,18 @@ shiftSelected this target = do
     void $ removeFromList this pos
     addLstItem target val
   sortList target
+
+
+{--------------------
+import Data.Aeson.Lens
+import Control.Lens
+
+selected cts = fmap (\x -> x-1) $ cts ^? key "windows" . _Array . _head . key "selected" . _Integral
+
+getTabUrl cts i = cts ^? key "windows" . _Array . _head . key "tabs" . nth i . key "entries" . _Array . _last . key "url" . _String
+
+getSelectedTabUrl cts = selected cts >>= getTabUrl cts
+
+run it:
+-- fmap getSelectedTabUrl (readFile "/home/markus/.mozilla/firefox/n5kzdn7q.default/sessionstore.js")
+--------------------}
