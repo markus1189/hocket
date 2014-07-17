@@ -1,7 +1,7 @@
 {-# LANGUAGE OverloadedStrings #-}
 
 import           Control.Applicative ((<*>), pure)
-import           Control.Concurrent (forkIO)
+import           Control.Concurrent (forkIO, threadDelay)
 import           Control.Monad (join, void, replicateM_, when)
 import           Control.Monad.Error (runErrorT)
 import           Control.Monad.IO.Class (liftIO)
@@ -251,8 +251,12 @@ lstKeyPressedHandler gui this key _ = case key of
   (KASCII 'g') -> scrollToBeginning this >> return True
   (KASCII 'G') -> scrollToEnd this >> return True
   (KASCII ' ') -> do
-    sel <- getSelected this
-    traverse_ (browseItem (launchCommand gui) . givenUrl . fst . snd) sel
+    updateStatusBar gui "Launched "
+    maybeSel <- getSelected this
+    traverse_ (browseItem (launchCommand gui) . givenUrl . fst . snd) maybeSel
+    void . forkIO $ do
+      threadDelay 1000000
+      schedule $ updateStatusBar gui ""
     return True
   _ -> return False
 
