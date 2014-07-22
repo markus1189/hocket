@@ -1,7 +1,7 @@
 {-# LANGUAGE OverloadedStrings #-}
 
 import           Control.Applicative ((<*>), pure)
-import           Control.Concurrent (forkIO, threadDelay)
+import           Control.Concurrent (forkIO, threadDelay, MVar, newEmptyMVar, takeMVar, tryPutMVar, readMVar)
 import           Control.Monad (join, void, replicateM_, when)
 import           Control.Monad.Error (runErrorT)
 import           Control.Monad.IO.Class (liftIO)
@@ -30,6 +30,9 @@ import           Pocket
 import           Printing
 import           Types
 import           Util
+
+forkIO_ :: IO () -> IO ()
+forkIO_ = void . forkIO
 
 main :: IO ()
 main = do
@@ -83,7 +86,15 @@ data HocketGUI = HocketGUI { unreadLst :: Widget (List PocketItem FormattedText)
                            , launchCommand :: String
                            , mainFocusGroup :: Widget FocusGroup
                            , titleText :: Widget FormattedText
+                           , asyncAction :: MVar (IO ())
                            }
+
+startExecuter :: MVar (IO ()) -> IO ()
+startExecuter m = forkIO_ loop
+  where loop = do act <- readMVar m; act >> void (takeMVar m) >> loop
+
+tryAsync :: HocketGUI -> IO () -> IO ()
+tryAsync gui = void . tryPutMVar (asyncAction gui)
 
 insertPocketItems :: Traversable f =>
                      Widget (List PocketItem FormattedText)
@@ -111,12 +122,12 @@ extractAndClear lst = do
   return itms
 
 updateStatusBar :: HocketGUI -> T.Text -> IO ()
-updateStatusBar gui txt = setText (statusBar gui) txt
+updateStatusBar gui txt = schedule $ setText (statusBar gui) txt
 
 retrieveNewItems :: HocketGUI -> IO ()
 retrieveNewItems gui = do
-  updateStatusBar gui "Updating "
-  void . forkIO $ do
+  tryAsync gui $ do
+    updateStatusBar gui "Updating "
     oldPIs <- (++) <$> (getAllItems $ unreadLst gui) <*> (getAllItems $ toArchiveLst gui)
     eitherErrorPIs <-
       tryHttpException $ runHocket (guiCreds gui, def) $ performGet Nothing
@@ -134,12 +145,12 @@ removeItemFromLst lst itm = do
 
 executeArchiveAction :: HocketGUI -> IO ()
 executeArchiveAction gui = do
-  updateStatusBar gui "Archiving "
-  void . forkIO $ do
+  tryAsync gui $ do
+    updateStatusBar gui "Archiving "
     let archiveLst = toArchiveLst gui
     itms <- getAllItems archiveLst
     res <- performArchive itms archiveLst
-    schedule . updateStatusBar gui
+    updateStatusBar gui
              . either (const "Archieving failed") (const "")
              $ res
   where performArchive itms archiveLst =
@@ -174,7 +185,9 @@ createGUI cred = do
                    <*> pure (credShellCmd cred)
                    <*> newFocusGroup
                    <*> plainText "Hocket"
+                   <*> newEmptyMVar
 
+   startExecuter (asyncAction gui)
    bottomBar <- ((pure $ helpBar gui) <++> hFill ' ' 1 <++> (pure $ statusBar gui))
    topBar <- ((pure $ titleText gui) <++> hFill ' ' 1)
 
@@ -251,12 +264,9 @@ lstKeyPressedHandler gui this key _ = case key of
   (KASCII 'g') -> scrollToBeginning this >> return True
   (KASCII 'G') -> scrollToEnd this >> return True
   (KASCII ' ') -> do
-    updateStatusBar gui "Launched "
-    maybeSel <- getSelected this
-    traverse_ (browseItem (launchCommand gui) . givenUrl . fst . snd) maybeSel
-    void . forkIO $ do
-      threadDelay 1000000
-      schedule $ updateStatusBar gui ""
+    forkIO_ $ do
+      maybeSel <- getSelected this
+      traverse_ (browseItem (launchCommand gui) . givenUrl . fst . snd) maybeSel
     return True
   _ -> return False
 
