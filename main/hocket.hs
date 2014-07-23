@@ -33,9 +33,6 @@ import           Printing
 import           Types
 import           Util
 
-forkIO_ :: IO () -> IO ()
-forkIO_ = void . forkIO
-
 main :: IO ()
 main = do
   creds <- readFromConfig "hocket.cfg"
@@ -94,8 +91,10 @@ data HocketGUI = HocketGUI { unreadLst :: Widget (List PocketItem FormattedText)
 abortAsync :: HocketGUI -> IO ()
 abortAsync gui@(asyncAction -> m) = do
   v <- readMVar m
-  cancel v
-  updateStatusBar gui "Aborted"
+  stat <- poll v
+  case stat of
+    Nothing -> cancel v >> updateStatusBar gui "Aborted"
+    Just _ -> return ()
 
 tryAsync :: HocketGUI -> IO () -> IO ()
 tryAsync (asyncAction -> m) act = do
@@ -273,7 +272,7 @@ lstKeyPressedHandler gui this key _ = case key of
   (KASCII 'G') -> scrollToEnd this >> return True
   (KASCII 'C') -> abortAsync gui >> return True
   (KASCII ' ') -> do
-    forkIO_ $ do
+    void . forkIO $ do
       maybeSel <- getSelected this
       traverse_ (browseItem (launchCommand gui) . givenUrl . fst . snd) maybeSel
     return True
@@ -296,18 +295,3 @@ shiftSelected this target = do
     void $ removeFromList this pos
     addLstItem target val
   sortList target
-
-
-{--------------------
-import Data.Aeson.Lens
-import Control.Lens
-
-selected cts = fmap (\x -> x-1) $ cts ^? key "windows" . _Array . _head . key "selected" . _Integral
-
-getTabUrl cts i = cts ^? key "windows" . _Array . _head . key "tabs" . nth i . key "entries" . _Array . _last . key "url" . _String
-
-getSelectedTabUrl cts = selected cts >>= getTabUrl cts
-
-run it:
--- fmap getSelectedTabUrl (readFile "/home/markus/.mozilla/firefox/n5kzdn7q.default/sessionstore.js")
---------------------}
