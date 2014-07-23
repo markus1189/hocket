@@ -1,7 +1,9 @@
 {-# LANGUAGE OverloadedStrings #-}
+{-# LANGUAGE ViewPatterns #-}
 
 import           Control.Applicative ((<*>), pure)
-import           Control.Concurrent (forkIO, threadDelay, MVar, newEmptyMVar, takeMVar, tryPutMVar, readMVar)
+import           Control.Concurrent (forkIO, MVar, takeMVar, readMVar, putMVar, newMVar)
+import           Control.Concurrent.Async (async, Async, poll, cancel)
 import           Control.Monad (join, void, replicateM_, when)
 import           Control.Monad.Error (runErrorT)
 import           Control.Monad.IO.Class (liftIO)
@@ -86,15 +88,21 @@ data HocketGUI = HocketGUI { unreadLst :: Widget (List PocketItem FormattedText)
                            , launchCommand :: String
                            , mainFocusGroup :: Widget FocusGroup
                            , titleText :: Widget FormattedText
-                           , asyncAction :: MVar (IO ())
+                           , asyncAction :: MVar (Async ())
                            }
 
-startExecuter :: MVar (IO ()) -> IO ()
-startExecuter m = forkIO_ loop
-  where loop = do act <- readMVar m; act >> void (takeMVar m) >> loop
+abortAsync :: HocketGUI -> IO ()
+abortAsync gui@(asyncAction -> m) = do
+  v <- readMVar m
+  cancel v
+  updateStatusBar gui "Aborted"
 
 tryAsync :: HocketGUI -> IO () -> IO ()
-tryAsync gui = void . tryPutMVar (asyncAction gui)
+tryAsync (asyncAction -> m) act = do
+  finished <- poll =<< readMVar m
+  case finished of
+    Nothing -> return ()
+    Just _ -> takeMVar m >> (putMVar m =<< async act)
 
 insertPocketItems :: Traversable f =>
                      Widget (List PocketItem FormattedText)
@@ -127,7 +135,7 @@ updateStatusBar gui txt = schedule $ setText (statusBar gui) txt
 retrieveNewItems :: HocketGUI -> IO ()
 retrieveNewItems gui = do
   tryAsync gui $ do
-    updateStatusBar gui "Updating "
+    updateStatusBar gui "Updating"
     oldPIs <- (++) <$> (getAllItems $ unreadLst gui) <*> (getAllItems $ toArchiveLst gui)
     eitherErrorPIs <-
       tryHttpException $ runHocket (guiCreds gui, def) $ performGet Nothing
@@ -146,7 +154,7 @@ removeItemFromLst lst itm = do
 executeArchiveAction :: HocketGUI -> IO ()
 executeArchiveAction gui = do
   tryAsync gui $ do
-    updateStatusBar gui "Archiving "
+    updateStatusBar gui "Archiving"
     let archiveLst = toArchiveLst gui
     itms <- getAllItems archiveLst
     res <- performArchive itms archiveLst
@@ -177,6 +185,7 @@ createGUI cred = do
                                                            , "D:Shift all"
                                                            , "u:Update"
                                                            , "A:Archive pending"
+                                                           , "C:Cancel"
                                                            , "SPC: Launch"
                                                            , "Enter:Launch & Shift"
                                                            ])
@@ -185,9 +194,8 @@ createGUI cred = do
                    <*> pure (credShellCmd cred)
                    <*> newFocusGroup
                    <*> plainText "Hocket"
-                   <*> newEmptyMVar
+                   <*> (newMVar =<< (async $ return ()))
 
-   startExecuter (asyncAction gui)
    bottomBar <- ((pure $ helpBar gui) <++> hFill ' ' 1 <++> (pure $ statusBar gui))
    topBar <- ((pure $ titleText gui) <++> hFill ' ' 1)
 
@@ -263,6 +271,7 @@ lstKeyPressedHandler gui this key _ = case key of
   (KASCII 's') -> sortList this >> return True
   (KASCII 'g') -> scrollToBeginning this >> return True
   (KASCII 'G') -> scrollToEnd this >> return True
+  (KASCII 'C') -> abortAsync gui >> return True
   (KASCII ' ') -> do
     forkIO_ $ do
       maybeSel <- getSelected this
