@@ -17,6 +17,7 @@ import qualified Data.ByteString.Lazy.Char8 as CL
 import           Network.HTTP.Conduit (HttpException)
 import qualified Network.HTTP.Conduit as HC
 
+
 requestSkeleton :: String
                 -> [(BS.ByteString, BS.ByteString)]
                 -> IO (HC.Response CL.ByteString)
@@ -47,7 +48,6 @@ useHttps req = req { HC.secure = True }
 
 setTimeOut :: Int -> HC.Request -> HC.Request
 setTimeOut n req = req { HC.responseTimeout = Just n }
-
 
 tryHttpException :: IO a -> IO (Either HttpException a)
 tryHttpException = try

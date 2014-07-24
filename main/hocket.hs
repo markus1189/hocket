@@ -1,5 +1,6 @@
 {-# LANGUAGE OverloadedStrings #-}
 {-# LANGUAGE ViewPatterns #-}
+{-# LANGUAGE GADTs #-}
 
 import           Control.Applicative ((<*>), pure)
 import           Control.Concurrent (forkIO, MVar, takeMVar, readMVar, putMVar, newMVar)
@@ -13,11 +14,9 @@ import           Data.Default
 import           Data.Foldable (traverse_, for_, for_)
 import           Data.Functor ((<$>))
 import           Data.List (sortBy, sortBy, (\\))
-import qualified Data.Map as M
-import           Data.Maybe (fromMaybe)
 import           Data.Ord (comparing)
+import           Data.Text (Text)
 import qualified Data.Text as T
-import           Data.Text.Encoding (encodeUtf8)
 import           Data.Traversable (Traversable, for)
 import           Graphics.Vty
 import           Graphics.Vty.Widgets.All
@@ -27,7 +26,6 @@ import           System.Posix.Env.ByteString (getArgs)
 import           System.Process
 import           Text.Printf (printf)
 
-import           Parsing
 import           Pocket
 import           Printing
 import           Types
@@ -35,28 +33,21 @@ import           Util
 
 main :: IO ()
 main = do
-  creds <- readFromConfig "hocket.cfg"
+  (creds,cmd) <- readFromConfig "hocket.cfg"
   args <- getArgs
   let (dispatch,rest) = (head args, tail args)
   runHocket (creds,def) $ case dispatch of
     "get" -> liftIO . newestFirst =<< performGet (read . CS.unpack . head $ rest)
-    "add" -> traverse_ addItem rest
-    "archive" -> for_ rest $ \x -> do
-      res <- archive x
-      liftIO . putStrLn . show $ res
-      mapM_ archive rest
-    "gui" -> liftIO . vty creds $ []
+    "add" -> traverse_ (perform . AddItem) rest
+    "gui" -> liftIO . vty cmd creds $ []
     _ -> fail "Invalid args."
 
-performGet :: Maybe (Natural,Natural) -> Hocket (PocketCredentials, PocketAPIUrls) [PocketItem]
+performGet :: Maybe (Natural,Natural) -> HocketCA [PocketItem]
 performGet maybeOffsetCount = do
-  retrieved <- retrieveList maybeOffsetCount
-  return . sortBy (flip $ comparing timeAdded)
-         . M.elems
-         . fromMaybe M.empty
-         . parseItems $ retrieved
+  retrieved <- perform $ RetrieveItems maybeOffsetCount
+  return . sortBy (flip $ comparing timeAdded) $ retrieved
 
-readFromConfig :: FilePath -> IO PocketCredentials
+readFromConfig :: FilePath -> IO (PocketCredentials, String)
 readFromConfig path = do
   Right (token,key,shCmd) <- runErrorT $ do
     cp <- join $ liftIO $ readfile emptyCP path
@@ -66,7 +57,7 @@ readFromConfig path = do
     return ( AccessToken . CS.pack $ accessToken
            , ConsumerKey . CS.pack $ consumerKey
            , cmd)
-  return $ PocketCredentials key token shCmd
+  return $ (PocketCredentials key token, shCmd)
 
 browseItem :: String -> T.Text -> IO ()
 browseItem shellCmd url = do
@@ -76,6 +67,9 @@ browseItem shellCmd url = do
 
 addLstItem :: Widget (List PocketItem FormattedText) -> PocketItem -> IO ()
 addLstItem lst itm = addToList lst itm =<< (plainText . bestTitle $ itm)
+
+bestTitle :: PocketItem -> Text
+bestTitle itm = (if givenTitle itm /= "" then givenTitle else resolvedTitle) itm
 
 data HocketGUI = HocketGUI { unreadLst :: Widget (List PocketItem FormattedText)
                            , toArchiveLst :: Widget (List PocketItem FormattedText)
@@ -160,12 +154,13 @@ executeArchiveAction gui = do
     updateStatusBar gui
              . either (const "Archieving failed") (const "")
              $ res
-  where performArchive itms archiveLst =
-          tryHttpException $ runHocket (guiCreds gui, def) $ do
-            for_ itms $ \itm -> do
-              successful <- archive . encodeUtf8 . itemId $ itm
-              liftIO . when successful . schedule $
-                removeItemFromLst archiveLst itm
+  where
+    performArchive itms archiveLst =
+      tryHttpException $ runHocket (guiCreds gui, def) $ do
+        for_ itms $ \itm -> do
+          successful <- perform $ ArchiveItem . itemId $ itm
+          liftIO . when successful . schedule $
+            removeItemFromLst archiveLst itm
 
 
 keepCurrent :: Attr
@@ -175,8 +170,8 @@ boldBlackOnOrange :: Attr
 boldBlackOnOrange = realBlack `on` (Color240 147) `mergeAttr` style bold
   where realBlack = rgb_color (0::Int) 0 0
 
-createGUI :: PocketCredentials -> IO (HocketGUI, Collection)
-createGUI cred = do
+createGUI :: String -> PocketCredentials -> IO (HocketGUI, Collection)
+createGUI shCmd cred = do
    gui <- HocketGUI <$> (newList keepCurrent 1)
                     <*> (newList keepCurrent 1)
                     <*> (plainText . T.intercalate " | " $ [ "q:Quit"
@@ -190,7 +185,7 @@ createGUI cred = do
                                                            ])
                    <*> plainText ""
                    <*> pure cred
-                   <*> pure (credShellCmd cred)
+                   <*> pure shCmd
                    <*> newFocusGroup
                    <*> plainText "Hocket"
                    <*> (newMVar =<< (async $ return ()))
@@ -228,9 +223,9 @@ createGUI cred = do
    void $ addToCollection c ui fg
    return (gui,c)
 
-vty :: PocketCredentials -> [PocketItem] -> IO ()
-vty cred  pis = do
-  (gui,c) <- createGUI cred
+vty :: String -> PocketCredentials -> [PocketItem] -> IO ()
+vty cmd cred  pis = do
+  (gui,c) <- createGUI cmd cred
   insertPocketItems (unreadLst gui) pis
 
   for_ [unreadLst gui, toArchiveLst gui] $ \x -> do
