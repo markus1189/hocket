@@ -25,7 +25,6 @@ import           Control.Applicative ((<$>),(<*>))
 import           Control.Monad (mzero)
 import           Control.Monad.Trans.Reader (ReaderT, runReaderT)
 import           Data.Aeson
-import qualified Data.ByteString as BS
 import           Data.Default
 import           Data.Text (Text)
 import           GHC.Generics
@@ -33,9 +32,9 @@ import           Network.Wreq (FormValue, FormParam((:=)))
 import qualified Network.Wreq as W
 import           Numeric.Natural
 
-newtype ConsumerKey = ConsumerKey { getConsumerKey :: BS.ByteString } deriving FormValue
-newtype RequestToken = RequestToken { getRequestToken :: BS.ByteString } deriving FormValue
-newtype AccessToken = AccessToken { getAccessToken :: BS.ByteString } deriving FormValue
+newtype ConsumerKey = ConsumerKey { getConsumerKey :: Text } deriving FormValue
+newtype RequestToken = RequestToken { getRequestToken :: Text } deriving FormValue
+newtype AccessToken = AccessToken { getAccessToken :: Text } deriving FormValue
 
 data PocketCredentials =
     PocketCredentials { credConsumerKey :: ConsumerKey
@@ -73,7 +72,7 @@ instance ToJSON PocketItemId where
   toJSON (PocketItemId i) = toJSON i
 
 data PocketRequest a where
-  AddItem :: BS.ByteString -> PocketRequest Bool
+  AddItem :: Text -> PocketRequest Bool
   ArchiveItem :: PocketItemId -> PocketRequest Bool
   Batch :: [PocketAction] -> PocketRequest [Bool]
   RetrieveItems :: Maybe (Natural,Natural) -> PocketRequest [PocketItem]

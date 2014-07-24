@@ -17,22 +17,17 @@ cabal-version:       >=1.8
 library
   ghc-options:         -Wall -O2 -Werror
   hs-source-dirs:      src
-  exposed-modules:     Types, Util, Pocket, Printing
+  exposed-modules:     Types, Pocket, Printing
   Build-depends:       base < 5,
                        http-client,
-                       http-conduit,
-                       data-default,
-                       resourcet,
-                       transformers,
-                       bytestring,
-                       aeson,
                        mtl >= 2.0 && < 2.2,
+                       data-default,
+                       transformers >= 0.3 && < 0.4,
+                       aeson,
                        http-types,
                        ConfigFile >= 1.1.2 && <= 1.2,
-                       containers,
                        text,
                        nats,
-                       unix,
                        wreq,
                        lens
 
@@ -42,19 +37,15 @@ executable hocket
   hs-source-dirs:      main
   build-depends:       hocket,
                        base < 5,
-                       hocket,
+                       http-client,
+                       data-default,
+                       transformers >= 0.3 && < 0.4,
                        mtl >= 2.0 && < 2.2,
                        nats,
-                       unix,
-                       transformers,
                        ConfigFile >= 1.1.2 && <= 1.2,
-                       bytestring,
-                       containers,
-                       data-default,
                        vty-ui == 1.7.1,
                        vty,
                        text,
                        process <= 1.3,
-                       http-conduit,
                        async >= 2.0 && < 2.1,
                        lens

@@ -5,10 +5,10 @@
 import           Control.Applicative ((<*>), pure)
 import           Control.Concurrent (forkIO, MVar, takeMVar, readMVar, putMVar, newMVar)
 import           Control.Concurrent.Async (async, Async, poll, cancel)
+import           Control.Exception (try)
 import           Control.Monad (join, void, replicateM_, when)
 import           Control.Monad.Error (runErrorT)
 import           Control.Monad.IO.Class (liftIO)
-import qualified Data.ByteString.Char8 as CS
 import           Data.ConfigFile
 import           Data.Default
 import           Data.Foldable (traverse_, for_, for_)
@@ -20,24 +20,24 @@ import qualified Data.Text as T
 import           Data.Traversable (Traversable, for)
 import           Graphics.Vty
 import           Graphics.Vty.Widgets.All
+import           Network.HTTP.Client (HttpException)
 import           Numeric.Natural
+import           System.Environment (getArgs)
 import           System.Exit (exitSuccess)
-import           System.Posix.Env.ByteString (getArgs)
 import           System.Process
 import           Text.Printf (printf)
 
 import           Pocket
 import           Printing
 import           Types
-import           Util
 
 main :: IO ()
 main = do
   (creds,cmd) <- readFromConfig "hocket.cfg"
-  args <- getArgs
+  args <- (fmap . fmap ) T.pack getArgs
   let (dispatch,rest) = (head args, tail args)
   runHocket (creds,def) $ case dispatch of
-    "get" -> liftIO . newestFirst =<< performGet (read . CS.unpack . head $ rest)
+    "get" -> liftIO . newestFirst =<< performGet (read . T.unpack . head $ rest)
     "add" -> traverse_ (perform . AddItem) rest
     "gui" -> liftIO . vty cmd creds $ []
     _ -> fail "Invalid args."
@@ -54,8 +54,8 @@ readFromConfig path = do
     accessToken <- get cp "Credentials" "access_token"
     consumerKey <- get cp "Credentials" "consumer_key"
     cmd <- get cp "Launch" "launch_cmd"
-    return ( AccessToken . CS.pack $ accessToken
-           , ConsumerKey . CS.pack $ consumerKey
+    return ( AccessToken $ accessToken
+           , ConsumerKey $ consumerKey
            , cmd)
   return $ (PocketCredentials key token, shCmd)
 
@@ -290,3 +290,6 @@ shiftSelected this target = do
     void $ removeFromList this pos
     addLstItem target val
   sortList target
+
+tryHttpException :: IO a -> IO (Either HttpException a)
+tryHttpException = try

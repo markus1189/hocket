@@ -16,7 +16,7 @@ import           Control.Lens.Operators
 import           Control.Monad.IO.Class (liftIO)
 import           Control.Monad.Reader.Class
 import           Data.Aeson.Lens (key, members, _JSON, _String, values)
-import qualified Network.HTTP.Conduit as HC
+import qualified Network.HTTP.Client as HC
 import           Network.HTTP.Types.Status
 import qualified Network.Wreq as W
 
