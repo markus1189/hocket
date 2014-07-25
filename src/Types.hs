@@ -71,8 +71,8 @@ import           Network.Wreq (FormValue, FormParam((:=)))
 import qualified Network.Wreq as W
 import           Numeric.Natural
 
-newtype ConsumerKey = ConsumerKey Text deriving FormValue
-newtype AccessToken = AccessToken Text deriving FormValue
+newtype ConsumerKey = ConsumerKey Text deriving (Show, FormValue)
+newtype AccessToken = AccessToken Text deriving (Show, FormValue)
 
 data PocketCredentials = PocketCredentials { _credConsumerKey :: ConsumerKey
                                            , _credAccessToken :: AccessToken

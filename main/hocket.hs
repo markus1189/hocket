@@ -19,6 +19,7 @@ import           Data.Ord (comparing)
 import           Data.Text (Text)
 import qualified Data.Text as T
 import           Data.Traversable (Traversable, for)
+import           Debug.Trace (traceShowM)
 import           Graphics.Vty
 import           Graphics.Vty.Widgets.All
 import           Network.HTTP.Client (HttpException)
@@ -34,7 +35,7 @@ import           Types
 
 main :: IO ()
 main = do
-  (creds,cmd) <- readFromConfig "hocket.cfg"
+  Just (creds,cmd) <- readFromConfig "hocket.cfg"
   args <- (fmap . fmap ) T.pack getArgs
   let (dispatch,rest) = (head args, tail args)
   runHocket (creds,def) $ case dispatch of
@@ -48,17 +49,22 @@ performGet maybeOffsetCount = do
   retrieved <- perform $ RetrieveItems maybeOffsetCount
   return . sortBy (flip . comparing $ view timeAdded) $ retrieved
 
-readFromConfig :: FilePath -> IO (PocketCredentials, String)
+readFromConfig :: FilePath -> IO (Maybe (PocketCredentials, String))
 readFromConfig path = do
-  Right (token,key,shCmd) <- runErrorT $ do
+
+  eitherErrorTriple <- runErrorT $ do
     cp <- join $ liftIO $ readfile emptyCP path
-    accessToken <- get cp "Credentials" "access_token"
     consumerKey <- get cp "Credentials" "consumer_key"
+    accessToken <- get cp "Credentials" "access_token"
     cmd <- get cp "Launch" "launch_cmd"
     return ( AccessToken $ accessToken
            , ConsumerKey $ consumerKey
-           , cmd)
-  return $ (PocketCredentials key token, shCmd)
+           , cmd
+           )
+  traceShowM $ eitherErrorTriple
+  return $ case eitherErrorTriple of
+    Right (token,key,shCmd) -> Just (PocketCredentials key token, shCmd)
+    Left _ -> Nothing
 
 browseItem :: String -> T.Text -> IO ()
 browseItem shellCmd url = do
@@ -160,7 +166,7 @@ executeArchiveAction gui = do
     performArchive itms archiveLst =
       tryHttpException $ runHocket (guiCreds gui, def) $ do
         for_ itms $ \itm -> do
-          successful <- perform $ ArchiveItem . view itemId $ itm
+          successful <- perform . ArchiveItem . view itemId $ itm
           liftIO . when successful . schedule $
             removeItemFromLst archiveLst itm
 
