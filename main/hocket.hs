@@ -7,7 +7,7 @@ import           Control.Concurrent (forkIO, MVar, takeMVar, readMVar, putMVar, 
 import           Control.Concurrent.Async (async, Async, poll, cancel)
 import           Control.Exception (try)
 import           Control.Lens (view)
-import           Control.Monad (join, void, replicateM_, when)
+import           Control.Monad (join, void, replicateM_)
 import           Control.Monad.Error (runErrorT)
 import           Control.Monad.IO.Class (liftIO)
 import           Data.ConfigFile
@@ -19,7 +19,6 @@ import           Data.Ord (comparing)
 import           Data.Text (Text)
 import qualified Data.Text as T
 import           Data.Traversable (Traversable, for)
-import           Debug.Trace (traceShowM)
 import           Graphics.Vty
 import           Graphics.Vty.Widgets.All
 import           Network.HTTP.Client (HttpException)
@@ -61,7 +60,6 @@ readFromConfig path = do
            , ConsumerKey $ consumerKey
            , cmd
            )
-  traceShowM $ eitherErrorTriple
   return $ case eitherErrorTriple of
     Right (token,key,shCmd) -> Just (PocketCredentials key token, shCmd)
     Left _ -> Nothing
@@ -165,10 +163,10 @@ executeArchiveAction gui = do
   where
     performArchive itms archiveLst =
       tryHttpException $ runHocket (guiCreds gui, def) $ do
-        for_ itms $ \itm -> do
-          successful <- perform . ArchiveItem . view itemId $ itm
-          liftIO . when successful . schedule $
-            removeItemFromLst archiveLst itm
+        bs <- perform $ Batch (map (Archive . view itemId) itms)
+        let archivedItms = map fst $ filter snd $ zip itms bs
+        liftIO . schedule $ for_ archivedItms $ \itm -> do
+          removeItemFromLst archiveLst itm
 
 
 keepCurrent :: Attr
@@ -245,6 +243,7 @@ vty cmd cred  pis = do
     (KASCII 'D') -> do
       insertPocketItems (toArchiveLst gui) =<< extractAndClear this
       focusNext (mainFocusGroup gui)
+      sortList (toArchiveLst gui)
       return True
     _ -> return False
 
@@ -253,6 +252,7 @@ vty cmd cred  pis = do
     (KASCII 'D') -> do
       insertPocketItems (unreadLst gui) =<< extractAndClear this
       focusNext (mainFocusGroup gui)
+      sortList (toArchiveLst gui)
       return True
 
     _ -> return False

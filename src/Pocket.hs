@@ -9,13 +9,12 @@ module Pocket (
   PocketRequest (..)
 ) where
 
-
 import           Control.Applicative ((<$>),(<*>))
-import           Control.Lens (_Left, to, view, _2, magnify)
+import           Control.Lens (_Left, view, _2, magnify)
 import           Control.Lens.Operators
 import           Control.Monad.IO.Class (liftIO)
 import           Control.Monad.Reader.Class
-import           Data.Aeson.Lens (key, members, _JSON, _String, values)
+import           Data.Aeson.Lens (key, members, _JSON, values, _Bool)
 import qualified Network.HTTP.Client as HC
 import           Network.HTTP.Types.Status
 import qualified Network.Wreq as W
@@ -41,8 +40,7 @@ perform req = do
     Batch _ -> resp ^.. W.responseBody
                       . key "action_results"
                       . values
-                      . _String
-                      . to (== "true")
+                      . _Bool
   where opts = W.defaults & W.manager . _Left %~ setManagerTimeOut 10e7
 
 setManagerTimeOut :: Int -> HC.ManagerSettings -> HC.ManagerSettings

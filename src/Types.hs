@@ -42,7 +42,7 @@ module Types (
   wordCount,
 
   PocketItemId (..),
-  PocketAction,
+  PocketAction (..),
   _Archive,
   _UnArchive,
   _Add,
