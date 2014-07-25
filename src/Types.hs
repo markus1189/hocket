@@ -42,8 +42,13 @@ module Types (
   wordCount,
 
   PocketItemId (..),
-  PocketAction (..),
+  PocketAction,
+  _Archive,
+  _UnArchive,
+  _Add,
+
   PocketRequest (..),
+
   AsFormParams (..),
   Hocket,
   HocketC,
@@ -53,7 +58,8 @@ module Types (
 ) where
 
 import           Control.Applicative ((<$>),(<*>))
-import           Control.Lens (view)
+import           Control.Lens (view, re)
+import           Control.Lens.Operators hiding ((.=))
 import           Control.Lens.TH
 import           Control.Monad (mzero)
 import           Control.Monad.Trans.Reader (ReaderT, runReaderT)
@@ -108,6 +114,7 @@ instance ToJSON PocketItemId where
 data PocketAction = Archive PocketItemId
                   | UnArchive PocketItemId
                   | Add PocketItemId
+makePrisms ''PocketAction
 
 instance ToJSON PocketAction where
   toJSON (Archive itmId) = object ["action" .= ("archive" :: String), "item_id" .= itmId]
@@ -115,31 +122,6 @@ instance ToJSON PocketAction where
   toJSON (Add url) = object [ "action" .= ("add" :: String)
                             , "item_id" .= (""::String)
                             , "url" .= url]
-
-data PocketRequest a where
-  AddItem :: Text -> PocketRequest Bool
-  ArchiveItem :: PocketItemId -> PocketRequest Bool
-  Batch :: [PocketAction] -> PocketRequest [Bool]
-  RetrieveItems :: Maybe (Natural,Natural) -> PocketRequest [PocketItem]
-
-class AsFormParams a where
-  toFormParams :: a -> [W.FormParam]
-
-instance (AsFormParams a, AsFormParams b) => AsFormParams (a,b) where
-  toFormParams (x,y) = toFormParams x ++ toFormParams y
-
-instance AsFormParams (PocketRequest a) where
-  toFormParams (Batch pas) = ["actions" := encode pas]
-  toFormParams (AddItem u) = [ "url" := u ]
-  toFormParams (ArchiveItem i) = toFormParams $ Batch [Archive i]
-  toFormParams (RetrieveItems _) = [ "detailType" := ("simple" :: Text)
-                                   , "sort" := ("newest" :: Text)
-                                   ]
-
-instance AsFormParams PocketCredentials where
-  toFormParams (PocketCredentials ck t) = [ "access_token" := t
-                                          , "consumer_key" := ck
-                                          ]
 
 data PocketItem =
   PocketItem { _excerpt :: Text
@@ -196,3 +178,28 @@ instance FromJSON PocketItem where
   parseJSON _ = mzero
 
 instance ToJSON PocketItem
+
+data PocketRequest a where
+  AddItem :: Text -> PocketRequest Bool
+  ArchiveItem :: PocketItemId -> PocketRequest Bool
+  Batch :: [PocketAction] -> PocketRequest [Bool]
+  RetrieveItems :: Maybe (Natural,Natural) -> PocketRequest [PocketItem]
+
+class AsFormParams a where
+  toFormParams :: a -> [W.FormParam]
+
+instance (AsFormParams a, AsFormParams b) => AsFormParams (a,b) where
+  toFormParams (x,y) = toFormParams x ++ toFormParams y
+
+instance AsFormParams (PocketRequest a) where
+  toFormParams (Batch pas) = ["actions" := encode pas]
+  toFormParams (AddItem u) = [ "url" := u ]
+  toFormParams (ArchiveItem i) = toFormParams $ Batch [Archive i]
+  toFormParams (RetrieveItems _) = [ "detailType" := ("simple" :: Text)
+                                   , "sort" := ("newest" :: Text)
+                                   ]
+
+instance AsFormParams PocketCredentials where
+  toFormParams (PocketCredentials ck t) = [ "access_token" := t
+                                          , "consumer_key" := ck
+                                          ]
