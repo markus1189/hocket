@@ -58,8 +58,7 @@ module Types (
 ) where
 
 import           Control.Applicative ((<$>),(<*>))
-import           Control.Lens (view, re)
-import           Control.Lens.Operators hiding ((.=))
+import           Control.Lens (view)
 import           Control.Lens.TH
 import           Control.Monad (mzero)
 import           Control.Monad.Trans.Reader (ReaderT, runReaderT)
