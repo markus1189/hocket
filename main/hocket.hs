@@ -6,6 +6,7 @@ import           Control.Applicative ((<*>), pure)
 import           Control.Concurrent (forkIO, MVar, takeMVar, readMVar, putMVar, newMVar)
 import           Control.Concurrent.Async (async, Async, poll, cancel)
 import           Control.Exception (try)
+import           Control.Lens (view)
 import           Control.Monad (join, void, replicateM_, when)
 import           Control.Monad.Error (runErrorT)
 import           Control.Monad.IO.Class (liftIO)
@@ -45,7 +46,7 @@ main = do
 performGet :: Maybe (Natural,Natural) -> HocketCA [PocketItem]
 performGet maybeOffsetCount = do
   retrieved <- perform $ RetrieveItems maybeOffsetCount
-  return . sortBy (flip $ comparing timeAdded) $ retrieved
+  return . sortBy (flip . comparing $ view timeAdded) $ retrieved
 
 readFromConfig :: FilePath -> IO (PocketCredentials, String)
 readFromConfig path = do
@@ -69,7 +70,8 @@ addLstItem :: Widget (List PocketItem FormattedText) -> PocketItem -> IO ()
 addLstItem lst itm = addToList lst itm =<< (plainText . bestTitle $ itm)
 
 bestTitle :: PocketItem -> Text
-bestTitle itm = (if givenTitle itm /= "" then givenTitle else resolvedTitle) itm
+bestTitle itm =
+  view (if view givenTitle itm /= "" then givenTitle else resolvedTitle) itm
 
 data HocketGUI = HocketGUI { unreadLst :: Widget (List PocketItem FormattedText)
                            , toArchiveLst :: Widget (List PocketItem FormattedText)
@@ -105,7 +107,7 @@ insertPocketItems lst = traverse_ (addLstItem lst)
 sortList :: Widget (List PocketItem FormattedText) -> IO ()
 sortList lst = do
   sel <- getSelected lst
-  pis <- sortBy (flip $ comparing timeAdded) <$> extractAndClear lst
+  pis <- sortBy (flip . comparing $ view timeAdded) <$> extractAndClear lst
   insertPocketItems lst pis
   for_ sel $ \(pos, _) -> setSelected lst pos
 
@@ -158,7 +160,7 @@ executeArchiveAction gui = do
     performArchive itms archiveLst =
       tryHttpException $ runHocket (guiCreds gui, def) $ do
         for_ itms $ \itm -> do
-          successful <- perform $ ArchiveItem . itemId $ itm
+          successful <- perform $ ArchiveItem . view itemId $ itm
           liftIO . when successful . schedule $
             removeItemFromLst archiveLst itm
 
@@ -269,7 +271,7 @@ lstKeyPressedHandler gui this key _ = case key of
   (KASCII ' ') -> do
     void . forkIO $ do
       maybeSel <- getSelected this
-      traverse_ (browseItem (launchCommand gui) . givenUrl . fst . snd) maybeSel
+      traverse_ (browseItem (launchCommand gui) . view givenUrl . fst . snd) maybeSel
     return True
   _ -> return False
 
@@ -279,7 +281,7 @@ lstItemActivatedHandler :: HocketGUI
                         -> IO ()
 lstItemActivatedHandler gui src (ActivateItemEvent _ v _) = do
   shiftSelected src (toArchiveLst gui)
-  browseItem (launchCommand gui) . givenUrl $ v
+  browseItem (launchCommand gui) . view givenUrl $ v
 
 shiftSelected :: Widget (List PocketItem FormattedText)
          -> Widget (List PocketItem FormattedText)

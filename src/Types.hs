@@ -1,15 +1,46 @@
 {-# LANGUAGE OverloadedStrings #-}
 {-# LANGUAGE GeneralizedNewtypeDeriving #-}
 {-# LANGUAGE GADTs #-}
+{-# LANGUAGE TemplateHaskell #-}
 {-# LANGUAGE DeriveGeneric #-}
 
 module Types (
   ConsumerKey (..),
-  RequestToken (..),
   AccessToken (..),
+
   PocketCredentials (..),
-  PocketAPIUrls (..),
+  credConsumerKey,
+  credAccessToken,
+
+  PocketAPIUrls,
+  addEndpoint,
+  retrieveEndpoint,
+  modifyEndpoint,
+  requestEndpoint,
+  authorizeEndpoint,
+
+
   PocketItem (..),
+  excerpt,
+  favorite,
+  givenTitle,
+  givenUrl,
+  hasImage,
+  hasVideo,
+  isArticle,
+  isIndex,
+  itemId,
+  resolvedId,
+  resolvedTitle,
+  resolvedUrl,
+  sortId,
+  status,
+  timeAdded,
+  timeFavorited,
+  timeRead,
+  timeUpdated,
+  wordCount,
+
   PocketItemId (..),
   PocketAction (..),
   PocketRequest (..),
@@ -22,38 +53,41 @@ module Types (
 ) where
 
 import           Control.Applicative ((<$>),(<*>))
+import           Control.Lens (view)
+import           Control.Lens.TH
 import           Control.Monad (mzero)
 import           Control.Monad.Trans.Reader (ReaderT, runReaderT)
 import           Data.Aeson
 import           Data.Default
+import           Data.Function (on)
 import           Data.Text (Text)
 import           GHC.Generics
 import           Network.Wreq (FormValue, FormParam((:=)))
 import qualified Network.Wreq as W
 import           Numeric.Natural
 
-newtype ConsumerKey = ConsumerKey { getConsumerKey :: Text } deriving FormValue
-newtype RequestToken = RequestToken { getRequestToken :: Text } deriving FormValue
-newtype AccessToken = AccessToken { getAccessToken :: Text } deriving FormValue
+newtype ConsumerKey = ConsumerKey Text deriving FormValue
+newtype AccessToken = AccessToken Text deriving FormValue
 
-data PocketCredentials =
-    PocketCredentials { credConsumerKey :: ConsumerKey
-                      , credAccessToken :: AccessToken
-                      }
+data PocketCredentials = PocketCredentials { _credConsumerKey :: ConsumerKey
+                                           , _credAccessToken :: AccessToken
+                                           }
+makeLenses ''PocketCredentials
 
-data PocketAPIUrls = PocketAPIUrls { addEndpoint :: String
-                                   , retrieveEndpoint :: String
-                                   , modifyEndpoint :: String
-                                   , requestEndpoint :: String
-                                   , authorizeEndpoint :: String
+data PocketAPIUrls = PocketAPIUrls { _addEndpoint :: String
+                                   , _retrieveEndpoint :: String
+                                   , _modifyEndpoint :: String
+                                   , _requestEndpoint :: String
+                                   , _authorizeEndpoint :: String
                                    }
+makeLenses ''PocketAPIUrls
 
 instance Default PocketAPIUrls where
-    def = PocketAPIUrls { addEndpoint = "https://getpocket.com/v3/add"
-                        , retrieveEndpoint = "https://getpocket.com/v3/get"
-                        , modifyEndpoint = "https://getpocket.com/v3/send"
-                        , requestEndpoint = "https://getpocket.com/v3/oauth/request"
-                        , authorizeEndpoint = "https://getpocket.com/v3/oauth/authorize"
+    def = PocketAPIUrls { _addEndpoint = "https://getpocket.com/v3/add"
+                        , _retrieveEndpoint = "https://getpocket.com/v3/get"
+                        , _modifyEndpoint = "https://getpocket.com/v3/send"
+                        , _requestEndpoint = "https://getpocket.com/v3/oauth/request"
+                        , _authorizeEndpoint = "https://getpocket.com/v3/oauth/authorize"
                         }
 
 type Hocket c a = ReaderT c IO a
@@ -70,6 +104,17 @@ newtype PocketItemId = PocketItemId Text
 
 instance ToJSON PocketItemId where
   toJSON (PocketItemId i) = toJSON i
+
+data PocketAction = Archive PocketItemId
+                  | UnArchive PocketItemId
+                  | Add PocketItemId
+
+instance ToJSON PocketAction where
+  toJSON (Archive itmId) = object ["action" .= ("archive" :: String), "item_id" .= itmId]
+  toJSON (UnArchive itmId) = object ["action" .= ("readd" :: String), "item_id" .= itmId]
+  toJSON (Add url) = object [ "action" .= ("add" :: String)
+                            , "item_id" .= (""::String)
+                            , "url" .= url]
 
 data PocketRequest a where
   AddItem :: Text -> PocketRequest Bool
@@ -97,29 +142,31 @@ instance AsFormParams PocketCredentials where
                                           ]
 
 data PocketItem =
-  PocketItem { excerpt :: Text
-             , favorite :: !Text
-             , givenTitle :: !Text
-             , givenUrl :: !Text
-             , hasImage :: !Bool
-             , hasVideo :: !Bool
-             , isArticle :: !Bool
-             , isIndex :: !Bool
-             , itemId :: !PocketItemId
-             , resolvedId :: !Text
-             , resolvedTitle :: !Text
-             , resolvedUrl :: !Text
-             , sortId :: Int
-             , status :: !Text
-             , timeAdded :: !Text
-             , timeFavorited :: !Text
-             , timeRead :: !Text
-             , timeUpdated :: !Text
-             , wordCount :: !Int
+  PocketItem { _excerpt :: Text
+             , _favorite :: !Text
+             , _givenTitle :: !Text
+             , _givenUrl :: !Text
+             , _hasImage :: !Bool
+             , _hasVideo :: !Bool
+             , _isArticle :: !Bool
+             , _isIndex :: !Bool
+             , _itemId :: !PocketItemId
+             , _resolvedId :: !Text
+             , _resolvedTitle :: !Text
+             , _resolvedUrl :: !Text
+             , _sortId :: Int
+             , _status :: !Text
+             , _timeAdded :: !Text
+             , _timeFavorited :: !Text
+             , _timeRead :: !Text
+             , _timeUpdated :: !Text
+             , _wordCount :: !Int
              } deriving (Show,Generic)
 
+makeLenses ''PocketItem
+
 instance Eq PocketItem where
-  (PocketItem {itemId = id1}) == (PocketItem {itemId = id2}) = id1 == id2
+  (==) = (==) `on` view itemId
 
 truthy :: Text -> Bool
 truthy "1" = True
@@ -149,14 +196,3 @@ instance FromJSON PocketItem where
   parseJSON _ = mzero
 
 instance ToJSON PocketItem
-
-data PocketAction = Archive PocketItemId
-                  | UnArchive PocketItemId
-                  | Add PocketItemId
-
-instance ToJSON PocketAction where
-  toJSON (Archive itmId) = object ["action" .= ("archive" :: String), "item_id" .= itmId]
-  toJSON (UnArchive itmId) = object ["action" .= ("readd" :: String), "item_id" .= itmId]
-  toJSON (Add url) = object [ "action" .= ("add" :: String)
-                            , "item_id" .= (""::String)
-                            , "url" .= url]

@@ -11,7 +11,7 @@ module Pocket (
 
 
 import           Control.Applicative ((<$>),(<*>))
-import           Control.Lens (_Left, to)
+import           Control.Lens (_Left, to, view, _2, magnify)
 import           Control.Lens.Operators
 import           Control.Monad.IO.Class (liftIO)
 import           Control.Monad.Reader.Class
@@ -23,14 +23,12 @@ import qualified Network.Wreq as W
 import           Types
 
 selectEndpoint :: PocketRequest a -> HocketCA String
-selectEndpoint req = asks $ sel . snd
+selectEndpoint req = magnify _2 $ view sel
   where sel = case req of
           AddItem _ -> addEndpoint
           ArchiveItem _ -> modifyEndpoint
           Batch _ -> modifyEndpoint
           RetrieveItems _ -> retrieveEndpoint
-
-selectEndpoint (AddItem _) = asks $ addEndpoint . snd
 
 perform :: PocketRequest a -> HocketCA a
 perform req = do
