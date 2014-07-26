@@ -13,8 +13,9 @@ import           Control.Monad.IO.Class (liftIO)
 import           Data.ConfigFile
 import           Data.Default
 import           Data.Foldable (traverse_, for_, for_)
+import qualified Data.Function as F
 import           Data.Functor ((<$>))
-import           Data.List (sortBy, sortBy, (\\))
+import           Data.List (sortBy, (\\))
 import           Data.Ord (comparing)
 import           Data.Text (Text)
 import qualified Data.Text as T
@@ -72,6 +73,20 @@ browseItem shellCmd url = do
 
 addLstItem :: Widget (List PocketItem FormattedText) -> PocketItem -> IO ()
 addLstItem lst itm = addToList lst itm =<< (plainText . bestTitle $ itm)
+
+addLstItemAt :: Int -> Widget (List PocketItem FormattedText) -> PocketItem -> IO ()
+addLstItemAt i lst itm = do
+  w <- plainText . bestTitle $ itm
+  insertIntoList lst itm w i
+
+sortedAddLstItem  :: Widget (List PocketItem FormattedText) -> PocketItem -> IO ()
+sortedAddLstItem lst itm = do
+  itms <- getAllItems lst
+  let insertPos = foldr (\x acc -> if itm `lt` x then acc else acc + 1) 0 itms
+  addLstItemAt insertPos lst itm
+  where
+    lt :: PocketItem -> PocketItem -> Bool
+    lt = (>) `F.on` view timeAdded
 
 bestTitle :: PocketItem -> Text
 bestTitle itm =
@@ -140,8 +155,7 @@ retrieveNewItems gui = do
       tryHttpException $ runHocket (guiCreds gui, def) $ performGet Nothing
     case eitherErrorPIs of
       Right pis -> schedule $ do
-        insertPocketItems (unreadLst gui) $ pis \\ oldPIs
-        sortList (unreadLst gui)
+        traverse_ (sortedAddLstItem (unreadLst gui)) $ pis \\ oldPIs
         updateStatusBar gui ""
       Left _ -> updateStatusBar gui "Updating failed"
 
@@ -250,9 +264,8 @@ vty cmd cred  pis = do
   (toArchiveLst gui) `onKeyPressed` \this key _ -> case key of
     (KASCII 'd') -> shiftSelected this (unreadLst gui) >> return True
     (KASCII 'D') -> do
-      insertPocketItems (unreadLst gui) =<< extractAndClear this
+      traverse_ (sortedAddLstItem (unreadLst gui)) =<< extractAndClear this
       focusNext (mainFocusGroup gui)
-      sortList (toArchiveLst gui)
       return True
 
     _ -> return False
@@ -296,8 +309,7 @@ shiftSelected this target = do
   sel <- getSelected this
   for_ sel $ \(pos, (val, _)) -> do
     void $ removeFromList this pos
-    addLstItem target val
-  sortList target
+    sortedAddLstItem target val
 
 tryHttpException :: IO a -> IO (Either HttpException a)
 tryHttpException = try
