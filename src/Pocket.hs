@@ -4,8 +4,6 @@
 {-# LANGUAGE NumDecimals #-}
 {-# LANGUAGE RankNTypes #-}
 
-{-# OPTIONS_GHC -fno-warn-overlapping-patterns #-}
-
 module Pocket (
   perform,
   PocketRequest (..)

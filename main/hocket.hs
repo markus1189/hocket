@@ -1,12 +1,15 @@
 {-# LANGUAGE OverloadedStrings #-}
 {-# LANGUAGE ViewPatterns #-}
 {-# LANGUAGE GADTs #-}
+{-# LANGUAGE TemplateHaskell #-}
 
 import           Control.Applicative ((<*>), pure)
 import           Control.Concurrent (forkIO, MVar, takeMVar, readMVar, putMVar, newMVar)
 import           Control.Concurrent.Async (async, Async, poll, cancel)
 import           Control.Exception (try)
 import           Control.Lens (view, _Right, preview)
+import           Control.Lens.Operators
+import           Control.Lens.TH
 import           Control.Monad (join, void, replicateM_)
 import           Control.Monad.Error (runErrorT)
 import           Control.Monad.IO.Class (liftIO)
@@ -32,6 +35,21 @@ import           Text.Printf (printf)
 import           Pocket
 import           Printing
 import           Types
+
+makeLensesFor [("std_err", "stdErr"), ("std_out", "stdOut")] ''CreateProcess
+
+
+data HocketGUI = HocketGUI { _unreadLst :: Widget (List PocketItem FormattedText)
+                           , _toArchiveLst :: Widget (List PocketItem FormattedText)
+                           , _helpBar :: Widget FormattedText
+                           , _statusBar :: Widget FormattedText
+                           , _guiCreds :: PocketCredentials
+                           , _launchCommand :: String
+                           , _mainFocusGroup :: Widget FocusGroup
+                           , _titleText :: Widget FormattedText
+                           , _asyncAction :: MVar (Async ())
+                           }
+makeLenses ''HocketGUI
 
 main :: IO ()
 main = do
@@ -64,9 +82,9 @@ readFromConfig path = do
 
 browseItem :: String -> T.Text -> IO ()
 browseItem shellCmd url = do
-  let spec = shell $ printf shellCmd (T.unpack url)
-      spec' = spec {std_out = CreatePipe, std_err = CreatePipe}
-  void $ createProcess spec'
+  let spec = (shell $ printf shellCmd (T.unpack url))
+  void $ createProcess $ spec & stdOut .~ CreatePipe
+                              & stdErr .~ CreatePipe
 
 addLstItem :: Widget (List PocketItem FormattedText) -> PocketItem -> IO ()
 addLstItem lst itm = addToList lst itm =<< (plainText . bestTitle $ itm)
@@ -89,19 +107,8 @@ bestTitle :: PocketItem -> Text
 bestTitle itm =
   view (if view givenTitle itm /= "" then givenTitle else resolvedTitle) itm
 
-data HocketGUI = HocketGUI { unreadLst :: Widget (List PocketItem FormattedText)
-                           , toArchiveLst :: Widget (List PocketItem FormattedText)
-                           , helpBar :: Widget FormattedText
-                           , statusBar :: Widget FormattedText
-                           , guiCreds :: PocketCredentials
-                           , launchCommand :: String
-                           , mainFocusGroup :: Widget FocusGroup
-                           , titleText :: Widget FormattedText
-                           , asyncAction :: MVar (Async ())
-                           }
-
 abortAsync :: HocketGUI -> IO ()
-abortAsync gui@(asyncAction -> m) = do
+abortAsync gui@(view asyncAction -> m) = do
   v <- readMVar m
   stat <- poll v
   case stat of
@@ -109,7 +116,7 @@ abortAsync gui@(asyncAction -> m) = do
     Just _ -> return ()
 
 tryAsync :: HocketGUI -> IO () -> IO ()
-tryAsync (asyncAction -> m) act = do
+tryAsync (view asyncAction -> m) act = do
   finished <- poll =<< readMVar m
   case finished of
     Nothing -> return ()
@@ -141,18 +148,19 @@ extractAndClear lst = do
   return itms
 
 updateStatusBar :: HocketGUI -> T.Text -> IO ()
-updateStatusBar gui txt = schedule $ setText (statusBar gui) txt
+updateStatusBar gui txt = schedule $ setText (view statusBar gui) txt
 
 retrieveNewItems :: HocketGUI -> IO ()
 retrieveNewItems gui = do
   tryAsync gui $ do
     updateStatusBar gui "Updating"
-    oldPIs <- (++) <$> (getAllItems $ unreadLst gui) <*> (getAllItems $ toArchiveLst gui)
+    oldPIs <- (++) <$> (getAllItems $ view unreadLst gui)
+                   <*> (getAllItems $ view toArchiveLst gui)
     eitherErrorPIs <-
-      tryHttpException $ runHocket (guiCreds gui, def) $ sortedRetrieve Nothing
+      tryHttpException $ runHocket (view guiCreds gui, def) $ sortedRetrieve Nothing
     case eitherErrorPIs of
       Right pis -> do
-        schedule $ traverse_ (sortedAddLstItem (unreadLst gui)) $ pis \\ oldPIs
+        schedule $ traverse_ (sortedAddLstItem (view unreadLst gui)) $ pis \\ oldPIs
         updateStatusBar gui ""
       Left _ -> updateStatusBar gui "Updating failed"
 
@@ -165,7 +173,7 @@ executeArchiveAction :: HocketGUI -> IO ()
 executeArchiveAction gui = do
   tryAsync gui $ do
     updateStatusBar gui "Archiving"
-    let archiveLst = toArchiveLst gui
+    let archiveLst = view toArchiveLst gui
     itms <- getAllItems archiveLst
     res <- performArchive gui archiveLst itms
     updateStatusBar gui . maybe "" (const "Archieving failed") $ res
@@ -175,7 +183,7 @@ performArchive :: HocketGUI
                -> [PocketItem]
                -> IO (Maybe HttpException)
 performArchive gui archiveLst itms = do
-  res <- tryHttpException $ runHocket (guiCreds gui, def) $ do
+  res <- tryHttpException $ runHocket (view guiCreds gui, def) $ do
     bs <- perform $ Batch (map (Archive . view itemId) itms)
     return . map fst . filter snd $ zip itms bs
   case res of
@@ -211,29 +219,29 @@ createGUI shCmd cred = do
                    <*> plainText "Hocket"
                    <*> (newMVar =<< (async $ return ()))
 
-   bottomBar <- ((pure $ helpBar gui) <++> hFill ' ' 1 <++> (pure $ statusBar gui))
-   topBar <- ((pure $ titleText gui) <++> hFill ' ' 1)
+   bottomBar <- ((pure $ view helpBar gui) <++> hFill ' ' 1 <++> (pure $ view statusBar gui))
+   topBar <- ((pure $ view titleText gui) <++> hFill ' ' 1)
 
    setNormalAttribute (bottomBar) $ Attr KeepCurrent KeepCurrent (SetTo black)
    setNormalAttribute (topBar) $ Attr KeepCurrent KeepCurrent (SetTo black)
-   setNormalAttribute (statusBar gui) $ Attr (SetTo bold) KeepCurrent KeepCurrent
+   setNormalAttribute (view statusBar gui) $ Attr (SetTo bold) KeepCurrent KeepCurrent
 
-   setFocusAttribute (unreadLst gui) boldBlackOnOrange
-   setFocusAttribute (toArchiveLst gui) boldBlackOnOrange
+   setFocusAttribute (view unreadLst gui) boldBlackOnOrange
+   setFocusAttribute (view toArchiveLst gui) boldBlackOnOrange
    for_ [unreadLst,toArchiveLst] $ \selector ->
-     setNormalAttribute (selector gui) $ Attr KeepCurrent (SetTo white) KeepCurrent
+     setNormalAttribute (view selector gui) $ Attr KeepCurrent (SetTo white) KeepCurrent
    for_ [helpBar, statusBar] $ \selector ->
-     setNormalAttribute (selector gui) $ Attr KeepCurrent (SetTo white) KeepCurrent
+     setNormalAttribute (view selector gui) $ Attr KeepCurrent (SetTo white) KeepCurrent
 
    ui <- centered =<< pure topBar
-                 <--> (pure $ unreadLst gui)
+                 <--> (pure $ view unreadLst gui)
                  <--> hBorder
-                 <--> (vFixed 10 (toArchiveLst gui))
+                 <--> (vFixed 10 (view toArchiveLst gui))
                  <--> pure bottomBar
 
-   let fg = mainFocusGroup gui
-   void $ addToFocusGroup fg (unreadLst gui)
-   void $ addToFocusGroup fg (toArchiveLst gui)
+   let fg = view mainFocusGroup gui
+   void $ addToFocusGroup fg (view unreadLst gui)
+   void $ addToFocusGroup fg (view toArchiveLst gui)
 
    fg `onKeyPressed` \_ k _ -> case k of
      (KASCII 'q') -> exitSuccess
@@ -247,26 +255,26 @@ createGUI shCmd cred = do
 vty :: String -> PocketCredentials -> [PocketItem] -> IO ()
 vty cmd cred  pis = do
   (gui,c) <- createGUI cmd cred
-  insertPocketItems (unreadLst gui) pis
+  insertPocketItems (view unreadLst gui) pis
 
-  for_ [unreadLst gui, toArchiveLst gui] $ \x -> do
+  for_ [view unreadLst gui, view toArchiveLst gui] $ \x -> do
     x `onItemActivated` (lstItemActivatedHandler gui x)
     x `onKeyPressed` lstKeyPressedHandler gui
 
-  (unreadLst gui) `onKeyPressed` \this key _ -> case key of
-    (KASCII 'd') -> shiftSelected this (toArchiveLst gui) >> return True
+  (view unreadLst gui) `onKeyPressed` \this key _ -> case key of
+    (KASCII 'd') -> shiftSelected this (view toArchiveLst gui) >> return True
     (KASCII 'D') -> do
-      insertPocketItems (toArchiveLst gui) =<< extractAndClear this
-      focusNext (mainFocusGroup gui)
-      sortList (toArchiveLst gui)
+      insertPocketItems (view toArchiveLst gui) =<< extractAndClear this
+      focusNext (view mainFocusGroup gui)
+      sortList (view toArchiveLst gui)
       return True
     _ -> return False
 
-  (toArchiveLst gui) `onKeyPressed` \this key _ -> case key of
-    (KASCII 'd') -> shiftSelected this (unreadLst gui) >> return True
+  (view toArchiveLst gui) `onKeyPressed` \this key _ -> case key of
+    (KASCII 'd') -> shiftSelected this (view unreadLst gui) >> return True
     (KASCII 'D') -> do
-      traverse_ (sortedAddLstItem (unreadLst gui)) =<< extractAndClear this
-      focusNext (mainFocusGroup gui)
+      traverse_ (sortedAddLstItem (view unreadLst gui)) =<< extractAndClear this
+      focusNext (view mainFocusGroup gui)
       return True
 
     _ -> return False
@@ -291,7 +299,7 @@ lstKeyPressedHandler gui this key _ = case key of
   (KASCII ' ') -> do
     void . forkIO $ do
       maybeSel <- getSelected this
-      traverse_ (browseItem (launchCommand gui) . view givenUrl . fst . snd) maybeSel
+      traverse_ (browseItem (view launchCommand gui) . view givenUrl . fst . snd) maybeSel
     return True
   _ -> return False
 
@@ -300,8 +308,8 @@ lstItemActivatedHandler :: HocketGUI
                         -> ActivateItemEvent PocketItem t
                         -> IO ()
 lstItemActivatedHandler gui src (ActivateItemEvent _ v _) = do
-  shiftSelected src (toArchiveLst gui)
-  browseItem (launchCommand gui) . view givenUrl $ v
+  shiftSelected src (view toArchiveLst gui)
+  browseItem (view launchCommand gui) . view givenUrl $ v
 
 shiftSelected :: Widget (List PocketItem FormattedText)
          -> Widget (List PocketItem FormattedText)
