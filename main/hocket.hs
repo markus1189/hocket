@@ -6,7 +6,7 @@ import           Control.Applicative ((<*>), pure)
 import           Control.Concurrent (forkIO, MVar, takeMVar, readMVar, putMVar, newMVar)
 import           Control.Concurrent.Async (async, Async, poll, cancel)
 import           Control.Exception (try)
-import           Control.Lens (view)
+import           Control.Lens (view, _Right, preview)
 import           Control.Monad (join, void, replicateM_)
 import           Control.Monad.Error (runErrorT)
 import           Control.Monad.IO.Class (liftIO)
@@ -39,31 +39,28 @@ main = do
   args <- (fmap . fmap ) T.pack getArgs
   let (dispatch,rest) = (head args, tail args)
   runHocket (creds,def) $ case dispatch of
-    "get" -> liftIO . newestFirst =<< performGet (read . T.unpack . head $ rest)
+    "get" -> liftIO . newestFirst =<< sortedRetrieve (read . T.unpack . head $ rest)
     "add" -> traverse_ (perform . AddItem) rest
     "gui" -> liftIO . vty cmd creds $ []
     _ -> fail "Invalid args."
 
-performGet :: Maybe (Natural,Natural) -> Hocket [PocketItem]
-performGet maybeOffsetCount = do
+sortedRetrieve :: Maybe (Natural,Natural) -> Hocket [PocketItem]
+sortedRetrieve maybeOffsetCount = do
   retrieved <- perform $ RetrieveItems maybeOffsetCount
   return . sortBy (flip . comparing $ view timeAdded) $ retrieved
 
 readFromConfig :: FilePath -> IO (Maybe (PocketCredentials, String))
 readFromConfig path = do
-
-  eitherErrorTriple <- runErrorT $ do
+  eitherErrorTuple <- runErrorT $ do
     cp <- join $ liftIO $ readfile emptyCP path
     consumerKey <- get cp "Credentials" "consumer_key"
     accessToken <- get cp "Credentials" "access_token"
     cmd <- get cp "Launch" "launch_cmd"
-    return ( AccessToken $ accessToken
-           , ConsumerKey $ consumerKey
+    return ( PocketCredentials (ConsumerKey consumerKey)
+                               (AccessToken accessToken)
            , cmd
            )
-  return $ case eitherErrorTriple of
-    Right (token,key,shCmd) -> Just (PocketCredentials key token, shCmd)
-    Left _ -> Nothing
+  return . preview _Right $ eitherErrorTuple
 
 browseItem :: String -> T.Text -> IO ()
 browseItem shellCmd url = do
@@ -152,7 +149,7 @@ retrieveNewItems gui = do
     updateStatusBar gui "Updating"
     oldPIs <- (++) <$> (getAllItems $ unreadLst gui) <*> (getAllItems $ toArchiveLst gui)
     eitherErrorPIs <-
-      tryHttpException $ runHocket (guiCreds gui, def) $ performGet Nothing
+      tryHttpException $ runHocket (guiCreds gui, def) $ sortedRetrieve Nothing
     case eitherErrorPIs of
       Right pis -> do
         schedule $ traverse_ (sortedAddLstItem (unreadLst gui)) $ pis \\ oldPIs
