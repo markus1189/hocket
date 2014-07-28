@@ -154,8 +154,8 @@ retrieveNewItems gui = do
     eitherErrorPIs <-
       tryHttpException $ runHocket (guiCreds gui, def) $ performGet Nothing
     case eitherErrorPIs of
-      Right pis -> schedule $ do
-        traverse_ (sortedAddLstItem (unreadLst gui)) $ pis \\ oldPIs
+      Right pis -> do
+        schedule $ traverse_ (sortedAddLstItem (unreadLst gui)) $ pis \\ oldPIs
         updateStatusBar gui ""
       Left _ -> updateStatusBar gui "Updating failed"
 
@@ -170,18 +170,22 @@ executeArchiveAction gui = do
     updateStatusBar gui "Archiving"
     let archiveLst = toArchiveLst gui
     itms <- getAllItems archiveLst
-    res <- performArchive itms archiveLst
-    updateStatusBar gui
-             . either (const "Archieving failed") (const "")
-             $ res
-  where
-    performArchive itms archiveLst =
-      tryHttpException $ runHocket (guiCreds gui, def) $ do
-        bs <- perform $ Batch (map (Archive . view itemId) itms)
-        let archivedItms = map fst $ filter snd $ zip itms bs
-        liftIO . schedule $ for_ archivedItms $ \itm -> do
-          removeItemFromLst archiveLst itm
+    res <- performArchive gui archiveLst itms
+    updateStatusBar gui . maybe "" (const "Archieving failed") $ res
 
+performArchive :: HocketGUI
+               -> Widget (List PocketItem b)
+               -> [PocketItem]
+               -> IO (Maybe HttpException)
+performArchive gui archiveLst itms = do
+  res <- tryHttpException $ runHocket (guiCreds gui, def) $ do
+    bs <- perform $ Batch (map (Archive . view itemId) itms)
+    return . map fst . filter snd $ zip itms bs
+  case res of
+    Left e -> return $ Just e
+    Right archivedItms -> do
+      schedule . traverse_ (removeItemFromLst archiveLst) $ archivedItms
+      return Nothing
 
 keepCurrent :: Attr
 keepCurrent = Attr KeepCurrent KeepCurrent KeepCurrent
@@ -200,7 +204,7 @@ createGUI shCmd cred = do
                                                            , "u:Update"
                                                            , "A:Archive pending"
                                                            , "C:Cancel"
-                                                           , "SPC: Launch"
+                                                           , "SPC:Launch"
                                                            , "Enter:Launch & Shift"
                                                            ])
                    <*> plainText ""

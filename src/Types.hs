@@ -183,6 +183,7 @@ data PocketRequest a where
   ArchiveItem :: PocketItemId -> PocketRequest Bool
   Batch :: [PocketAction] -> PocketRequest [Bool]
   RetrieveItems :: Maybe (Natural,Natural) -> PocketRequest [PocketItem]
+  Raw :: PocketRequest b -> PocketRequest Text
 
 class AsFormParams a where
   toFormParams :: a -> [W.FormParam]
@@ -191,6 +192,7 @@ instance (AsFormParams a, AsFormParams b) => AsFormParams (a,b) where
   toFormParams (x,y) = toFormParams x ++ toFormParams y
 
 instance AsFormParams (PocketRequest a) where
+  toFormParams (Raw x) = toFormParams x
   toFormParams (Batch pas) = ["actions" := encode pas]
   toFormParams (AddItem u) = [ "url" := u ]
   toFormParams (ArchiveItem i) = toFormParams $ Batch [Archive i]
