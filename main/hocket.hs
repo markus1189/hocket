@@ -44,7 +44,7 @@ main = do
     "gui" -> liftIO . vty cmd creds $ []
     _ -> fail "Invalid args."
 
-performGet :: Maybe (Natural,Natural) -> HocketCA [PocketItem]
+performGet :: Maybe (Natural,Natural) -> Hocket [PocketItem]
 performGet maybeOffsetCount = do
   retrieved <- perform $ RetrieveItems maybeOffsetCount
   return . sortBy (flip . comparing $ view timeAdded) $ retrieved

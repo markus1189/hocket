@@ -25,7 +25,7 @@ import qualified Data.Text.Lazy as TL
 
 import           Types
 
-selectEndpoint :: PocketRequest a -> HocketCA String
+selectEndpoint :: PocketRequest a -> Hocket String
 selectEndpoint req = magnify _2 $ view (sel req)
   where sel :: PocketRequest a -> Getter PocketAPIUrls String
         sel r = case r of
@@ -35,7 +35,7 @@ selectEndpoint req = magnify _2 $ view (sel req)
           RetrieveItems _ -> retrieveEndpoint
           Raw x -> sel x
 
-perform :: PocketRequest a -> HocketCA a
+perform :: PocketRequest a -> Hocket a
 perform req = do
   (ep,c) <- (,) <$> selectEndpoint req <*> asks fst
   resp <- liftIO . W.postWith opts ep $ toFormParams (c,req)

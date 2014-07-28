@@ -51,9 +51,6 @@ module Types (
 
   AsFormParams (..),
   Hocket,
-  HocketC,
-  HocketA,
-  HocketCA,
   runHocket
 ) where
 
@@ -95,11 +92,7 @@ instance Default PocketAPIUrls where
                         , _authorizeEndpoint = "https://getpocket.com/v3/oauth/authorize"
                         }
 
-type Hocket c a = ReaderT c IO a
-
-type HocketC a = Hocket PocketCredentials a
-type HocketA a = Hocket PocketAPIUrls a
-type HocketCA a = Hocket (PocketCredentials,PocketAPIUrls) a
+type Hocket a = ReaderT (PocketCredentials,PocketAPIUrls) IO a
 
 runHocket :: c -> ReaderT c IO a -> IO a
 runHocket = flip runReaderT
