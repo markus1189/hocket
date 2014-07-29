@@ -40,9 +40,10 @@ module Types (
   timeRead,
   timeUpdated,
   wordCount,
+  idEq,
 
   PocketItemId (..),
-  PocketAction (..),
+  BatchAction (..),
   _Archive,
   _UnArchive,
   _Add,
@@ -103,16 +104,27 @@ newtype PocketItemId = PocketItemId Text
 instance ToJSON PocketItemId where
   toJSON (PocketItemId i) = toJSON i
 
-data PocketAction = Archive PocketItemId
-                  | UnArchive PocketItemId
-                  | Add PocketItemId
-makePrisms ''PocketAction
+data BatchAction = Archive PocketItemId
+                 | UnArchive PocketItemId
+                 | Add PocketItemId
+                 | Rename PocketItemId Text
 
-instance ToJSON PocketAction where
-  toJSON (Archive itmId) = object ["action" .= ("archive" :: String), "item_id" .= itmId]
-  toJSON (UnArchive itmId) = object ["action" .= ("readd" :: String), "item_id" .= itmId]
-  toJSON (Add url) = object [ "action" .= ("add" :: String)
-                            , "item_id" .= (""::String)
+makePrisms ''BatchAction
+
+s :: String -> String
+s = id
+
+instance ToJSON BatchAction where
+  toJSON (Archive itmId) = object [ "action" .= s "archive"
+                                  , "item_id" .= itmId]
+  toJSON (UnArchive itmId) = object [ "action" .= s "readd"
+                                    , "item_id" .= itmId]
+  toJSON (Rename itmId title) = object [ "action" .= s "add"
+                                       , "item_id" .= itmId
+                                       , "title" .= title
+                                       ]
+  toJSON (Add url) = object [ "action" .= s "add"
+                            , "item_id" .= s ""
                             , "url" .= url]
 
 data PocketItem =
@@ -135,12 +147,11 @@ data PocketItem =
              , _timeRead :: !Text
              , _timeUpdated :: !Text
              , _wordCount :: !Int
-             } deriving (Show,Generic)
-
+             } deriving (Show,Eq,Generic)
 makeLenses ''PocketItem
 
-instance Eq PocketItem where
-  (==) = (==) `on` view itemId
+idEq :: PocketItem -> PocketItem -> Bool
+idEq = (==) `on` view itemId
 
 truthy :: Text -> Bool
 truthy "1" = True
@@ -174,9 +185,10 @@ instance ToJSON PocketItem
 data PocketRequest a where
   AddItem :: Text -> PocketRequest Bool
   ArchiveItem :: PocketItemId -> PocketRequest Bool
-  Batch :: [PocketAction] -> PocketRequest [Bool]
+  RenameItem :: PocketItemId -> Text -> PocketRequest Bool
+  Batch :: [BatchAction] -> PocketRequest [Bool]
   RetrieveItems :: Maybe (Natural,Natural) -> PocketRequest [PocketItem]
-  Raw :: PocketRequest b -> PocketRequest Text
+  Raw :: PocketRequest a -> PocketRequest Text
 
 class AsFormParams a where
   toFormParams :: a -> [W.FormParam]
@@ -188,6 +200,7 @@ instance AsFormParams (PocketRequest a) where
   toFormParams (Raw x) = toFormParams x
   toFormParams (Batch pas) = ["actions" := encode pas]
   toFormParams (AddItem u) = [ "url" := u ]
+  toFormParams (RenameItem i txt) = toFormParams $ Batch [Rename i txt]
   toFormParams (ArchiveItem i) = toFormParams $ Batch [Archive i]
   toFormParams (RetrieveItems _) = [ "detailType" := ("simple" :: Text)
                                    , "sort" := ("newest" :: Text)

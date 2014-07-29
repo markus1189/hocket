@@ -18,7 +18,7 @@ import           Data.Default
 import           Data.Foldable (traverse_, for_, for_)
 import qualified Data.Function as F
 import           Data.Functor ((<$>))
-import           Data.List (sortBy, (\\))
+import           Data.List (sortBy, deleteFirstsBy)
 import           Data.Ord (comparing)
 import           Data.Text (Text)
 import qualified Data.Text as T
@@ -156,13 +156,14 @@ retrieveNewItems gui = do
     updateStatusBar gui "Updating"
     oldPIs <- (++) <$> (getAllItems $ view unreadLst gui)
                    <*> (getAllItems $ view toArchiveLst gui)
-    eitherErrorPIs <-
-      tryHttpException $ runHocket (view guiCreds gui, def) $ sortedRetrieve Nothing
+    eitherErrorPIs <- tryHttpException
+                    . runHocket (view guiCreds gui, def) $ sortedRetrieve Nothing
     case eitherErrorPIs of
       Right pis -> do
-        schedule $ traverse_ (sortedAddLstItem (view unreadLst gui)) $ pis \\ oldPIs
+        schedule . traverse_ (sortedAddLstItem (view unreadLst gui)) $ pis \\\ oldPIs
         updateStatusBar gui ""
       Left _ -> updateStatusBar gui "Updating failed"
+  where (\\\) = deleteFirstsBy idEq
 
 removeItemFromLst :: Eq a => Widget (List a b) -> a -> IO ()
 removeItemFromLst lst itm = do
@@ -312,8 +313,8 @@ lstItemActivatedHandler gui src (ActivateItemEvent _ v _) = do
   browseItem (view launchCommand gui) . view givenUrl $ v
 
 shiftSelected :: Widget (List PocketItem FormattedText)
-         -> Widget (List PocketItem FormattedText)
-         -> IO ()
+              -> Widget (List PocketItem FormattedText)
+              -> IO ()
 shiftSelected this target = do
   sel <- getSelected this
   for_ sel $ \(pos, (val, _)) -> do
