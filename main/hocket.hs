@@ -7,7 +7,7 @@ import           Control.Applicative ((<*>), pure)
 import           Control.Concurrent (forkIO, MVar, takeMVar, readMVar, putMVar, newMVar)
 import           Control.Concurrent.Async (async, Async, poll, cancel)
 import           Control.Exception (try)
-import           Control.Lens (view, _Right, preview)
+import           Control.Lens (view, _Right, preview, preview)
 import           Control.Lens.Operators
 import           Control.Lens.TH
 import           Control.Monad (join, void)
@@ -15,14 +15,14 @@ import           Control.Monad.Error (runErrorT)
 import           Control.Monad.IO.Class (liftIO)
 import           Data.ConfigFile
 import           Data.Default
-import           Data.Foldable (traverse_, for_, for_)
+import           Data.Foldable (traverse_, for_)
 import qualified Data.Function as F
 import           Data.Functor ((<$>))
 import           Data.List (sortBy, deleteFirstsBy)
 import           Data.Ord (comparing)
 import           Data.Text (Text)
 import qualified Data.Text as T
-import           Data.Traversable (Traversable, for)
+import           Data.Traversable (Traversable)
 import           Graphics.Vty
 import           Graphics.Vty.Widgets.All
 import           Network.HTTP.Client (HttpException)
@@ -90,19 +90,11 @@ browseItem shellCmd url = do
 addLstItem :: Widget (List PocketItem FormattedText) -> PocketItem -> IO ()
 addLstItem lst itm = addToList lst itm =<< (plainText . bestTitle $ itm)
 
-addLstItemAt :: Int -> Widget (List PocketItem FormattedText) -> PocketItem -> IO ()
-addLstItemAt i lst itm = do
-  w <- plainText . bestTitle $ itm
-  insertIntoList lst itm w i
-
-sortedAddLstItem  :: Widget (List PocketItem FormattedText) -> PocketItem -> IO ()
-sortedAddLstItem lst itm = do
-  itms <- getAllItems lst
-  let insertPos = foldr (\x acc -> if itm `lt` x then acc else acc + 1) 0 itms
-  addLstItemAt insertPos lst itm
+sortedAddLstItem :: Widget (List PocketItem FormattedText) -> PocketItem -> IO ()
+sortedAddLstItem = addToListSortedBy lt (plainText . bestTitle)
   where
-    lt :: PocketItem -> PocketItem -> Bool
-    lt = (>) `F.on` view timeAdded
+    lt :: PocketItem -> PocketItem -> Ordering
+    lt = (flip compare) `F.on` view timeAdded
 
 bestTitle :: PocketItem -> Text
 bestTitle itm =
@@ -135,16 +127,9 @@ sortList lst = do
   insertPocketItems lst pis
   for_ sel $ \(pos, _) -> setSelected lst pos
 
-getAllItems :: Widget (List a b) -> IO [a]
-getAllItems lst = do
-  n <- getListSize lst
-  for [0..(n-1)] $ \i -> do
-    Just (itm, _) <- getListItem lst i
-    return itm
-
 extractAndClear :: Widget (List a b) -> IO [a]
 extractAndClear lst = do
-  itms <- getAllItems lst
+  itms <- listItems lst
   clearList lst
   return itms
 
@@ -155,8 +140,8 @@ retrieveNewItems :: HocketGUI -> IO ()
 retrieveNewItems gui = do
   tryAsync gui $ do
     updateStatusBar gui "Updating"
-    oldPIs <- (++) <$> (getAllItems $ view unreadLst gui)
-                   <*> (getAllItems $ view toArchiveLst gui)
+    oldPIs <- (++) <$> (listItems $ view unreadLst gui)
+                   <*> (listItems $ view toArchiveLst gui)
     eitherErrorPIs <- tryHttpException
                     . runHocket (view guiCreds gui, def) $ sortedRetrieve Nothing
     case eitherErrorPIs of
@@ -176,7 +161,7 @@ executeArchiveAction gui = do
   tryAsync gui $ do
     updateStatusBar gui "Archiving"
     let archiveLst = view toArchiveLst gui
-    itms <- getAllItems archiveLst
+    itms <- listItems archiveLst
     res <- performArchive gui archiveLst itms
     updateStatusBar gui . maybe "" (const "Archieving failed") $ res
 
@@ -196,8 +181,8 @@ performArchive gui archiveLst itms = do
 
 createGUI :: String -> PocketCredentials -> IO (HocketGUI, Collection)
 createGUI shCmd cred = do
-  gui <- HocketGUI <$> newList'
-                   <*> newList'
+  gui <- HocketGUI <$> newList' boldBlackOnOrange
+                   <*> newList' boldBlackOnOrange
                    <*> (plainText . T.intercalate " | " $ [ "q:Quit"
                                                           , "d:Shift item"
                                                           , "D:Shift all"
