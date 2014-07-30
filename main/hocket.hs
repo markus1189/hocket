@@ -10,7 +10,7 @@ import           Control.Exception (try)
 import           Control.Lens (view, _Right, preview)
 import           Control.Lens.Operators
 import           Control.Lens.TH
-import           Control.Monad (join, void, replicateM_)
+import           Control.Monad (join, void)
 import           Control.Monad.Error (runErrorT)
 import           Control.Monad.IO.Class (liftIO)
 import           Data.ConfigFile
@@ -32,6 +32,7 @@ import           System.Exit (exitSuccess)
 import           System.Process
 import           Text.Printf (printf)
 
+import           GUI
 import           Pocket
 import           Printing
 import           Types
@@ -193,26 +194,19 @@ performArchive gui archiveLst itms = do
       schedule . traverse_ (removeItemFromLst archiveLst) $ archivedItms
       return Nothing
 
-keepCurrent :: Attr
-keepCurrent = Attr KeepCurrent KeepCurrent KeepCurrent
-
-boldBlackOnOrange :: Attr
-boldBlackOnOrange = realBlack `on` (Color240 147) `mergeAttr` style bold
-  where realBlack = rgb_color (0::Int) 0 0
-
 createGUI :: String -> PocketCredentials -> IO (HocketGUI, Collection)
 createGUI shCmd cred = do
-   gui <- HocketGUI <$> (newList keepCurrent 1)
-                    <*> (newList keepCurrent 1)
-                    <*> (plainText . T.intercalate " | " $ [ "q:Quit"
-                                                           , "d:Shift item"
-                                                           , "D:Shift all"
-                                                           , "u:Update"
-                                                           , "A:Archive pending"
-                                                           , "C:Cancel"
-                                                           , "SPC:Launch"
-                                                           , "Enter:Launch & Shift"
-                                                           ])
+  gui <- HocketGUI <$> newList'
+                   <*> newList'
+                   <*> (plainText . T.intercalate " | " $ [ "q:Quit"
+                                                          , "d:Shift item"
+                                                          , "D:Shift all"
+                                                          , "u:Update"
+                                                          , "A:Archive pending"
+                                                          , "C:Cancel"
+                                                          , "SPC:Launch"
+                                                          , "Enter:Launch & Shift"
+                                                          ])
                    <*> plainText ""
                    <*> pure cred
                    <*> pure shCmd
@@ -220,38 +214,36 @@ createGUI shCmd cred = do
                    <*> plainText "Hocket"
                    <*> (newMVar =<< (async $ return ()))
 
-   bottomBar <- ((pure $ view helpBar gui) <++> hFill ' ' 1 <++> (pure $ view statusBar gui))
-   topBar <- ((pure $ view titleText gui) <++> hFill ' ' 1)
+  bottomBar <- ((pure $ view helpBar gui) <++> hFill ' ' 1 <++> (pure $ view statusBar gui))
+  topBar <- ((pure $ view titleText gui) <++> hFill ' ' 1)
 
-   setNormalAttribute (bottomBar) $ Attr KeepCurrent KeepCurrent (SetTo black)
-   setNormalAttribute (topBar) $ Attr KeepCurrent KeepCurrent (SetTo black)
-   setNormalAttribute (view statusBar gui) $ Attr (SetTo bold) KeepCurrent KeepCurrent
+  setNormalAttribute (bottomBar) $ Attr KeepCurrent KeepCurrent (SetTo black)
+  setNormalAttribute (topBar) $ Attr KeepCurrent KeepCurrent (SetTo black)
+  setNormalAttribute (view statusBar gui) $ Attr (SetTo bold) KeepCurrent KeepCurrent
 
-   setFocusAttribute (view unreadLst gui) boldBlackOnOrange
-   setFocusAttribute (view toArchiveLst gui) boldBlackOnOrange
-   for_ [unreadLst,toArchiveLst] $ \selector ->
-     setNormalAttribute (view selector gui) $ Attr KeepCurrent (SetTo white) KeepCurrent
-   for_ [helpBar, statusBar] $ \selector ->
-     setNormalAttribute (view selector gui) $ Attr KeepCurrent (SetTo white) KeepCurrent
+  for_ [unreadLst,toArchiveLst] $ \selector ->
+    setNormalAttribute (view selector gui) $ Attr KeepCurrent (SetTo white) KeepCurrent
+  for_ [helpBar, statusBar] $ \selector ->
+    setNormalAttribute (view selector gui) $ Attr KeepCurrent (SetTo white) KeepCurrent
 
-   ui <- centered =<< pure topBar
-                 <--> (pure $ view unreadLst gui)
-                 <--> hBorder
-                 <--> (vFixed 10 (view toArchiveLst gui))
-                 <--> pure bottomBar
+  ui <- centered =<< pure topBar
+                <--> (pure $ view unreadLst gui)
+                <--> hBorder
+                <--> (vFixed 10 (view toArchiveLst gui))
+                <--> pure bottomBar
 
-   let fg = view mainFocusGroup gui
-   void $ addToFocusGroup fg (view unreadLst gui)
-   void $ addToFocusGroup fg (view toArchiveLst gui)
+  let fg = view mainFocusGroup gui
+  void $ addToFocusGroup fg (view unreadLst gui)
+  void $ addToFocusGroup fg (view toArchiveLst gui)
 
-   fg `onKeyPressed` \_ k _ -> case k of
-     (KASCII 'q') -> exitSuccess
-     (KASCII 'u') -> retrieveNewItems gui >> return True
-     (KASCII 'A') -> executeArchiveAction gui >> return True
-     _ -> return False
-   c <- newCollection
-   void $ addToCollection c ui fg
-   return (gui,c)
+  fg `onKeyPressed` \_ k _ -> case k of
+    (KASCII 'q') -> exitSuccess
+    (KASCII 'u') -> retrieveNewItems gui >> return True
+    (KASCII 'A') -> executeArchiveAction gui >> return True
+    _ -> return False
+  c <- newCollection
+  void $ addToCollection c ui fg
+  return (gui,c)
 
 vty :: String -> PocketCredentials -> [PocketItem] -> IO ()
 vty cmd cred  pis = do
@@ -289,13 +281,7 @@ lstKeyPressedHandler :: HocketGUI
                      -> t
                      -> IO Bool
 lstKeyPressedHandler gui this key _ = case key of
-  (KASCII 'j') -> scrollDown this >> return True
-  (KASCII 'k') -> scrollUp this >> return True
-  (KASCII 'J') -> replicateM_ 3 (scrollDown this) >> return True
-  (KASCII 'K') -> replicateM_ 3 (scrollUp this) >> return True
   (KASCII 's') -> sortList this >> return True
-  (KASCII 'g') -> scrollToBeginning this >> return True
-  (KASCII 'G') -> scrollToEnd this >> return True
   (KASCII 'C') -> abortAsync gui >> return True
   (KASCII ' ') -> do
     void . forkIO $ do
