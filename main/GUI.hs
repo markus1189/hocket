@@ -1,6 +1,8 @@
 module GUI ( newList'
            , listItems
            , addToListSortedBy
+           , addToFront
+           , addToBack
            , boldBlackOnOrange
            ) where
 
@@ -19,10 +21,11 @@ boldBlackOnOrange :: Attr
 boldBlackOnOrange = realBlack `W.on` (V.Color240 147) `W.mergeAttr` W.style V.bold
   where realBlack = V.rgb_color (0::Int) 0 0
 
-newList' :: Show b => Attr -> IO (Widget (List a b))
-newList' focus = do
+newList' :: Show b => Attr -> Attr -> IO (Widget (List a b))
+newList' focus normal = do
   w <- W.newList keepCurrent 1
   W.setFocusAttribute w focus
+  W.setNormalAttribute w normal
   w `W.onKeyPressed` listWidgetVIKeys
   return w
 
@@ -45,6 +48,15 @@ listItems lst = do
   catMaybes <$> for [0..(n-1)] getItem
   where getItem i = W.getListItem lst i <&> preview (_Just . _1)
 
+const2 :: a -> b -> c -> a
+const2 x = const . const x
+
+addToFront :: Show b => (a -> IO (Widget b)) -> Widget (List a b) -> a -> IO ()
+addToFront = addToListSortedBy (const2 LT)
+
+addToBack :: Show b => (a -> IO (Widget b)) -> Widget (List a b) -> a -> IO ()
+addToBack = addToListSortedBy (const2 GT)
+
 addToListSortedBy :: Show b =>
                      (a -> a -> Ordering)
                   -> (a -> IO (Widget b))
@@ -54,5 +66,6 @@ addToListSortedBy :: Show b =>
 addToListSortedBy cmp render lst x = do
   itms <- listItems lst
   wx <- render x
-  let pos = foldr (\i acc -> if x `cmp` i == LT then acc else acc + 1) 0 itms
+  let pos = foldr go 0 itms
+      go i acc = if x `cmp` i == LT then acc else acc + 1
   W.insertIntoList lst x wx pos

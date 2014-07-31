@@ -7,6 +7,7 @@
 module Types (
   ConsumerKey (..),
   AccessToken (..),
+  URL(..),
 
   PocketCredentials (..),
   credConsumerKey,
@@ -71,26 +72,27 @@ import           Numeric.Natural
 
 newtype ConsumerKey = ConsumerKey Text deriving (Show, FormValue)
 newtype AccessToken = AccessToken Text deriving (Show, FormValue)
+newtype URL = URL String deriving (Show, Eq, FormValue, FromJSON, ToJSON)
 
 data PocketCredentials = PocketCredentials { _credConsumerKey :: ConsumerKey
                                            , _credAccessToken :: AccessToken
                                            }
 makeLenses ''PocketCredentials
 
-data PocketAPIUrls = PocketAPIUrls { _addEndpoint :: String
-                                   , _retrieveEndpoint :: String
-                                   , _modifyEndpoint :: String
-                                   , _requestEndpoint :: String
-                                   , _authorizeEndpoint :: String
+data PocketAPIUrls = PocketAPIUrls { _addEndpoint :: URL
+                                   , _retrieveEndpoint :: URL
+                                   , _modifyEndpoint :: URL
+                                   , _requestEndpoint :: URL
+                                   , _authorizeEndpoint :: URL
                                    }
 makeLenses ''PocketAPIUrls
 
 instance Default PocketAPIUrls where
-    def = PocketAPIUrls { _addEndpoint = "https://getpocket.com/v3/add"
-                        , _retrieveEndpoint = "https://getpocket.com/v3/get"
-                        , _modifyEndpoint = "https://getpocket.com/v3/send"
-                        , _requestEndpoint = "https://getpocket.com/v3/oauth/request"
-                        , _authorizeEndpoint = "https://getpocket.com/v3/oauth/authorize"
+    def = PocketAPIUrls { _addEndpoint = URL "https://getpocket.com/v3/add"
+                        , _retrieveEndpoint = URL "https://getpocket.com/v3/get"
+                        , _modifyEndpoint = URL "https://getpocket.com/v3/send"
+                        , _requestEndpoint = URL "https://getpocket.com/v3/oauth/request"
+                        , _authorizeEndpoint = URL "https://getpocket.com/v3/oauth/authorize"
                         }
 
 type Hocket a = ReaderT (PocketCredentials,PocketAPIUrls) IO a
@@ -131,7 +133,7 @@ data PocketItem =
   PocketItem { _excerpt :: Text
              , _favorite :: !Text
              , _givenTitle :: !Text
-             , _givenUrl :: !Text
+             , _givenUrl :: !URL
              , _hasImage :: !Bool
              , _hasVideo :: !Bool
              , _isArticle :: !Bool

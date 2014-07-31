@@ -23,9 +23,9 @@ import qualified Data.Text.Lazy as TL
 
 import           Types
 
-selectEndpoint :: PocketRequest a -> Hocket String
+selectEndpoint :: PocketRequest a -> Hocket URL
 selectEndpoint req = magnify _2 $ view (sel req)
-  where sel :: PocketRequest a -> Getter PocketAPIUrls String
+  where sel :: PocketRequest a -> Getter PocketAPIUrls URL
         sel r = case r of
           AddItem _ -> addEndpoint
           ArchiveItem _ -> modifyEndpoint
@@ -36,7 +36,7 @@ selectEndpoint req = magnify _2 $ view (sel req)
 
 perform :: PocketRequest a -> Hocket a
 perform req = do
-  (ep,c) <- (,) <$> selectEndpoint req <*> asks fst
+  (URL ep,c) <- (,) <$> selectEndpoint req <*> asks fst
   resp <- liftIO . W.postWith opts ep $ toFormParams (c,req)
   return $ case req of
     Raw _ -> resp ^. W.responseBody & TL.toStrict . TLE.decodeUtf8

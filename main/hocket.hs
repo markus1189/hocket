@@ -39,13 +39,15 @@ import           Types
 
 makeLensesFor [("std_err", "stdErr"), ("std_out", "stdOut")] ''CreateProcess
 
+newtype ShellCommand = Cmd String
+
 
 data HocketGUI = HocketGUI { _unreadLst :: Widget (List PocketItem FormattedText)
                            , _toArchiveLst :: Widget (List PocketItem FormattedText)
                            , _helpBar :: Widget FormattedText
                            , _statusBar :: Widget FormattedText
                            , _guiCreds :: PocketCredentials
-                           , _launchCommand :: String
+                           , _launchCommand :: ShellCommand
                            , _mainFocusGroup :: Widget FocusGroup
                            , _titleText :: Widget FormattedText
                            , _asyncAction :: MVar (Async ())
@@ -65,10 +67,10 @@ main = do
 
 sortedRetrieve :: Maybe (Natural,Natural) -> Hocket [PocketItem]
 sortedRetrieve maybeOffsetCount = do
-  retrieved <- perform $ RetrieveItems maybeOffsetCount
-  return . sortBy (flip . comparing $ view timeAdded) $ retrieved
+  perform (RetrieveItems maybeOffsetCount) >>=
+    return . sortBy (flip . comparing $ view timeAdded)
 
-readFromConfig :: FilePath -> IO (Maybe (PocketCredentials, String))
+readFromConfig :: FilePath -> IO (Maybe (PocketCredentials, ShellCommand))
 readFromConfig path = do
   eitherErrorTuple <- runErrorT $ do
     cp <- join $ liftIO $ readfile emptyCP path
@@ -77,13 +79,13 @@ readFromConfig path = do
     cmd <- get cp "Launch" "launch_cmd"
     return ( PocketCredentials (ConsumerKey consumerKey)
                                (AccessToken accessToken)
-           , cmd
+           , Cmd cmd
            )
   return . preview _Right $ eitherErrorTuple
 
-browseItem :: String -> T.Text -> IO ()
-browseItem shellCmd url = do
-  let spec = (shell $ printf shellCmd (T.unpack url))
+browseItem :: ShellCommand -> URL -> IO ()
+browseItem (Cmd shellCmd) (URL url) = do
+  let spec = (shell $ printf shellCmd url)
   void $ createProcess $ spec & stdOut .~ CreatePipe
                               & stdErr .~ CreatePipe
 
@@ -179,10 +181,12 @@ performArchive gui archiveLst itms = do
       schedule . traverse_ (removeItemFromLst archiveLst) $ archivedItms
       return Nothing
 
-createGUI :: String -> PocketCredentials -> IO (HocketGUI, Collection)
+createGUI :: ShellCommand -> PocketCredentials -> IO (HocketGUI, Collection)
 createGUI shCmd cred = do
-  gui <- HocketGUI <$> newList' boldBlackOnOrange
-                   <*> newList' boldBlackOnOrange
+  let normal = Attr KeepCurrent (SetTo white) KeepCurrent
+      focusedAttr = boldBlackOnOrange
+  gui <- HocketGUI <$> newList' focusedAttr normal
+                   <*> newList' focusedAttr normal
                    <*> (plainText . T.intercalate " | " $ [ "q:Quit"
                                                           , "d:Shift item"
                                                           , "D:Shift all"
@@ -206,8 +210,6 @@ createGUI shCmd cred = do
   setNormalAttribute (topBar) $ Attr KeepCurrent KeepCurrent (SetTo black)
   setNormalAttribute (view statusBar gui) $ Attr (SetTo bold) KeepCurrent KeepCurrent
 
-  for_ [unreadLst,toArchiveLst] $ \selector ->
-    setNormalAttribute (view selector gui) $ Attr KeepCurrent (SetTo white) KeepCurrent
   for_ [helpBar, statusBar] $ \selector ->
     setNormalAttribute (view selector gui) $ Attr KeepCurrent (SetTo white) KeepCurrent
 
@@ -230,7 +232,7 @@ createGUI shCmd cred = do
   void $ addToCollection c ui fg
   return (gui,c)
 
-vty :: String -> PocketCredentials -> [PocketItem] -> IO ()
+vty :: ShellCommand -> PocketCredentials -> [PocketItem] -> IO ()
 vty cmd cred  pis = do
   (gui,c) <- createGUI cmd cred
   insertPocketItems (view unreadLst gui) pis
