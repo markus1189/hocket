@@ -89,9 +89,6 @@ browseItem (Cmd shellCmd) (URL url) = do
   void $ createProcess $ spec & stdOut .~ CreatePipe
                               & stdErr .~ CreatePipe
 
-addLstItem :: Widget (List PocketItem FormattedText) -> PocketItem -> IO ()
-addLstItem lst itm = addToList lst itm =<< (plainText . bestTitle $ itm)
-
 sortedAddLstItem :: Widget (List PocketItem FormattedText) -> PocketItem -> IO ()
 sortedAddLstItem = addToListSortedBy lt (plainText . bestTitle)
   where
@@ -120,14 +117,7 @@ tryAsync (view asyncAction -> m) act = do
 insertPocketItems :: Traversable f =>
                      Widget (List PocketItem FormattedText)
                      -> f PocketItem -> IO ()
-insertPocketItems lst = traverse_ (addLstItem lst)
-
-sortList :: Widget (List PocketItem FormattedText) -> IO ()
-sortList lst = do
-  sel <- getSelected lst
-  pis <- sortBy (flip . comparing $ view timeAdded) <$> extractAndClear lst
-  insertPocketItems lst pis
-  for_ sel $ \(pos, _) -> setSelected lst pos
+insertPocketItems lst = traverse_ (sortedAddLstItem lst)
 
 extractAndClear :: Widget (List a b) -> IO [a]
 extractAndClear lst = do
@@ -157,6 +147,17 @@ removeItemFromLst :: Eq a => Widget (List a b) -> a -> IO ()
 removeItemFromLst lst itm = do
   maybePos <- listFindFirst lst itm
   traverse_ (removeFromList lst) maybePos
+
+executeRenameSelected :: HocketGUI -> Widget (List PocketItem b) -> Text -> IO ()
+executeRenameSelected gui w newTxt = withSelection w $ \_ sel -> do
+  tryAsync gui $ do
+    updateStatusBar gui "Renaming"
+    res <- tryHttpException $ runHocket (view guiCreds gui, def) $
+      perform $ RenameItem (view itemId sel) newTxt
+    case res of
+      Left _ -> sigFail
+      Right b -> if b then removeItemFromLst w sel else sigFail
+  where sigFail = updateStatusBar gui "Renaming failed"
 
 executeArchiveAction :: HocketGUI -> IO ()
 executeArchiveAction gui = do
@@ -223,13 +224,28 @@ createGUI shCmd cred = do
   void $ addToFocusGroup fg (view unreadLst gui)
   void $ addToFocusGroup fg (view toArchiveLst gui)
 
+  c <- newCollection
+
+  edlg <- newEditDialog
+  displayMainGui <- addToCollection c ui fg
+  displayEditDialog <- addToCollection c
+    (edlg ^. editDlgDialog & dialogWidget)
+    (edlg ^. editDlgFocusGroup)
+
+  setUpEditHandler edlg (view unreadLst gui) displayEditDialog
+
+  (view editDlgDialog edlg) `onDialogCancel` \_ -> displayMainGui
+  (view editDlgDialog edlg) `onDialogAccept` \_ -> do
+    error "TODO actually do rename: `executeRenameSelected`"
+    -- but how to get the focused widget etc?
+    displayMainGui
+
   fg `onKeyPressed` \_ k _ -> case k of
     (KASCII 'q') -> exitSuccess
     (KASCII 'u') -> retrieveNewItems gui >> return True
     (KASCII 'A') -> executeArchiveAction gui >> return True
     _ -> return False
-  c <- newCollection
-  void $ addToCollection c ui fg
+
   return (gui,c)
 
 vty :: ShellCommand -> PocketCredentials -> [PocketItem] -> IO ()
@@ -246,7 +262,6 @@ vty cmd cred  pis = do
     (KASCII 'D') -> do
       insertPocketItems (view toArchiveLst gui) =<< extractAndClear this
       focusNext (view mainFocusGroup gui)
-      sortList (view toArchiveLst gui)
       return True
     _ -> return False
 
@@ -268,7 +283,6 @@ lstKeyPressedHandler :: HocketGUI
                      -> t
                      -> IO Bool
 lstKeyPressedHandler gui this key _ = case key of
-  (KASCII 's') -> sortList this >> return True
   (KASCII 'C') -> abortAsync gui >> return True
   (KASCII ' ') -> do
     void . forkIO $ do
@@ -288,11 +302,27 @@ lstItemActivatedHandler gui src (ActivateItemEvent _ v _) = do
 shiftSelected :: Widget (List PocketItem FormattedText)
               -> Widget (List PocketItem FormattedText)
               -> IO ()
-shiftSelected this target = do
-  sel <- getSelected this
-  for_ sel $ \(pos, (val, _)) -> do
-    void $ removeFromList this pos
-    sortedAddLstItem target val
+shiftSelected this target = withSelection this $ \pos val -> do
+  void $ removeFromList this pos
+  sortedAddLstItem target val
+
+withSelection :: Widget (List a b) -> (Int -> a -> IO c) -> IO ()
+withSelection w k = do
+  getSelected w >>= traverse_ (\(i, (x, _)) -> k i x)
+  return ()
 
 tryHttpException :: IO a -> IO (Either HttpException a)
 tryHttpException = try
+
+setUpEditHandler :: EditDialog
+                 -> Widget (List PocketItem FormattedText)
+                 -> IO a
+                 -> IO ()
+setUpEditHandler e l switch = l `onKeyPressed` \_ k _  -> case k of
+  (KASCII 'e') -> do
+    withSelection l $ \_ sel -> do
+      let edit = e ^. editDlgWidget
+      setEditText edit (bestTitle sel)
+      switch
+    return True
+  _ -> return False

@@ -1,21 +1,37 @@
+{-# LANGUAGE OverloadedStrings #-}
+{-# LANGUAGE TemplateHaskell #-}
+
 module GUI ( newList'
+           , newEditDialog
            , listItems
            , addToListSortedBy
            , addToFront
            , addToBack
            , boldBlackOnOrange
+
+           , EditDialog
+           , editDlgDialog
+           , editDlgWidget
+           , editDlgFocusGroup
            ) where
 
 import           Control.Applicative ((<$>))
 import           Control.Lens (preview, _Just, _1)
 import           Control.Lens.Operators
+import           Control.Lens.TH
 import           Control.Monad (replicateM_)
 import           Data.Maybe (catMaybes)
+import           Data.Traversable (for)
 import           Graphics.Vty (Attr, Modifier, Key)
 import qualified Graphics.Vty as V
-import           Graphics.Vty.Widgets.All (Widget, List)
+import           Graphics.Vty.Widgets.All (Widget, List, Dialog, FocusGroup, Edit)
 import qualified Graphics.Vty.Widgets.All as W
-import           Data.Traversable (for)
+
+data EditDialog = EditDialog { _editDlgDialog :: Dialog
+                             , _editDlgWidget :: Widget Edit
+                             , _editDlgFocusGroup :: Widget FocusGroup
+                             }
+makeLenses ''EditDialog
 
 boldBlackOnOrange :: Attr
 boldBlackOnOrange = realBlack `W.on` (V.Color240 147) `W.mergeAttr` W.style V.bold
@@ -28,6 +44,15 @@ newList' focus normal = do
   W.setNormalAttribute w normal
   w `W.onKeyPressed` listWidgetVIKeys
   return w
+
+newEditDialog :: IO EditDialog
+newEditDialog = do
+  fg1 <- W.newFocusGroup
+  e <- W.editWidget
+  W.addToFocusGroup fg1 e
+  (dlg, fg2) <- W.newDialog e "Edit"
+  fg <- W.mergeFocusGroups fg1 fg2
+  return $ EditDialog dlg e fg
 
 keepCurrent :: Attr
 keepCurrent = V.Attr V.KeepCurrent V.KeepCurrent V.KeepCurrent
