@@ -31,6 +31,7 @@ import           System.Environment (getArgs)
 import           System.Exit (exitSuccess)
 import           System.Process
 import           Text.Printf (printf)
+import qualified Text.Trans.Tokenize as TT
 
 import           GUI
 import           Pocket
@@ -89,8 +90,22 @@ browseItem (Cmd shellCmd) (URL url) = do
   void $ createProcess $ spec & stdOut .~ CreatePipe
                               & stdErr .~ CreatePipe
 
+displayText :: PocketItem -> Text
+displayText i = bestTitle i `T.append`
+                " <!>" `T.append`
+                view resolvedUrl i
+
+alignRightAfter :: Text -> Formatter
+alignRightAfter marker = Formatter $ \(DisplayRegion w _) ts -> do
+  let currentText = TT.serialize ts
+      parts = T.splitOn marker currentText
+      neededSpaces = 0 `max` (w - fromIntegral (T.length currentText - T.length marker))
+      sp = T.replicate (fromIntegral neededSpaces) " "
+      newText = flip TT.tokenize def_attr $ T.intercalate sp parts
+  return newText
+
 sortedAddLstItem :: Widget (List PocketItem FormattedText) -> PocketItem -> IO ()
-sortedAddLstItem = addToListSortedBy lt (plainText . bestTitle)
+sortedAddLstItem = addToListSortedBy lt (textWidget (alignRightAfter "<!>") . displayText)
   where
     lt :: PocketItem -> PocketItem -> Ordering
     lt = (flip compare) `F.on` view timeAdded
