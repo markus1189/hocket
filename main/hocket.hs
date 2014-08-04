@@ -90,10 +90,24 @@ browseItem (Cmd shellCmd) (URL url) = do
   void $ createProcess $ spec & stdOut .~ CreatePipe
                               & stdErr .~ CreatePipe
 
+-- used to right align urls in gui using vty-ui formatter 'alignRightAfter' (defined here)
+magicMarker :: Text
+magicMarker = "<!>"
+
+shortenUrl :: Text -> Text
+shortenUrl t = let parts = T.splitOn "/" t
+                   mainPart = T.intercalate "/" . take 3 $ parts
+                   rest = T.intercalate "/" . drop 3 $ parts
+                   maxW = 50
+                   remaining = (maxW - T.length mainPart) `max` 0
+                   postFix = T.take remaining rest
+               in T.intercalate "/" [mainPart, postFix]
+
 displayText :: PocketItem -> Text
 displayText i = bestTitle i `T.append`
-                " <!>" `T.append`
-                view resolvedUrl i
+                " " `T.append`
+                magicMarker `T.append`
+                shortenUrl (view resolvedUrl i)
 
 alignRightAfter :: Text -> Formatter
 alignRightAfter marker = Formatter $ \(DisplayRegion w _) ts -> do
@@ -105,7 +119,7 @@ alignRightAfter marker = Formatter $ \(DisplayRegion w _) ts -> do
   return newText
 
 sortedAddLstItem :: Widget (List PocketItem FormattedText) -> PocketItem -> IO ()
-sortedAddLstItem = addToListSortedBy lt (textWidget (alignRightAfter "<!>") . displayText)
+sortedAddLstItem = addToListSortedBy lt (textWidget (alignRightAfter magicMarker) . displayText)
   where
     lt :: PocketItem -> PocketItem -> Ordering
     lt = (flip compare) `F.on` view timeAdded
