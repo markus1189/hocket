@@ -62,13 +62,13 @@ main = do
   let (dispatch,rest) = (head args, tail args)
   runHocket (creds,def) $ case dispatch of
     "get" -> liftIO . newestFirst =<< sortedRetrieve (read . T.unpack . head $ rest)
-    "add" -> traverse_ (perform . AddItem) rest
+    "add" -> traverse_ (pocket . AddItem) rest
     "gui" -> liftIO . vty cmd creds $ []
     _ -> fail "Invalid args."
 
 sortedRetrieve :: Maybe (Natural,Natural) -> Hocket [PocketItem]
 sortedRetrieve maybeOffsetCount = do
-  perform (RetrieveItems maybeOffsetCount) >>=
+  pocket (RetrieveItems maybeOffsetCount) >>=
     return . sortBy (flip . comparing $ view timeAdded)
 
 readFromConfig :: FilePath -> IO (Maybe (PocketCredentials, ShellCommand))
@@ -94,14 +94,14 @@ browseItem (Cmd shellCmd) (URL url) = do
 magicMarker :: Text
 magicMarker = "<!>"
 
-shortenUrl :: Text -> Text
-shortenUrl t = let parts = T.splitOn "/" t
-                   mainPart = T.intercalate "/" . take 3 $ parts
-                   rest = T.intercalate "/" . drop 3 $ parts
-                   maxW = 50
-                   remaining = (maxW - T.length mainPart) `max` 0
-                   postFix = T.take remaining rest
-               in T.intercalate "/" [mainPart, postFix]
+shortenUrl :: URL -> Text
+shortenUrl (URL t) = let parts = T.splitOn "/" . T.pack $ t
+                         mainPart = T.intercalate "/" . take 3 $ parts
+                         rest = T.intercalate "/" . drop 3 $ parts
+                         maxW = 50
+                         remaining = (maxW - T.length mainPart) `max` 0
+                         postFix = T.take remaining rest
+                     in T.intercalate "/" [mainPart, postFix]
 
 displayText :: PocketItem -> Text
 displayText i = bestTitle i `T.append`
@@ -182,7 +182,7 @@ executeRenameSelected gui w newTxt = withSelection w $ \_ sel -> do
   tryAsync gui $ do
     updateStatusBar gui "Renaming"
     res <- tryHttpException $ runHocket (view guiCreds gui, def) $
-      perform $ RenameItem (view itemId sel) newTxt
+      pocket $ RenameItem (view itemId sel) newTxt
     case res of
       Left _ -> sigFail
       Right b -> if b then removeItemFromLst w sel else sigFail
@@ -203,7 +203,7 @@ performArchive :: HocketGUI
                -> IO (Maybe HttpException)
 performArchive gui archiveLst itms = do
   res <- tryHttpException $ runHocket (view guiCreds gui, def) $ do
-    bs <- perform $ Batch (map (Archive . view itemId) itms)
+    bs <- pocket $ Batch (map (Archive . view itemId) itms)
     return . map fst . filter snd $ zip itms bs
   case res of
     Left e -> return $ Just e

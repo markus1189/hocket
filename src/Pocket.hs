@@ -5,7 +5,7 @@
 {-# LANGUAGE RankNTypes #-}
 
 module Pocket (
-  perform,
+  pocket,
   PocketRequest (..)
 ) where
 
@@ -34,8 +34,8 @@ selectEndpoint req = magnify _2 $ view (sel req)
           RetrieveItems _ -> retrieveEndpoint
           Raw x -> sel x
 
-perform :: PocketRequest a -> Hocket a
-perform req = do
+pocket :: PocketRequest a -> Hocket a
+pocket req = do
   (URL ep,c) <- (,) <$> selectEndpoint req <*> asks fst
   resp <- liftIO . W.postWith opts ep $ toFormParams (c,req)
   return $ case req of

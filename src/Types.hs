@@ -1,3 +1,5 @@
+{-# OPTIONS_GHC -fno-warn-orphans #-}
+
 {-# LANGUAGE OverloadedStrings #-}
 {-# LANGUAGE GeneralizedNewtypeDeriving #-}
 {-# LANGUAGE GADTs #-}
@@ -65,14 +67,43 @@ import           Data.Aeson
 import           Data.Default
 import           Data.Function (on)
 import           Data.Text (Text)
+import qualified Data.Text as T
+import           Data.Time.Clock.POSIX
+import           Data.Time.Clock
 import           GHC.Generics
 import           Network.Wreq (FormValue, FormParam((:=)))
 import qualified Network.Wreq as W
 import           Numeric.Natural
 
+s :: String -> String
+s = id
+
 newtype ConsumerKey = ConsumerKey Text deriving (Show, FormValue)
 newtype AccessToken = AccessToken Text deriving (Show, FormValue)
 newtype URL = URL String deriving (Show, Eq, FormValue, FromJSON, ToJSON)
+
+data ItemStatus = Normal | Archived | ShouldBeDeleted deriving (Show, Eq, Enum, Bounded)
+
+instance ToJSON ItemStatus where
+  toJSON = toJSON . show . fromEnum
+
+data Has = No | Yes | Is deriving (Show, Eq, Enum, Bounded)
+parseItemHas :: Text -> Has
+parseItemHas "0" = No
+parseItemHas "1" = Yes
+parseItemHas "2" = Is
+parseItemHas t =
+  error . T.unpack $ "Unexpected text: <" +|+ t +|+ "> expected one of <0,1,2>"
+  where (+|+) = T.append
+
+instance ToJSON Has where
+  toJSON = toJSON . show . fromEnum
+
+parseItemState :: Text -> ItemStatus
+parseItemState "0" = Normal
+parseItemState "1" = Archived
+parseItemState "2" = ShouldBeDeleted
+parseItemState t = error . T.unpack $ "Unexpected item status: " `T.append` t
 
 data PocketCredentials = PocketCredentials { _credConsumerKey :: ConsumerKey
                                            , _credAccessToken :: AccessToken
@@ -110,11 +141,7 @@ data BatchAction = Archive PocketItemId
                  | UnArchive PocketItemId
                  | Add PocketItemId
                  | Rename PocketItemId Text
-
 makePrisms ''BatchAction
-
-s :: String -> String
-s = id
 
 instance ToJSON BatchAction where
   toJSON (Archive itmId) = object [ "action" .= s "archive"
@@ -131,23 +158,23 @@ instance ToJSON BatchAction where
 
 data PocketItem =
   PocketItem { _excerpt :: Text
-             , _favorite :: !Text
+             , _favorite :: !Bool
              , _givenTitle :: !Text
              , _givenUrl :: !URL
-             , _hasImage :: !Bool
-             , _hasVideo :: !Bool
+             , _hasImage :: !Has
+             , _hasVideo :: !Has
              , _isArticle :: !Bool
              , _isIndex :: !Bool
              , _itemId :: !PocketItemId
-             , _resolvedId :: !Text
+             , _resolvedId :: !PocketItemId
              , _resolvedTitle :: !Text
-             , _resolvedUrl :: !Text
+             , _resolvedUrl :: !URL
              , _sortId :: Int
-             , _status :: !Text
-             , _timeAdded :: !Text
-             , _timeFavorited :: !Text
-             , _timeRead :: !Text
-             , _timeUpdated :: !Text
+             , _status :: !ItemStatus
+             , _timeAdded :: !POSIXTime
+             , _timeFavorited :: !POSIXTime
+             , _timeRead :: !POSIXTime
+             , _timeUpdated :: !POSIXTime
              , _wordCount :: !Int
              } deriving (Show,Eq,Generic)
 makeLenses ''PocketItem
@@ -159,30 +186,36 @@ truthy :: Text -> Bool
 truthy "1" = True
 truthy _ = False
 
+parseTime :: Text -> POSIXTime
+parseTime = fromIntegral . (read :: String -> Integer) . T.unpack
+
 instance FromJSON PocketItem where
   parseJSON (Object o) = PocketItem
                      <$> o .: "excerpt"
-                     <*> o .: "favorite"
+                     <*> (truthy <$> o .: "favorite")
                      <*> o .: "given_title"
                      <*> o .: "given_url"
-                     <*> (truthy <$> (o .: "has_image"))
-                     <*> (truthy <$> (o .: "has_video"))
+                     <*> (parseItemHas <$> (o .: "has_image"))
+                     <*> (parseItemHas <$> (o .: "has_video"))
                      <*> (truthy <$> (o .: "is_article"))
                      <*> (truthy <$> (o .: "is_index"))
-                     <*> (PocketItemId <$> (o .: "item_id"))
-                     <*> o .: "resolved_id"
+                     <*> (PocketItemId <$> o .: "item_id")
+                     <*> (PocketItemId <$> o .: "resolved_id")
                      <*> o .: "resolved_title"
                      <*> o .: "resolved_url"
                      <*> o .: "sort_id"
-                     <*> o .: "status"
-                     <*> o .: "time_added"
-                     <*> o .: "time_favorited"
-                     <*> o .: "time_read"
-                     <*> o .: "time_updated"
+                     <*> (parseItemState <$> o .: "status")
+                     <*> (parseTime <$> o .: "time_added")
+                     <*> (parseTime <$> o .: "time_favorited")
+                     <*> (parseTime <$> o .: "time_read")
+                     <*> (parseTime <$> o .: "time_updated")
                      <*> (read <$> (o .: "word_count"))
   parseJSON _ = mzero
 
 instance ToJSON PocketItem
+
+instance ToJSON NominalDiffTime where
+  toJSON = toJSON . (floor :: NominalDiffTime -> Integer)
 
 data PocketRequest a where
   AddItem :: Text -> PocketRequest Bool
