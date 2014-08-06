@@ -19,7 +19,7 @@ import           Control.Applicative ((<$>))
 import           Control.Lens (preview, _Just, _1)
 import           Control.Lens.Operators
 import           Control.Lens.TH
-import           Control.Monad (replicateM_)
+import           Control.Monad (replicateM_, void)
 import           Data.Maybe (catMaybes)
 import           Data.Traversable (for)
 import           Graphics.Vty (Attr, Modifier, Key)
@@ -49,7 +49,7 @@ newEditDialog :: IO EditDialog
 newEditDialog = do
   fg1 <- W.newFocusGroup
   e <- W.editWidget
-  W.addToFocusGroup fg1 e
+  void $ W.addToFocusGroup fg1 e
   (dlg, fg2) <- W.newDialog e "Edit"
   fg <- W.mergeFocusGroups fg1 fg2
   return $ EditDialog dlg e fg
