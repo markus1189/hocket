@@ -13,9 +13,11 @@ module GUI ( newList'
            , editDlgDialog
            , editDlgWidget
            , editDlgFocusGroup
+           , editVar
            ) where
 
 import           Control.Applicative ((<$>))
+import           Control.Concurrent.MVar (MVar, newMVar)
 import           Control.Lens (preview, _Just, _1)
 import           Control.Lens.Operators
 import           Control.Lens.TH
@@ -27,10 +29,13 @@ import qualified Graphics.Vty as V
 import           Graphics.Vty.Widgets.All (Widget, List, Dialog, FocusGroup, Edit)
 import qualified Graphics.Vty.Widgets.All as W
 
-data EditDialog = EditDialog { _editDlgDialog :: Dialog
-                             , _editDlgWidget :: Widget Edit
-                             , _editDlgFocusGroup :: Widget FocusGroup
-                             }
+import Types
+
+data EditDialog b = EditDialog { _editDlgDialog :: Dialog
+                               , _editDlgWidget :: Widget Edit
+                               , _editDlgFocusGroup :: Widget FocusGroup
+                               , _editVar :: MVar (Maybe (Widget (List PocketItem b)))
+                               }
 makeLenses ''EditDialog
 
 boldBlackOnOrange :: Attr
@@ -45,14 +50,15 @@ newList' focus normal = do
   w `W.onKeyPressed` listWidgetVIKeys
   return w
 
-newEditDialog :: IO EditDialog
+newEditDialog :: IO (EditDialog b)
 newEditDialog = do
   fg1 <- W.newFocusGroup
   e <- W.editWidget
   void $ W.addToFocusGroup fg1 e
   (dlg, fg2) <- W.newDialog e "Edit"
   fg <- W.mergeFocusGroups fg1 fg2
-  return $ EditDialog dlg e fg
+  m <- newMVar Nothing
+  return $ EditDialog dlg e fg m
 
 keepCurrent :: Attr
 keepCurrent = V.Attr V.KeepCurrent V.KeepCurrent V.KeepCurrent

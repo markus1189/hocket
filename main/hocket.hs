@@ -4,10 +4,10 @@
 {-# LANGUAGE TemplateHaskell #-}
 
 import           Control.Applicative ((<*>), pure)
-import           Control.Concurrent (forkIO, MVar, takeMVar, readMVar, putMVar, newMVar)
+import           Control.Concurrent (forkIO, MVar, takeMVar, readMVar, putMVar, newMVar, swapMVar)
 import           Control.Concurrent.Async (async, Async, poll, cancel)
 import           Control.Exception (try)
-import           Control.Lens (view, _Right, preview, preview)
+import           Control.Lens (view, _Right, preview, preview, act)
 import           Control.Lens.Operators
 import           Control.Lens.TH
 import           Control.Monad (join, void)
@@ -137,11 +137,11 @@ abortAsync gui@(view asyncAction -> m) = do
     Just _ -> return ()
 
 tryAsync :: HocketGUI -> IO () -> IO ()
-tryAsync (view asyncAction -> m) act = do
+tryAsync (view asyncAction -> m) a = do
   finished <- poll =<< readMVar m
   case finished of
     Nothing -> return ()
-    Just _ -> takeMVar m >> (putMVar m =<< async act)
+    Just _ -> takeMVar m >> (putMVar m =<< async a)
 
 insertPocketItems :: Traversable f =>
                      Widget (List PocketItem FormattedText)
@@ -185,8 +185,9 @@ executeRenameSelected gui w newTxt = withSelection w $ \_ sel -> do
       pocket $ RenameItem (view itemId sel) newTxt
     case res of
       Left _ -> sigFail
-      Right b -> if b then removeItemFromLst w sel else sigFail
+      Right b -> if b then removeItemFromLst w sel >> sigSucc else sigFail
   where sigFail = updateStatusBar gui "Renaming failed"
+        sigSucc = updateStatusBar gui ""
 
 executeArchiveAction :: HocketGUI -> IO ()
 executeArchiveAction gui = do
@@ -265,8 +266,13 @@ createGUI shCmd cred = do
 
   (view editDlgDialog edlg) `onDialogCancel` \_ -> displayMainGui
   (view editDlgDialog edlg) `onDialogAccept` \_ -> do
-    error "TODO actually do rename: `executeRenameSelected`"
-    -- but how to get the focused widget etc?
+    edlgSrc <- edlg ^! editVar . act readMVar
+    if (edlgSrc == Nothing)
+      then updateStatusBar gui "Renaming failed"
+      else do
+        newName <- getEditText (view editDlgWidget edlg)
+        Just src <- edlg ^! editVar . act readMVar
+        executeRenameSelected gui src newName
     displayMainGui
 
   fg `onKeyPressed` \_ k _ -> case k of
@@ -343,7 +349,7 @@ withSelection w k = do
 tryHttpException :: IO a -> IO (Either HttpException a)
 tryHttpException = try
 
-setUpEditHandler :: EditDialog
+setUpEditHandler :: EditDialog FormattedText
                  -> Widget (List PocketItem FormattedText)
                  -> IO a
                  -> IO ()
@@ -352,6 +358,7 @@ setUpEditHandler e l switch = l `onKeyPressed` \_ k _  -> case k of
     withSelection l $ \_ sel -> do
       let edit = e ^. editDlgWidget
       setEditText edit (bestTitle sel)
+      void $ e ^! editVar . act (\x -> swapMVar x (Just l))
       switch
     return True
   _ -> return False
