@@ -58,7 +58,7 @@ module Network.Pocket.Types (
   runHocket,
 ) where
 
-import           Control.Applicative ((<$>),(<*>))
+import           Control.Applicative ((<$>),(<*>), empty, pure, Alternative)
 import           Control.Lens (view)
 import           Control.Lens.TH
 import           Control.Monad (mzero)
@@ -68,12 +68,12 @@ import           Data.Default
 import           Data.Function (on)
 import           Data.Text (Text)
 import qualified Data.Text as T
-import           Data.Time.Clock.POSIX
 import           Data.Time.Clock
+import           Data.Time.Clock.POSIX
 import           GHC.Generics
 import           Network.Wreq (FormValue, FormParam((:=)))
-import qualified Network.Wreq as W
-import           Numeric.Natural
+
+import Network.Pocket.Retrieve
 
 s :: String -> String
 s = id
@@ -82,28 +82,26 @@ newtype ConsumerKey = ConsumerKey Text deriving (Show, FormValue)
 newtype AccessToken = AccessToken Text deriving (Show, FormValue)
 newtype URL = URL String deriving (Show, Eq, FormValue, FromJSON, ToJSON)
 
-data ItemStatus = Normal | Archived | ShouldBeDeleted deriving (Show, Eq, Enum, Bounded)
+data ItemStatus = Normal | IsArchived | ShouldBeDeleted deriving (Show, Eq, Enum, Bounded)
 
 instance ToJSON ItemStatus where
   toJSON = toJSON . show . fromEnum
 
 data Has = No | Yes | Is deriving (Show, Eq, Enum, Bounded)
-parseItemHas :: Text -> Has
-parseItemHas "0" = No
-parseItemHas "1" = Yes
-parseItemHas "2" = Is
-parseItemHas t =
-  error . T.unpack $ "Unexpected text: <" +|+ t +|+ "> expected one of <0,1,2>"
-  where (+|+) = T.append
+parseItemHas :: Alternative f => Text -> f Has
+parseItemHas "0" = pure No
+parseItemHas "1" = pure Yes
+parseItemHas "2" = pure Is
+parseItemHas _ = empty
 
 instance ToJSON Has where
   toJSON = toJSON . show . fromEnum
 
-parseItemState :: Text -> ItemStatus
-parseItemState "0" = Normal
-parseItemState "1" = Archived
-parseItemState "2" = ShouldBeDeleted
-parseItemState t = error . T.unpack $ "Unexpected item status: " `T.append` t
+parseItemState :: Alternative f => Text -> f ItemStatus
+parseItemState "0" = pure Normal
+parseItemState "1" = pure IsArchived
+parseItemState "2" = pure ShouldBeDeleted
+parseItemState _ = empty
 
 data PocketCredentials = PocketCredentials { _credConsumerKey :: ConsumerKey
                                            , _credAccessToken :: AccessToken
@@ -195,8 +193,8 @@ instance FromJSON PocketItem where
                      <*> (truthy <$> o .: "favorite")
                      <*> o .: "given_title"
                      <*> o .: "given_url"
-                     <*> (parseItemHas <$> (o .: "has_image"))
-                     <*> (parseItemHas <$> (o .: "has_video"))
+                     <*> (parseItemHas =<< (o .: "has_image"))
+                     <*> (parseItemHas =<< (o .: "has_video"))
                      <*> (truthy <$> (o .: "is_article"))
                      <*> (truthy <$> (o .: "is_index"))
                      <*> (PocketItemId <$> o .: "item_id")
@@ -204,7 +202,7 @@ instance FromJSON PocketItem where
                      <*> o .: "resolved_title"
                      <*> o .: "resolved_url"
                      <*> o .: "sort_id"
-                     <*> (parseItemState <$> o .: "status")
+                     <*> (parseItemState =<< o .: "status")
                      <*> (parseTime <$> o .: "time_added")
                      <*> (parseTime <$> o .: "time_favorited")
                      <*> (parseTime <$> o .: "time_read")
@@ -222,11 +220,8 @@ data PocketRequest a where
   ArchiveItem :: PocketItemId -> PocketRequest Bool
   RenameItem :: PocketItemId -> Text -> PocketRequest Bool
   Batch :: [BatchAction] -> PocketRequest [Bool]
-  RetrieveItems :: Maybe (Natural,Natural) -> PocketRequest [PocketItem]
+  RetrieveItems :: RetrieveConfig -> PocketRequest [PocketItem]
   Raw :: PocketRequest a -> PocketRequest Text
-
-class AsFormParams a where
-  toFormParams :: a -> [W.FormParam]
 
 instance (AsFormParams a, AsFormParams b) => AsFormParams (a,b) where
   toFormParams (x,y) = toFormParams x ++ toFormParams y
@@ -237,9 +232,7 @@ instance AsFormParams (PocketRequest a) where
   toFormParams (AddItem u) = [ "url" := u ]
   toFormParams (RenameItem i txt) = toFormParams $ Batch [Rename i txt]
   toFormParams (ArchiveItem i) = toFormParams $ Batch [Archive i]
-  toFormParams (RetrieveItems _) = [ "detailType" := ("simple" :: Text)
-                                   , "sort" := ("newest" :: Text)
-                                   ]
+  toFormParams (RetrieveItems c) = toFormParams c
 
 instance AsFormParams PocketCredentials where
   toFormParams (PocketCredentials ck t) = [ "access_token" := t

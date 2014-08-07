@@ -26,7 +26,6 @@ import           Data.Traversable (Traversable)
 import           Graphics.Vty
 import           Graphics.Vty.Widgets.All
 import           Network.HTTP.Client (HttpException)
-import           Numeric.Natural
 import           System.Environment (getArgs)
 import           System.Exit (exitSuccess)
 import           System.Process
@@ -36,6 +35,12 @@ import qualified Text.Trans.Tokenize as TT
 import           GUI
 import           Printing
 import           Network.Pocket
+import           Network.Pocket.Retrieve ( RetrieveConfig
+                                         , retrieveCount
+                                         , RetrieveCount(Count, NoLimit)
+                                         , retrieveSort
+                                         , RetrieveSort(NewestFirst)
+                                         )
 
 makeLensesFor [("std_err", "stdErr"), ("std_out", "stdOut")] ''CreateProcess
 
@@ -60,14 +65,17 @@ main = do
   args <- (fmap . fmap ) T.pack getArgs
   let (dispatch,rest) = (head args, tail args)
   runHocket (creds,def) $ case dispatch of
-    "get" -> liftIO . newestFirst =<< sortedRetrieve (read . T.unpack . head $ rest)
+    "get" -> do
+      let c = read . T.unpack . head $ rest
+          retCfg = defaultRetrieval & retrieveCount .~ Count c
+      liftIO . newestFirst =<< sortedRetrieve retCfg
     "add" -> traverse_ (pocket . AddItem) rest
     "gui" -> liftIO . vty cmd creds $ []
     _ -> fail "Invalid args."
 
-sortedRetrieve :: Maybe (Natural,Natural) -> Hocket [PocketItem]
-sortedRetrieve maybeOffsetCount = do
-  pocket (RetrieveItems maybeOffsetCount) >>=
+sortedRetrieve :: RetrieveConfig -> Hocket [PocketItem]
+sortedRetrieve cfg = do
+  pocket (RetrieveItems cfg) >>=
     return . sortBy (flip . comparing $ view timeAdded)
 
 readFromConfig :: FilePath -> IO (Maybe (PocketCredentials, ShellCommand))
@@ -156,6 +164,9 @@ extractAndClear lst = do
 updateStatusBar :: HocketGUI -> T.Text -> IO ()
 updateStatusBar gui txt = schedule $ setText (view statusBar gui) txt
 
+defaultRetrieval :: RetrieveConfig
+defaultRetrieval = def & retrieveSort ?~ NewestFirst & retrieveCount .~ NoLimit
+
 retrieveNewItems :: HocketGUI -> IO ()
 retrieveNewItems gui = do
   tryAsync gui $ do
@@ -163,7 +174,7 @@ retrieveNewItems gui = do
     oldPIs <- (++) <$> (listItems $ view unreadLst gui)
                    <*> (listItems $ view toArchiveLst gui)
     eitherErrorPIs <- tryHttpException
-                    . runHocket (view guiCreds gui, def) $ sortedRetrieve Nothing
+                    . runHocket (view guiCreds gui, def) $ sortedRetrieve defaultRetrieval
     case eitherErrorPIs of
       Right pis -> do
         schedule . traverse_ (sortedAddLstItem (view unreadLst gui)) $ pis \\\ oldPIs
