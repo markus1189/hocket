@@ -34,9 +34,8 @@ import           Text.Printf (printf)
 import qualified Text.Trans.Tokenize as TT
 
 import           GUI
-import           Pocket
 import           Printing
-import           Types
+import           Network.Pocket
 
 makeLensesFor [("std_err", "stdErr"), ("std_out", "stdOut")] ''CreateProcess
 

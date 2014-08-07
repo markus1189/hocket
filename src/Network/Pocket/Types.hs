@@ -6,7 +6,7 @@
 {-# LANGUAGE TemplateHaskell #-}
 {-# LANGUAGE DeriveGeneric #-}
 
-module Types (
+module Network.Pocket.Types (
   ConsumerKey (..),
   AccessToken (..),
   URL(..),
@@ -55,7 +55,7 @@ module Types (
 
   AsFormParams (..),
   Hocket,
-  runHocket
+  runHocket,
 ) where
 
 import           Control.Applicative ((<$>),(<*>))

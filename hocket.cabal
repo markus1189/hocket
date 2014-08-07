@@ -17,7 +17,7 @@ cabal-version:       >=1.8
 library
   ghc-options:         -Wall -O2 -Werror
   hs-source-dirs:      src
-  exposed-modules:     Types, Pocket, Printing
+  exposed-modules:     Network.Pocket.Types, Network.Pocket, Printing
   Build-depends:       base >= 4 && < 5,
                        http-client >= 0.3 && < 0.4,
                        http-types >= 0.8 && < 0.9,

@@ -9,7 +9,7 @@ import           Data.Ord (comparing)
 import qualified Data.Text as T
 import qualified Data.Text.IO as TIO
 
-import           Types
+import           Network.Pocket
 
 newestFirst :: [PocketItem] -> IO ()
 newestFirst = traverse_ printItem . reverseSortBy (comparing $ view timeAdded)

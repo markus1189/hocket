@@ -29,7 +29,7 @@ import qualified Graphics.Vty as V
 import           Graphics.Vty.Widgets.All (Widget, List, Dialog, FocusGroup, Edit)
 import qualified Graphics.Vty.Widgets.All as W
 
-import Types
+import Network.Pocket
 
 data EditDialog b = EditDialog { _editDlgDialog :: Dialog
                                , _editDlgWidget :: Widget Edit

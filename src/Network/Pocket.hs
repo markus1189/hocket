@@ -4,7 +4,9 @@
 {-# LANGUAGE NumDecimals #-}
 {-# LANGUAGE RankNTypes #-}
 
-module Pocket (
+module Network.Pocket (
+  module Network.Pocket.Types,
+
   pocket,
   PocketRequest (..)
 ) where
@@ -21,7 +23,7 @@ import qualified Network.Wreq as W
 import qualified Data.Text.Lazy.Encoding as TLE
 import qualified Data.Text.Lazy as TL
 
-import           Types
+import           Network.Pocket.Types
 
 selectEndpoint :: PocketRequest a -> Hocket URL
 selectEndpoint req = magnify _2 $ view (sel req)
