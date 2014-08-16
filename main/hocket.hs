@@ -10,7 +10,7 @@ import           Control.Exception (try)
 import           Control.Lens (view, _Right, preview, preview, act)
 import           Control.Lens.Operators
 import           Control.Lens.TH
-import           Control.Monad (join, void)
+import           Control.Monad (join, void, when)
 import           Control.Monad.Error (runErrorT)
 import           Control.Monad.IO.Class (liftIO)
 import           Data.ConfigFile
@@ -19,6 +19,7 @@ import           Data.Foldable (traverse_, for_)
 import qualified Data.Function as F
 import           Data.Functor ((<$>))
 import           Data.List (sortBy, deleteFirstsBy)
+import           Data.Maybe (isNothing)
 import           Data.Ord (comparing)
 import           Data.Text (Text)
 import qualified Data.Text as T
@@ -27,7 +28,7 @@ import           Graphics.Vty
 import           Graphics.Vty.Widgets.All
 import           Network.HTTP.Client (HttpException)
 import           System.Environment (getArgs)
-import           System.Exit (exitSuccess)
+import           System.Exit (exitSuccess, exitWith, ExitCode(ExitFailure))
 import           System.Process
 import           Text.Printf (printf)
 import qualified Text.Trans.Tokenize as TT
@@ -63,6 +64,9 @@ main :: IO ()
 main = do
   Just (creds,cmd) <- readFromConfig "hocket.cfg"
   args <- (fmap . fmap ) T.pack getArgs
+  when (null args) $ do
+    putStrLn "Invalid args, has to be one of [get <n>, add <url>..., gui]"
+    exitWith (ExitFailure 1)
   let (dispatch,rest) = (head args, tail args)
   runHocket (creds,def) $ case dispatch of
     "get" -> do
@@ -74,9 +78,7 @@ main = do
     _ -> fail "Invalid args."
 
 sortedRetrieve :: RetrieveConfig -> Hocket [PocketItem]
-sortedRetrieve cfg = do
-  pocket (RetrieveItems cfg) >>=
-    return . sortBy (flip . comparing $ view timeAdded)
+sortedRetrieve cfg = sortBy (flip . comparing $ view timeAdded) <$> pocket (RetrieveItems cfg)
 
 readFromConfig :: FilePath -> IO (Maybe (PocketCredentials, ShellCommand))
 readFromConfig path = do
@@ -93,7 +95,7 @@ readFromConfig path = do
 
 browseItem :: ShellCommand -> URL -> IO ()
 browseItem (Cmd shellCmd) (URL url) = do
-  let spec = (shell $ printf shellCmd url)
+  let spec = shell $ printf shellCmd url
   void $ createProcess $ spec & stdOut .~ CreatePipe
                               & stdErr .~ CreatePipe
 
@@ -129,7 +131,7 @@ sortedAddLstItem :: Widget (List PocketItem FormattedText) -> PocketItem -> IO (
 sortedAddLstItem = addToListSortedBy lt (textWidget (alignRightAfter magicMarker) . displayText)
   where
     lt :: PocketItem -> PocketItem -> Ordering
-    lt = (flip compare) `F.on` view timeAdded
+    lt = flip compare `F.on` view timeAdded
 
 bestTitle :: PocketItem -> Text
 bestTitle itm =
@@ -168,11 +170,10 @@ defaultRetrieval :: RetrieveConfig
 defaultRetrieval = def & retrieveSort ?~ NewestFirst & retrieveCount .~ NoLimit
 
 retrieveNewItems :: HocketGUI -> IO ()
-retrieveNewItems gui = do
-  tryAsync gui $ do
+retrieveNewItems gui = tryAsync gui $ do
     updateStatusBar gui "Updating"
-    oldPIs <- (++) <$> (listItems $ view unreadLst gui)
-                   <*> (listItems $ view toArchiveLst gui)
+    oldPIs <- (++) <$> listItems (view unreadLst gui)
+                   <*> listItems (view toArchiveLst gui)
     eitherErrorPIs <- tryHttpException
                     . runHocket (view guiCreds gui, def) $ sortedRetrieve defaultRetrieval
     case eitherErrorPIs of
@@ -188,8 +189,7 @@ removeItemFromLst lst itm = do
   traverse_ (removeFromList lst) maybePos
 
 executeRenameSelected :: HocketGUI -> Widget (List PocketItem b) -> Text -> IO ()
-executeRenameSelected gui w newTxt = withSelection w $ \_ sel -> do
-  tryAsync gui $ do
+executeRenameSelected gui w newTxt = withSelection w $ \_ sel -> tryAsync gui $ do
     updateStatusBar gui "Renaming"
     res <- tryHttpException $ runHocket (view guiCreds gui, def) $
       pocket $ RenameItem (view itemId sel) newTxt
@@ -200,8 +200,7 @@ executeRenameSelected gui w newTxt = withSelection w $ \_ sel -> do
         sigSucc = updateStatusBar gui ""
 
 executeArchiveAction :: HocketGUI -> IO ()
-executeArchiveAction gui = do
-  tryAsync gui $ do
+executeArchiveAction gui = tryAsync gui $ do
     updateStatusBar gui "Archiving"
     let archiveLst = view toArchiveLst gui
     itms <- listItems archiveLst
@@ -242,22 +241,22 @@ createGUI shCmd cred = do
                    <*> pure shCmd
                    <*> newFocusGroup
                    <*> plainText "Hocket"
-                   <*> (newMVar =<< (async $ return ()))
+                   <*> (newMVar =<< async (return ()))
 
-  bottomBar <- ((pure $ view helpBar gui) <++> hFill ' ' 1 <++> (pure $ view statusBar gui))
-  topBar <- ((pure $ view titleText gui) <++> hFill ' ' 1)
+  bottomBar <- pure (view helpBar gui) <++> hFill ' ' 1 <++> pure (view statusBar gui)
+  topBar <- pure (view titleText gui) <++> hFill ' ' 1
 
-  setNormalAttribute (bottomBar) $ Attr KeepCurrent KeepCurrent (SetTo black)
-  setNormalAttribute (topBar) $ Attr KeepCurrent KeepCurrent (SetTo black)
+  setNormalAttribute bottomBar $ Attr KeepCurrent KeepCurrent (SetTo black)
+  setNormalAttribute topBar $ Attr KeepCurrent KeepCurrent (SetTo black)
   setNormalAttribute (view statusBar gui) $ Attr (SetTo bold) KeepCurrent KeepCurrent
 
   for_ [helpBar, statusBar] $ \selector ->
     setNormalAttribute (view selector gui) $ Attr KeepCurrent (SetTo white) KeepCurrent
 
   ui <- centered =<< pure topBar
-                <--> (pure $ view unreadLst gui)
+                <--> pure (view unreadLst gui)
                 <--> hBorder
-                <--> (vFixed 10 (view toArchiveLst gui))
+                <--> vFixed 10 (view toArchiveLst gui)
                 <--> pure bottomBar
 
   let fg = view mainFocusGroup gui
@@ -274,10 +273,10 @@ createGUI shCmd cred = do
 
   setUpEditHandler edlg (view unreadLst gui) displayEditDialog
 
-  (view editDlgDialog edlg) `onDialogCancel` \_ -> displayMainGui
-  (view editDlgDialog edlg) `onDialogAccept` \_ -> do
+  view editDlgDialog edlg `onDialogCancel` const displayMainGui
+  view editDlgDialog edlg `onDialogAccept` \_ -> do
     edlgSrc <- edlg ^! editVar . act readMVar
-    if (edlgSrc == Nothing)
+    if isNothing edlgSrc
       then updateStatusBar gui "Renaming failed"
       else do
         newName <- getEditText (view editDlgWidget edlg)
@@ -299,10 +298,10 @@ vty cmd cred  pis = do
   insertPocketItems (view unreadLst gui) pis
 
   for_ [view unreadLst gui, view toArchiveLst gui] $ \x -> do
-    x `onItemActivated` (lstItemActivatedHandler gui x)
+    x `onItemActivated` lstItemActivatedHandler gui x
     x `onKeyPressed` lstKeyPressedHandler gui
 
-  (view unreadLst gui) `onKeyPressed` \this key _ -> case key of
+  view unreadLst gui `onKeyPressed` \this key _ -> case key of
     (KASCII 'd') -> shiftSelected this (view toArchiveLst gui) >> return True
     (KASCII 'D') -> do
       insertPocketItems (view toArchiveLst gui) =<< extractAndClear this
@@ -310,7 +309,7 @@ vty cmd cred  pis = do
       return True
     _ -> return False
 
-  (view toArchiveLst gui) `onKeyPressed` \this key _ -> case key of
+  view toArchiveLst gui `onKeyPressed` \this key _ -> case key of
     (KASCII 'd') -> shiftSelected this (view unreadLst gui) >> return True
     (KASCII 'D') -> do
       traverse_ (sortedAddLstItem (view unreadLst gui)) =<< extractAndClear this

@@ -1,9 +1,8 @@
+{-# LANGUAGE TemplateHaskell #-}
 {-# LANGUAGE OverloadedStrings #-}
 {-# LANGUAGE GADTs #-}
-{-# LANGUAGE ViewPatterns #-}
 {-# LANGUAGE NumDecimals #-}
 {-# LANGUAGE RankNTypes #-}
-
 module Network.Pocket (
   module Network.Pocket.Types,
 
@@ -12,9 +11,9 @@ module Network.Pocket (
 ) where
 
 import           Control.Applicative ((<$>),(<*>))
-import           Control.Lens (_Left, view, _2, magnify, Getter, lens)
+import           Control.Lens (_Left, view, _2, magnify, Getter)
 import           Control.Lens.Operators
-import           Control.Lens.Type (Lens')
+import           Control.Lens.TH
 import           Control.Monad.IO.Class (liftIO)
 import           Control.Monad.Reader.Class
 import           Data.Aeson.Lens (key, members, _JSON, values, _Bool)
@@ -25,6 +24,8 @@ import           Network.HTTP.Types.Status
 import qualified Network.Wreq as W
 
 import           Network.Pocket.Types
+
+makeLensesFor [("managerResponseTimeout", "managerResponseTimeout")] ''HC.ManagerSettings
 
 selectEndpoint :: PocketRequest a -> Hocket URL
 selectEndpoint req = magnify _2 $ view (sel req)
@@ -51,8 +52,3 @@ pocket req = do
                       . key "action_results"
                       . values
                       . _Bool
-
-managerResponseTimeout :: Lens' HC.ManagerSettings (Maybe Int)
-managerResponseTimeout = lens getter setter
-  where getter m = HC.managerResponseTimeout m
-        setter m n = m { HC.managerResponseTimeout = n }

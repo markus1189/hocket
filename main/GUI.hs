@@ -39,7 +39,7 @@ data EditDialog b = EditDialog { _editDlgDialog :: Dialog
 makeLenses ''EditDialog
 
 boldBlackOnOrange :: Attr
-boldBlackOnOrange = realBlack `W.on` (V.Color240 147) `W.mergeAttr` W.style V.bold
+boldBlackOnOrange = realBlack `W.on` V.Color240 147 `W.mergeAttr` W.style V.bold
   where realBlack = V.rgb_color (0::Int) 0 0
 
 newList' :: Show b => Attr -> Attr -> IO (Widget (List a b))
