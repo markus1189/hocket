@@ -1,0 +1,9 @@
+* Hocket
+** GUI
+*** TODO Use a store-like thing with tables in HocketGUI
+#+BEGIN_SRC haskell
+data Store = Store { lastUpdate :: UnixTime, storage :: Table PocketItem }
+updateStore :: UnixTime -> [PocketItem] -> Store -> Store
+#+END_SRC
+** Pocket Client
+*** TODO Add missing fields in [[file:src/Network/Pocket/Types.hs::data%20PocketItem%20%3D][PocketItem]]
