@@ -130,7 +130,7 @@ runHocket :: c -> ReaderT c IO a -> IO a
 runHocket = flip runReaderT
 
 newtype PocketItemId = PocketItemId Text
-                     deriving (Show, FormValue, Eq)
+                     deriving (Show, FormValue, Eq, Ord)
 
 instance ToJSON PocketItemId where
   toJSON (PocketItemId i) = toJSON i

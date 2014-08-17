@@ -6,8 +6,10 @@
 import           Control.Applicative ((<*>), pure)
 import           Control.Concurrent (forkIO, MVar, takeMVar, readMVar, putMVar, newMVar, swapMVar)
 import           Control.Concurrent.Async (async, Async, poll, cancel)
+import           Control.Concurrent.MVar (modifyMVar_)
 import           Control.Exception (try)
 import           Control.Lens (view, _Right, preview, preview, act)
+import           Control.Lens.Action (perform)
 import           Control.Lens.Operators
 import           Control.Lens.TH
 import           Control.Monad (join, void, when)
@@ -15,12 +17,13 @@ import           Control.Monad.Error (runErrorT)
 import           Control.Monad.IO.Class (liftIO)
 import           Data.ConfigFile
 import           Data.Default
-import           Data.Foldable (traverse_, for_)
+import           Data.Foldable (traverse_, for_, Foldable, foldr')
 import qualified Data.Function as F
 import           Data.Functor ((<$>))
 import           Data.List (sortBy, deleteFirstsBy)
 import           Data.Maybe (isNothing)
 import           Data.Ord (comparing)
+import qualified Data.Table as TB
 import           Data.Text (Text)
 import qualified Data.Text as T
 import           Data.Traversable (Traversable)
@@ -34,7 +37,6 @@ import           Text.Printf (printf)
 import qualified Text.Trans.Tokenize as TT
 
 import           GUI
-import           Printing
 import           Network.Pocket
 import           Network.Pocket.Retrieve ( RetrieveConfig
                                          , retrieveCount
@@ -42,6 +44,8 @@ import           Network.Pocket.Retrieve ( RetrieveConfig
                                          , retrieveSort
                                          , RetrieveSort(NewestFirst)
                                          )
+import           Orphan ()
+import           Printing
 
 makeLensesFor [("std_err", "stdErr"), ("std_out", "stdOut")] ''CreateProcess
 
@@ -57,6 +61,7 @@ data HocketGUI = HocketGUI { _unreadLst :: Widget (List PocketItem FormattedText
                            , _mainFocusGroup :: Widget FocusGroup
                            , _titleText :: Widget FormattedText
                            , _asyncAction :: MVar (Async ())
+                           , _itemTable :: MVar (TB.Table PocketItem)
                            }
 makeLenses ''HocketGUI
 
@@ -169,6 +174,9 @@ updateStatusBar gui txt = schedule $ setText (view statusBar gui) txt
 defaultRetrieval :: RetrieveConfig
 defaultRetrieval = def & retrieveSort ?~ NewestFirst & retrieveCount .~ NoLimit
 
+modifyItemTable :: (TB.Table PocketItem -> TB.Table PocketItem) -> HocketGUI -> IO ()
+modifyItemTable f = perform $ itemTable . act (\m -> modifyMVar_ m (return . f))
+
 retrieveNewItems :: HocketGUI -> IO ()
 retrieveNewItems gui = tryAsync gui $ do
     updateStatusBar gui "Updating"
@@ -178,6 +186,7 @@ retrieveNewItems gui = tryAsync gui $ do
                     . runHocket (view guiCreds gui, def) $ sortedRetrieve defaultRetrieval
     case eitherErrorPIs of
       Right pis -> do
+        modifyItemTable (TB.union (TB.fromList pis)) gui
         schedule . traverse_ (sortedAddLstItem (view unreadLst gui)) $ pis \\\ oldPIs
         updateStatusBar gui ""
       Left _ -> updateStatusBar gui "Updating failed"
@@ -214,12 +223,16 @@ performArchive :: HocketGUI
 performArchive gui archiveLst itms = do
   res <- tryHttpException $ runHocket (view guiCreds gui, def) $ do
     bs <- pocket $ Batch (map (Archive . view itemId) itms)
-    return . map fst . filter snd $ zip itms bs
+    return [i | (i,success) <- zip itms bs, success]
   case res of
     Left e -> return $ Just e
     Right archivedItms -> do
+      modifyItemTable (deleteAll archivedItms) gui
       schedule . traverse_ (removeItemFromLst archiveLst) $ archivedItms
       return Nothing
+
+deleteAll :: Foldable f => f t -> TB.Table t -> TB.Table t
+deleteAll ts table = foldr' TB.delete table ts
 
 createGUI :: ShellCommand -> PocketCredentials -> IO (HocketGUI, Collection)
 createGUI shCmd cred = do
@@ -242,6 +255,7 @@ createGUI shCmd cred = do
                    <*> newFocusGroup
                    <*> plainText "Hocket"
                    <*> (newMVar =<< async (return ()))
+                   <*> newMVar TB.empty
 
   bottomBar <- pure (view helpBar gui) <++> hFill ' ' 1 <++> pure (view statusBar gui)
   topBar <- pure (view titleText gui) <++> hFill ' ' 1
