@@ -8,7 +8,7 @@ import           Control.Concurrent (forkIO, MVar, takeMVar, readMVar, putMVar, 
 import           Control.Concurrent.Async (async, Async, poll, cancel)
 import           Control.Concurrent.MVar (modifyMVar_)
 import           Control.Exception (try)
-import           Control.Lens (view, _Right, preview, preview, act)
+import           Control.Lens (view, _Right, preview, preview, act, non)
 import           Control.Lens.Action (perform)
 import           Control.Lens.Operators
 import           Control.Lens.TH
@@ -108,14 +108,13 @@ browseItem (Cmd shellCmd) (URL url) = do
 magicMarker :: Text
 magicMarker = "<!>"
 
+tryStripPrefix :: Text -> Text -> Text
+tryStripPrefix p t = view (non t) $ T.stripPrefix p t
+
 shortenUrl :: URL -> Text
-shortenUrl (URL t) = let parts = T.splitOn "/" . T.pack $ t
-                         mainPart = T.intercalate "/" . take 3 $ parts
-                         rest = T.intercalate "/" . drop 3 $ parts
-                         maxW = 50
-                         remaining = (maxW - T.length mainPart) `max` 0
-                         postFix = T.take remaining rest
-                     in T.intercalate "/" [mainPart, postFix]
+shortenUrl (URL (T.pack -> t)) = T.take 60 . cleanUrl $ t
+  where cleanUrl :: Text -> Text
+        cleanUrl = tryStripPrefix "www." . tryStripPrefix "http://" . tryStripPrefix "https://"
 
 displayText :: PocketItem -> Text
 displayText i = bestTitle i `T.append`
