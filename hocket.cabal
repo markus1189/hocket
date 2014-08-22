@@ -17,41 +17,41 @@ cabal-version:       >=1.8
 library
   ghc-options:         -Wall -O2 -Werror
   hs-source-dirs:      src
-  exposed-modules:     Network.Pocket.Types,
-                       Network.Pocket,
-                       Network.Pocket.Retrieve,
-                       Printing
-  Build-depends:       base >= 4 && < 5,
-                       http-client >= 0.3 && < 0.4,
-                       http-types >= 0.8 && < 0.9,
-                       data-default >= 0.5 && < 0.6,
-                       mtl >= 2.0 && < 2.2,
-                       transformers >= 0.3 && < 0.4,
-                       aeson >= 0.7 && < 0.8,
-                       ConfigFile >= 1.1.2 && < 1.2,
-                       text >= 1.1 && < 1.2,
-                       nats >= 0.2 && < 0.3,
-                       wreq >= 0.1 && < 0.2,
-                       lens >= 4.3 && < 4.4,
-                       time >= 1.4 && < 1.5
+  exposed-modules:     Network.Pocket
+                     , Network.Pocket.Retrieve
+                     , Network.Pocket.Types
+                     , Printing
+  Build-depends:       ConfigFile >= 1.1.2 && < 1.2
+                     , aeson >= 0.7 && < 0.8
+                     , base >= 4 && < 5
+                     , data-default >= 0.5 && < 0.6
+                     , http-client >= 0.3 && < 0.4
+                     , http-types >= 0.8 && < 0.9
+                     , lens >= 4.3 && < 4.4
+                     , mtl >= 2.0 && < 2.2
+                     , nats >= 0.2 && < 0.3
+                     , text >= 1.1 && < 1.2
+                     , time >= 1.4 && < 1.5
+                     , transformers >= 0.3 && < 0.4
+                     , wreq >= 0.1 && < 0.2
 
 executable hocket
   ghc-options:         -Wall -O2
   main-is:             hocket.hs
   hs-source-dirs:      main
-  build-depends:       hocket,
-                       base >= 4 && < 5,
-                       http-client >= 0.3 && < 0.4,
-                       data-default >= 0.5 && < 0.6,
-                       transformers >= 0.3 && < 0.4,
-                       mtl >= 2.0 && < 2.2,
-                       nats >= 0.2 && < 0.3,
-                       ConfigFile >= 1.1.2 && < 1.2,
-                       vty-ui == 1.7.1,
-                       vty >= 4.7 && < 4.8,
-                       text >= 1.1 && < 1.2,
-                       process >= 1.2 && < 1.4,
-                       async >= 2.0 && < 2.1,
-                       lens >= 4.3 && < 4.4,
-                       time >= 1.4 && < 1.5,
-                       tables >= 0.4 && < 0.5
+  build-depends:       ConfigFile >= 1.1.2 && < 1.2
+                     , async >= 2.0 && < 2.1
+                     , base >= 4 && < 5
+                     , data-default >= 0.5 && < 0.6
+                     , hocket
+                     , http-client >= 0.3 && < 0.4
+                     , lens >= 4.3 && < 4.4
+                     , mtl >= 2.0 && < 2.2
+                     , nats >= 0.2 && < 0.3
+                     , process >= 1.2 && < 1.4
+                     , tables >= 0.4 && < 0.5
+                     , text >= 1.1 && < 1.2
+                     , time >= 1.4 && < 1.5
+                     , transformers >= 0.3 && < 0.4
+                     , vty >= 4.7 && < 4.8
+                     , vty-ui == 1.7.1
