@@ -23,12 +23,14 @@ import           Data.Functor ((<$>))
 import           Data.List (sortBy, deleteFirstsBy)
 import           Data.Maybe (isNothing)
 import           Data.Ord (comparing)
+import           Data.Table (Table)
 import qualified Data.Table as TB
 import           Data.Text (Text)
 import qualified Data.Text as T
+import           Data.Time.Clock.POSIX (POSIXTime)
 import           Data.Traversable (Traversable)
 import           Graphics.Vty
-import           Graphics.Vty.Widgets.All
+import           Graphics.Vty.Widgets.All hiding (Table)
 import           Network.HTTP.Client (HttpException)
 import           System.Environment (getArgs)
 import           System.Exit (exitSuccess, exitWith, ExitCode(ExitFailure))
@@ -51,17 +53,22 @@ makeLensesFor [("std_err", "stdErr"), ("std_out", "stdOut")] ''CreateProcess
 
 newtype ShellCommand = Cmd String
 
+data HocketData = HocketData { _dataTime :: Maybe POSIXTime
+                             , _dataItems :: Table PocketItem
+                             }
+makeLenses ''HocketData
 
 data HocketGUI = HocketGUI { _unreadLst :: Widget (List PocketItem FormattedText)
                            , _toArchiveLst :: Widget (List PocketItem FormattedText)
                            , _helpBar :: Widget FormattedText
                            , _statusBar :: Widget FormattedText
+                           , _timeStamp :: Widget FormattedText
                            , _guiCreds :: PocketCredentials
                            , _launchCommand :: ShellCommand
                            , _mainFocusGroup :: Widget FocusGroup
                            , _titleText :: Widget FormattedText
                            , _asyncAction :: MVar (Async ())
-                           , _itemTable :: MVar (TB.Table PocketItem)
+                           , _hocketData :: MVar HocketData
                            }
 makeLenses ''HocketGUI
 
@@ -170,11 +177,18 @@ extractAndClear lst = do
 updateStatusBar :: HocketGUI -> T.Text -> IO ()
 updateStatusBar gui txt = schedule $ setText (view statusBar gui) txt
 
+updateTimeStamp :: HocketGUI -> IO ()
+updateTimeStamp gui = do
+  currentTS <- perform (hocketData . act readMVar . dataTime) gui
+  schedule $ setText (view timeStamp gui) (T.pack $ show currentTS)
+
 defaultRetrieval :: RetrieveConfig
 defaultRetrieval = def & retrieveSort ?~ NewestFirst & retrieveCount .~ NoLimit
 
 modifyItemTable :: (TB.Table PocketItem -> TB.Table PocketItem) -> HocketGUI -> IO ()
-modifyItemTable f = perform $ itemTable . act (\m -> modifyMVar_ m (return . f))
+modifyItemTable f gui = do
+  hd <- readMVar (gui ^. hocketData)
+  putMVar (gui ^. hocketData) (hd & dataItems %~ f)
 
 retrieveNewItems :: HocketGUI -> IO ()
 retrieveNewItems gui = tryAsync gui $ do
@@ -249,14 +263,19 @@ createGUI shCmd cred = do
                                                           , "Enter:Launch & Shift"
                                                           ])
                    <*> plainText ""
+                   <*> plainText "<never>"
                    <*> pure cred
                    <*> pure shCmd
                    <*> newFocusGroup
                    <*> plainText "Hocket"
                    <*> (newMVar =<< async (return ()))
-                   <*> newMVar TB.empty
+                   <*> newMVar (HocketData Nothing TB.empty)
 
-  bottomBar <- pure (view helpBar gui) <++> hFill ' ' 1 <++> pure (view statusBar gui)
+  bottomBar <- pure (view helpBar gui) <++>
+               hFill ' ' 1 <++>
+               pure (view statusBar gui) <++>
+               plainText " " <++>
+               pure (view timeStamp gui)
   topBar <- pure (view titleText gui) <++> hFill ' ' 1
 
   setNormalAttribute bottomBar $ Attr KeepCurrent KeepCurrent (SetTo black)
