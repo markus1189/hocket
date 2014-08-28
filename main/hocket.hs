@@ -330,7 +330,9 @@ createGUI shCmd cred = do
 
   setUpEditHandler edlg (view unreadLst gui) displayEditDialog
 
-  view editDlgDialog edlg `onDialogCancel` const displayMainGui
+  view editDlgDialog edlg `onDialogCancel` \_ -> do
+    edlg ^! editDlgFocusGroup . act focusNext
+    displayMainGui
   view editDlgDialog edlg `onDialogAccept` \_ -> do
     edlgSrc <- edlg ^! editVar . act readMVar
     if isNothing edlgSrc
@@ -339,6 +341,7 @@ createGUI shCmd cred = do
         newName <- getEditText (view editDlgWidget edlg)
         Just src <- edlg ^! editVar . act readMVar
         executeRenameSelected gui src newName
+    edlg ^! editDlgFocusGroup . act focusPrevious
     displayMainGui
 
   fg `onKeyPressed` \_ k _ -> case k of
