@@ -4,11 +4,10 @@
 {-# LANGUAGE TemplateHaskell #-}
 
 import           Control.Applicative ((<*>), pure)
-import           Control.Concurrent (forkIO, MVar, takeMVar, readMVar, putMVar, newMVar, swapMVar)
+import           Control.Concurrent (forkIO, MVar, takeMVar, readMVar, putMVar, newMVar, swapMVar, modifyMVar_)
 import           Control.Concurrent.Async (async, Async, poll, cancel)
-import           Control.Concurrent.MVar (modifyMVar_)
 import           Control.Exception (try)
-import           Control.Lens (view, _Right, preview, preview, act, non)
+import           Control.Lens (view, _Right, preview, preview, act, non, from)
 import           Control.Lens.Action (perform)
 import           Control.Lens.Operators
 import           Control.Lens.TH
@@ -20,20 +19,21 @@ import           Data.Default
 import           Data.Foldable (traverse_, for_, Foldable, foldr')
 import qualified Data.Function as F
 import           Data.Functor ((<$>))
-import           Data.List (sortBy, deleteFirstsBy)
+import           Data.List (deleteFirstsBy)
 import           Data.Maybe (isNothing)
-import           Data.Ord (comparing)
 import           Data.Table (Table)
 import qualified Data.Table as TB
 import           Data.Text (Text)
 import qualified Data.Text as T
-import           Data.Time.Clock.POSIX (POSIXTime)
+import           Data.Time.Clock.POSIX (POSIXTime, posixSecondsToUTCTime)
+import           Data.Time.Format
 import           Data.Traversable (Traversable)
 import           Graphics.Vty
 import           Graphics.Vty.Widgets.All hiding (Table)
 import           Network.HTTP.Client (HttpException)
 import           System.Environment (getArgs)
 import           System.Exit (exitSuccess, exitWith, ExitCode(ExitFailure))
+import           System.Locale (defaultTimeLocale)
 import           System.Process
 import           Text.Printf (printf)
 import qualified Text.Trans.Tokenize as TT
@@ -46,7 +46,6 @@ import           Network.Pocket.Retrieve ( RetrieveConfig
                                          , retrieveSort
                                          , RetrieveSort(NewestFirst)
                                          )
-import           Orphan ()
 import           Printing
 
 makeLensesFor [("std_err", "stdErr"), ("std_out", "stdOut")] ''CreateProcess
@@ -57,6 +56,14 @@ data HocketData = HocketData { _dataTime :: Maybe POSIXTime
                              , _dataItems :: Table PocketItem
                              }
 makeLenses ''HocketData
+
+consumeBatch :: HocketData -> PocketItemBatch -> HocketData
+consumeBatch bt1@(HocketData maybeTs1 tb1) (BatchTable ts2 tb2) =
+  case maybeTs1 of
+    Nothing -> HocketData (Just ts2) (tb1 `TB.union` tb2)
+    Just ts1 -> if ts1 >= ts2
+                then bt1
+                else HocketData (Just ts2) (tb1 `TB.union` tb2)
 
 data HocketGUI = HocketGUI { _unreadLst :: Widget (List PocketItem FormattedText)
                            , _toArchiveLst :: Widget (List PocketItem FormattedText)
@@ -72,6 +79,9 @@ data HocketGUI = HocketGUI { _unreadLst :: Widget (List PocketItem FormattedText
                            }
 makeLenses ''HocketGUI
 
+modifyData :: HocketGUI -> (HocketData -> HocketData) -> IO ()
+modifyData (view hocketData -> m) f = modifyMVar_ m (return . f)
+
 main :: IO ()
 main = do
   Just (creds,cmd) <- readFromConfig "hocket.cfg"
@@ -84,13 +94,10 @@ main = do
     "get" -> do
       let c = read . T.unpack . head $ rest
           retCfg = defaultRetrieval & retrieveCount .~ Count c
-      liftIO . newestFirst =<< sortedRetrieve retCfg
+      liftIO . newestFirst =<< view (batchTable . from TB.table) <$> pocket (RetrieveItems retCfg)
     "add" -> traverse_ (pocket . AddItem) rest
     "gui" -> liftIO . vty cmd creds $ []
     _ -> fail "Invalid args."
-
-sortedRetrieve :: RetrieveConfig -> Hocket [PocketItem]
-sortedRetrieve cfg = sortBy (flip . comparing $ view timeAdded) <$> pocket (RetrieveItems cfg)
 
 readFromConfig :: FilePath -> IO (Maybe (PocketCredentials, ShellCommand))
 readFromConfig path = do
@@ -180,15 +187,13 @@ updateStatusBar gui txt = schedule $ setText (view statusBar gui) txt
 updateTimeStamp :: HocketGUI -> IO ()
 updateTimeStamp gui = do
   currentTS <- perform (hocketData . act readMVar . dataTime) gui
-  schedule $ setText (view timeStamp gui) (T.pack $ show currentTS)
+  let fmt = formatTime defaultTimeLocale "%T" . posixSecondsToUTCTime
+  case currentTS of
+    Nothing -> return ()
+    Just ts -> schedule $ setText (view timeStamp gui) (T.pack . fmt $ ts)
 
 defaultRetrieval :: RetrieveConfig
 defaultRetrieval = def & retrieveSort ?~ NewestFirst & retrieveCount .~ NoLimit
-
-modifyItemTable :: (TB.Table PocketItem -> TB.Table PocketItem) -> HocketGUI -> IO ()
-modifyItemTable f gui = do
-  hd <- readMVar (gui ^. hocketData)
-  putMVar (gui ^. hocketData) (hd & dataItems %~ f)
 
 retrieveNewItems :: HocketGUI -> IO ()
 retrieveNewItems gui = tryAsync gui $ do
@@ -196,10 +201,12 @@ retrieveNewItems gui = tryAsync gui $ do
     oldPIs <- (++) <$> listItems (view unreadLst gui)
                    <*> listItems (view toArchiveLst gui)
     eitherErrorPIs <- tryHttpException
-                    . runHocket (view guiCreds gui, def) $ sortedRetrieve defaultRetrieval
+                    . runHocket (view guiCreds gui, def) $ pocket $ RetrieveItems defaultRetrieval
     case eitherErrorPIs of
-      Right pis -> do
-        modifyItemTable (TB.union (TB.fromList pis)) gui
+      Right batch -> do
+        modifyData gui (`consumeBatch` batch)
+        updateTimeStamp gui
+        let pis = view (batchTable . from TB.table) batch
         schedule . traverse_ (sortedAddLstItem (view unreadLst gui)) $ pis \\\ oldPIs
         updateStatusBar gui ""
       Left _ -> updateStatusBar gui "Updating failed"
@@ -217,7 +224,11 @@ executeRenameSelected gui w newTxt = withSelection w $ \_ sel -> tryAsync gui $ 
       pocket $ RenameItem (view itemId sel) newTxt
     case res of
       Left _ -> sigFail
-      Right b -> if b then removeItemFromLst w sel >> sigSucc else sigFail
+      Right b -> if b then do
+                      removeItemFromLst w sel
+                      modifyData gui (dataItems %~ TB.delete sel)
+                      sigSucc
+                 else sigFail
   where sigFail = updateStatusBar gui "Renaming failed"
         sigSucc = updateStatusBar gui ""
 
@@ -240,7 +251,7 @@ performArchive gui archiveLst itms = do
   case res of
     Left e -> return $ Just e
     Right archivedItms -> do
-      modifyItemTable (deleteAll archivedItms) gui
+      modifyData gui (dataItems %~ deleteAll archivedItms)
       schedule . traverse_ (removeItemFromLst archiveLst) $ archivedItms
       return Nothing
 
