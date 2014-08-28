@@ -27,6 +27,7 @@ import           Data.Text (Text)
 import qualified Data.Text as T
 import           Data.Time.Clock.POSIX (POSIXTime, posixSecondsToUTCTime)
 import           Data.Time.Format
+import           Data.Time.LocalTime (LocalTime(..), utcToLocalTime, getCurrentTimeZone)
 import           Data.Traversable (Traversable)
 import           Graphics.Vty
 import           Graphics.Vty.Widgets.All hiding (Table)
@@ -45,6 +46,7 @@ import           Network.Pocket.Retrieve ( RetrieveConfig
                                          , RetrieveCount(Count, NoLimit)
                                          , retrieveSort
                                          , RetrieveSort(NewestFirst)
+                                         , retrieveSince
                                          )
 import           Printing
 
@@ -184,32 +186,44 @@ extractAndClear lst = do
 updateStatusBar :: HocketGUI -> T.Text -> IO ()
 updateStatusBar gui txt = schedule $ setText (view statusBar gui) txt
 
+posixToLocalTime :: POSIXTime -> IO LocalTime
+posixToLocalTime p = utcToLocalTime
+                 <$> getCurrentTimeZone
+                 <*> pure (posixSecondsToUTCTime p)
+
+formatPosix :: POSIXTime -> IO String
+formatPosix = fmap (formatTime defaultTimeLocale "%T") . posixToLocalTime
+
+lastRetrieval :: HocketGUI -> IO (Maybe POSIXTime)
+lastRetrieval = perform (hocketData . act readMVar . dataTime)
+
 updateTimeStamp :: HocketGUI -> IO ()
 updateTimeStamp gui = do
-  currentTS <- perform (hocketData . act readMVar . dataTime) gui
-  let fmt = formatTime defaultTimeLocale "%T" . posixSecondsToUTCTime
+  currentTS <- lastRetrieval gui
   case currentTS of
     Nothing -> return ()
-    Just ts -> schedule $ setText (view timeStamp gui) (T.pack . fmt $ ts)
+    Just ts -> schedule $ setText (view timeStamp gui) =<< (T.pack <$> formatPosix ts)
 
 defaultRetrieval :: RetrieveConfig
 defaultRetrieval = def & retrieveSort ?~ NewestFirst & retrieveCount .~ NoLimit
 
 retrieveNewItems :: HocketGUI -> IO ()
 retrieveNewItems gui = tryAsync gui $ do
-    updateStatusBar gui "Updating"
-    oldPIs <- (++) <$> listItems (view unreadLst gui)
-                   <*> listItems (view toArchiveLst gui)
-    eitherErrorPIs <- tryHttpException
-                    . runHocket (view guiCreds gui, def) $ pocket $ RetrieveItems defaultRetrieval
-    case eitherErrorPIs of
-      Right batch -> do
-        modifyData gui (`consumeBatch` batch)
-        updateTimeStamp gui
-        let pis = view (batchTable . from TB.table) batch
-        schedule . traverse_ (sortedAddLstItem (view unreadLst gui)) $ pis \\\ oldPIs
-        updateStatusBar gui ""
-      Left _ -> updateStatusBar gui "Updating failed"
+  lastRetrieved <- lastRetrieval gui
+  let retCfg = defaultRetrieval & retrieveSince .~ lastRetrieved
+  updateStatusBar gui "Updating"
+  oldPIs <- (++) <$> listItems (view unreadLst gui)
+                 <*> listItems (view toArchiveLst gui)
+  eitherErrorPIs <- tryHttpException
+                    . runHocket (view guiCreds gui, def) $ pocket $ RetrieveItems retCfg
+  case eitherErrorPIs of
+    Right batch -> do
+      modifyData gui (`consumeBatch` batch)
+      updateTimeStamp gui
+      let pis = view (batchTable . from TB.table) batch
+      schedule . traverse_ (sortedAddLstItem (view unreadLst gui)) $ pis \\\ oldPIs
+      updateStatusBar gui ""
+    Left _ -> updateStatusBar gui "Updating failed"
   where (\\\) = deleteFirstsBy idEq
 
 removeItemFromLst :: Eq a => Widget (List a b) -> a -> IO ()
