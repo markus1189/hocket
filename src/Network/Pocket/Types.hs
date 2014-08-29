@@ -5,6 +5,7 @@
 {-# LANGUAGE GADTs #-}
 {-# LANGUAGE TemplateHaskell #-}
 {-# LANGUAGE DeriveGeneric #-}
+{-# LANGUAGE TypeFamilies #-}
 
 module Network.Pocket.Types (
   ConsumerKey (..),
@@ -21,7 +22,6 @@ module Network.Pocket.Types (
   modifyEndpoint,
   requestEndpoint,
   authorizeEndpoint,
-
 
   PocketItem (..),
   excerpt,
@@ -56,6 +56,10 @@ module Network.Pocket.Types (
   AsFormParams (..),
   Hocket,
   runHocket,
+
+  PocketItemBatch(BatchTable),
+  batchTable,
+  batchTS,
 ) where
 
 import           Control.Applicative ((<$>),(<*>), empty, pure, Alternative)
@@ -66,6 +70,7 @@ import           Control.Monad.Trans.Reader (ReaderT, runReaderT)
 import           Data.Aeson
 import           Data.Default
 import           Data.Function (on)
+import           Data.Table hiding (empty)
 import           Data.Text (Text)
 import qualified Data.Text as T
 import           Data.Time.Clock
@@ -73,7 +78,7 @@ import           Data.Time.Clock.POSIX
 import           GHC.Generics
 import           Network.Wreq (FormValue, FormParam((:=)))
 
-import Network.Pocket.Retrieve
+import           Network.Pocket.Retrieve
 
 s :: String -> String
 s = id
@@ -130,7 +135,7 @@ runHocket :: c -> ReaderT c IO a -> IO a
 runHocket = flip runReaderT
 
 newtype PocketItemId = PocketItemId Text
-                     deriving (Show, FormValue, Eq)
+                     deriving (Show, FormValue, Eq, Ord)
 
 instance ToJSON PocketItemId where
   toJSON (PocketItemId i) = toJSON i
@@ -177,6 +182,21 @@ data PocketItem =
              } deriving (Show,Eq,Generic)
 makeLenses ''PocketItem
 
+instance Tabular PocketItem where
+  type PKT PocketItem = PocketItemId
+  data Key k PocketItem b where
+    PocketItemTId :: Key Primary PocketItem PocketItemId
+  data Tab PocketItem i = PIT (i Primary PocketItemId)
+
+  fetch PocketItemTId = view itemId
+
+  primary = PocketItemTId
+  primarily PocketItemTId r = r
+
+  mkTab f               = PIT <$> f PocketItemTId
+  forTab (PIT x) f = PIT <$> f PocketItemTId x
+  ixTab (PIT x) PocketItemTId  = x
+
 idEq :: PocketItem -> PocketItem -> Bool
 idEq = (==) `on` view itemId
 
@@ -220,7 +240,7 @@ data PocketRequest a where
   ArchiveItem :: PocketItemId -> PocketRequest Bool
   RenameItem :: PocketItemId -> Text -> PocketRequest Bool
   Batch :: [BatchAction] -> PocketRequest [Bool]
-  RetrieveItems :: RetrieveConfig -> PocketRequest [PocketItem]
+  RetrieveItems :: RetrieveConfig -> PocketRequest PocketItemBatch
   Raw :: PocketRequest a -> PocketRequest Text
 
 instance (AsFormParams a, AsFormParams b) => AsFormParams (a,b) where
@@ -238,3 +258,8 @@ instance AsFormParams PocketCredentials where
   toFormParams (PocketCredentials ck t) = [ "access_token" := t
                                           , "consumer_key" := ck
                                           ]
+
+data PocketItemBatch =
+  BatchTable { _batchTS :: POSIXTime
+             , _batchTable :: Table PocketItem}
+makeLenses ''PocketItemBatch

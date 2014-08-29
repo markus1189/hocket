@@ -4,10 +4,11 @@
 {-# LANGUAGE TemplateHaskell #-}
 
 import           Control.Applicative ((<*>), pure)
-import           Control.Concurrent (forkIO, MVar, takeMVar, readMVar, putMVar, newMVar, swapMVar)
+import           Control.Concurrent (forkIO, MVar, takeMVar, readMVar, putMVar, newMVar, swapMVar, modifyMVar_)
 import           Control.Concurrent.Async (async, Async, poll, cancel)
 import           Control.Exception (try)
-import           Control.Lens (view, _Right, preview, preview, act)
+import           Control.Lens (view, _Right, preview, preview, act, non, from)
+import           Control.Lens.Action (perform)
 import           Control.Lens.Operators
 import           Control.Lens.TH
 import           Control.Monad (join, void, when)
@@ -15,50 +16,73 @@ import           Control.Monad.Error (runErrorT)
 import           Control.Monad.IO.Class (liftIO)
 import           Data.ConfigFile
 import           Data.Default
-import           Data.Foldable (traverse_, for_)
+import           Data.Foldable (traverse_, for_, Foldable, foldr')
 import qualified Data.Function as F
 import           Data.Functor ((<$>))
-import           Data.List (sortBy, deleteFirstsBy)
+import           Data.List (deleteFirstsBy)
 import           Data.Maybe (isNothing)
-import           Data.Ord (comparing)
+import           Data.Table (Table)
+import qualified Data.Table as TB
 import           Data.Text (Text)
 import qualified Data.Text as T
+import           Data.Time.Clock.POSIX (POSIXTime, posixSecondsToUTCTime)
+import           Data.Time.Format
+import           Data.Time.LocalTime (LocalTime(..), utcToLocalTime, getCurrentTimeZone)
 import           Data.Traversable (Traversable)
 import           Graphics.Vty
-import           Graphics.Vty.Widgets.All
+import           Graphics.Vty.Widgets.All hiding (Table)
 import           Network.HTTP.Client (HttpException)
 import           System.Environment (getArgs)
 import           System.Exit (exitSuccess, exitWith, ExitCode(ExitFailure))
+import           System.Locale (defaultTimeLocale)
 import           System.Process
 import           Text.Printf (printf)
 import qualified Text.Trans.Tokenize as TT
 
 import           GUI
-import           Printing
 import           Network.Pocket
 import           Network.Pocket.Retrieve ( RetrieveConfig
                                          , retrieveCount
                                          , RetrieveCount(Count, NoLimit)
                                          , retrieveSort
                                          , RetrieveSort(NewestFirst)
+                                         , retrieveSince
                                          )
+import           Printing
 
 makeLensesFor [("std_err", "stdErr"), ("std_out", "stdOut")] ''CreateProcess
 
 newtype ShellCommand = Cmd String
 
+data HocketData = HocketData { _dataTime :: Maybe POSIXTime
+                             , _dataItems :: Table PocketItem
+                             }
+makeLenses ''HocketData
+
+consumeBatch :: HocketData -> PocketItemBatch -> HocketData
+consumeBatch bt1@(HocketData maybeTs1 tb1) (BatchTable ts2 tb2) =
+  case maybeTs1 of
+    Nothing -> HocketData (Just ts2) (tb1 `TB.union` tb2)
+    Just ts1 -> if ts1 >= ts2
+                then bt1
+                else HocketData (Just ts2) (tb1 `TB.union` tb2)
 
 data HocketGUI = HocketGUI { _unreadLst :: Widget (List PocketItem FormattedText)
                            , _toArchiveLst :: Widget (List PocketItem FormattedText)
                            , _helpBar :: Widget FormattedText
                            , _statusBar :: Widget FormattedText
+                           , _timeStamp :: Widget FormattedText
                            , _guiCreds :: PocketCredentials
                            , _launchCommand :: ShellCommand
                            , _mainFocusGroup :: Widget FocusGroup
                            , _titleText :: Widget FormattedText
                            , _asyncAction :: MVar (Async ())
+                           , _hocketData :: MVar HocketData
                            }
 makeLenses ''HocketGUI
+
+modifyData :: HocketGUI -> (HocketData -> HocketData) -> IO ()
+modifyData (view hocketData -> m) f = modifyMVar_ m (return . f)
 
 main :: IO ()
 main = do
@@ -72,13 +96,10 @@ main = do
     "get" -> do
       let c = read . T.unpack . head $ rest
           retCfg = defaultRetrieval & retrieveCount .~ Count c
-      liftIO . newestFirst =<< sortedRetrieve retCfg
+      liftIO . newestFirst =<< view (batchTable . from TB.table) <$> pocket (RetrieveItems retCfg)
     "add" -> traverse_ (pocket . AddItem) rest
     "gui" -> liftIO . vty cmd creds $ []
     _ -> fail "Invalid args."
-
-sortedRetrieve :: RetrieveConfig -> Hocket [PocketItem]
-sortedRetrieve cfg = sortBy (flip . comparing $ view timeAdded) <$> pocket (RetrieveItems cfg)
 
 readFromConfig :: FilePath -> IO (Maybe (PocketCredentials, ShellCommand))
 readFromConfig path = do
@@ -103,14 +124,13 @@ browseItem (Cmd shellCmd) (URL url) = do
 magicMarker :: Text
 magicMarker = "<!>"
 
+tryStripPrefix :: Text -> Text -> Text
+tryStripPrefix p t = view (non t) $ T.stripPrefix p t
+
 shortenUrl :: URL -> Text
-shortenUrl (URL t) = let parts = T.splitOn "/" . T.pack $ t
-                         mainPart = T.intercalate "/" . take 3 $ parts
-                         rest = T.intercalate "/" . drop 3 $ parts
-                         maxW = 50
-                         remaining = (maxW - T.length mainPart) `max` 0
-                         postFix = T.take remaining rest
-                     in T.intercalate "/" [mainPart, postFix]
+shortenUrl (URL (T.pack -> t)) = T.take 60 . cleanUrl $ t
+  where cleanUrl :: Text -> Text
+        cleanUrl = tryStripPrefix "www." . tryStripPrefix "http://" . tryStripPrefix "https://"
 
 displayText :: PocketItem -> Text
 displayText i = bestTitle i `T.append`
@@ -166,21 +186,44 @@ extractAndClear lst = do
 updateStatusBar :: HocketGUI -> T.Text -> IO ()
 updateStatusBar gui txt = schedule $ setText (view statusBar gui) txt
 
+posixToLocalTime :: POSIXTime -> IO LocalTime
+posixToLocalTime p = utcToLocalTime
+                 <$> getCurrentTimeZone
+                 <*> pure (posixSecondsToUTCTime p)
+
+formatPosix :: POSIXTime -> IO String
+formatPosix = fmap (formatTime defaultTimeLocale "%T") . posixToLocalTime
+
+lastRetrieval :: HocketGUI -> IO (Maybe POSIXTime)
+lastRetrieval = perform (hocketData . act readMVar . dataTime)
+
+updateTimeStamp :: HocketGUI -> IO ()
+updateTimeStamp gui = do
+  currentTS <- lastRetrieval gui
+  case currentTS of
+    Nothing -> return ()
+    Just ts -> schedule $ setText (view timeStamp gui) =<< (T.pack <$> formatPosix ts)
+
 defaultRetrieval :: RetrieveConfig
 defaultRetrieval = def & retrieveSort ?~ NewestFirst & retrieveCount .~ NoLimit
 
 retrieveNewItems :: HocketGUI -> IO ()
 retrieveNewItems gui = tryAsync gui $ do
-    updateStatusBar gui "Updating"
-    oldPIs <- (++) <$> listItems (view unreadLst gui)
-                   <*> listItems (view toArchiveLst gui)
-    eitherErrorPIs <- tryHttpException
-                    . runHocket (view guiCreds gui, def) $ sortedRetrieve defaultRetrieval
-    case eitherErrorPIs of
-      Right pis -> do
-        schedule . traverse_ (sortedAddLstItem (view unreadLst gui)) $ pis \\\ oldPIs
-        updateStatusBar gui ""
-      Left _ -> updateStatusBar gui "Updating failed"
+  lastRetrieved <- lastRetrieval gui
+  let retCfg = defaultRetrieval & retrieveSince .~ lastRetrieved
+  updateStatusBar gui "Updating"
+  oldPIs <- (++) <$> listItems (view unreadLst gui)
+                 <*> listItems (view toArchiveLst gui)
+  eitherErrorPIs <- tryHttpException
+                    . runHocket (view guiCreds gui, def) $ pocket $ RetrieveItems retCfg
+  case eitherErrorPIs of
+    Right batch -> do
+      modifyData gui (`consumeBatch` batch)
+      updateTimeStamp gui
+      let pis = view (batchTable . from TB.table) batch
+      schedule . traverse_ (sortedAddLstItem (view unreadLst gui)) $ pis \\\ oldPIs
+      updateStatusBar gui ""
+    Left _ -> updateStatusBar gui "Updating failed"
   where (\\\) = deleteFirstsBy idEq
 
 removeItemFromLst :: Eq a => Widget (List a b) -> a -> IO ()
@@ -195,7 +238,11 @@ executeRenameSelected gui w newTxt = withSelection w $ \_ sel -> tryAsync gui $ 
       pocket $ RenameItem (view itemId sel) newTxt
     case res of
       Left _ -> sigFail
-      Right b -> if b then removeItemFromLst w sel >> sigSucc else sigFail
+      Right b -> if b then do
+                      removeItemFromLst w sel
+                      modifyData gui (dataItems %~ TB.delete sel)
+                      sigSucc
+                 else sigFail
   where sigFail = updateStatusBar gui "Renaming failed"
         sigSucc = updateStatusBar gui ""
 
@@ -214,12 +261,16 @@ performArchive :: HocketGUI
 performArchive gui archiveLst itms = do
   res <- tryHttpException $ runHocket (view guiCreds gui, def) $ do
     bs <- pocket $ Batch (map (Archive . view itemId) itms)
-    return . map fst . filter snd $ zip itms bs
+    return [i | (i,success) <- zip itms bs, success]
   case res of
     Left e -> return $ Just e
     Right archivedItms -> do
+      modifyData gui (dataItems %~ deleteAll archivedItms)
       schedule . traverse_ (removeItemFromLst archiveLst) $ archivedItms
       return Nothing
+
+deleteAll :: Foldable f => f t -> TB.Table t -> TB.Table t
+deleteAll ts table = foldr' TB.delete table ts
 
 createGUI :: ShellCommand -> PocketCredentials -> IO (HocketGUI, Collection)
 createGUI shCmd cred = do
@@ -237,13 +288,19 @@ createGUI shCmd cred = do
                                                           , "Enter:Launch & Shift"
                                                           ])
                    <*> plainText ""
+                   <*> plainText "<never>"
                    <*> pure cred
                    <*> pure shCmd
                    <*> newFocusGroup
                    <*> plainText "Hocket"
                    <*> (newMVar =<< async (return ()))
+                   <*> newMVar (HocketData Nothing TB.empty)
 
-  bottomBar <- pure (view helpBar gui) <++> hFill ' ' 1 <++> pure (view statusBar gui)
+  bottomBar <- pure (view helpBar gui) <++>
+               hFill ' ' 1 <++>
+               pure (view statusBar gui) <++>
+               plainText " " <++>
+               pure (view timeStamp gui)
   topBar <- pure (view titleText gui) <++> hFill ' ' 1
 
   setNormalAttribute bottomBar $ Attr KeepCurrent KeepCurrent (SetTo black)
@@ -273,7 +330,9 @@ createGUI shCmd cred = do
 
   setUpEditHandler edlg (view unreadLst gui) displayEditDialog
 
-  view editDlgDialog edlg `onDialogCancel` const displayMainGui
+  view editDlgDialog edlg `onDialogCancel` \_ -> do
+    edlg ^! editDlgFocusGroup . act focusNext
+    displayMainGui
   view editDlgDialog edlg `onDialogAccept` \_ -> do
     edlgSrc <- edlg ^! editVar . act readMVar
     if isNothing edlgSrc
@@ -282,6 +341,7 @@ createGUI shCmd cred = do
         newName <- getEditText (view editDlgWidget edlg)
         Just src <- edlg ^! editVar . act readMVar
         executeRenameSelected gui src newName
+    edlg ^! editDlgFocusGroup . act focusPrevious
     displayMainGui
 
   fg `onKeyPressed` \_ k _ -> case k of
