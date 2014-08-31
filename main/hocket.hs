@@ -59,12 +59,12 @@ data HocketData = HocketData { _dataTime :: Maybe POSIXTime
 makeLenses ''HocketData
 
 consumeBatch :: HocketData -> PocketItemBatch -> HocketData
-consumeBatch bt1@(HocketData maybeTs1 tb1) (BatchTable ts2 tb2) =
+consumeBatch bt1@(HocketData maybeTs1 tb1) (PocketItemBatch ts2 tb2) =
   case maybeTs1 of
-    Nothing -> HocketData (Just ts2) (tb1 `TB.union` tb2)
+    Nothing -> HocketData (Just ts2) (tb1 `TB.union` view TB.table tb2)
     Just ts1 -> if ts1 >= ts2
                 then bt1
-                else HocketData (Just ts2) (tb1 `TB.union` tb2)
+                else HocketData (Just ts2) (tb1 `TB.union` view TB.table tb2)
 
 data HocketGUI = HocketGUI { _unreadLst :: Widget (List PocketItem FormattedText)
                            , _toArchiveLst :: Widget (List PocketItem FormattedText)
@@ -95,7 +95,7 @@ main = do
     "get" -> do
       let c = read . T.unpack . head $ rest
           retCfg = defaultRetrieval & retrieveCount .~ Count c
-      liftIO . newestFirst =<< view (batchTable . from TB.table) <$> pocket (RetrieveItems retCfg)
+      liftIO . newestFirst =<< view batchItems <$> pocket (RetrieveItems retCfg)
     "add" -> traverse_ (pocket . AddItem) rest
     "gui" -> liftIO . vty cmd creds $ []
     _ -> fail "Invalid args."
@@ -116,7 +116,7 @@ readFromConfig path = do
 browseItem :: ShellCommand -> URL -> IO ()
 browseItem (Cmd shellCmd) (URL url) = do
   let spec = shell $ printf shellCmd url
-  void $ createProcess $ spec & stdOut .~ CreatePipe
+  void . createProcess $ spec & stdOut .~ CreatePipe
                               & stdErr .~ CreatePipe
 
 -- used to right align urls in gui using vty-ui formatter 'alignRightAfter' (defined here)
@@ -219,7 +219,7 @@ retrieveNewItems gui = tryAsync gui $ do
     Right batch -> do
       modifyData gui (`consumeBatch` batch)
       updateTimeStamp gui
-      let pis = view (batchTable . from TB.table) batch
+      let pis = view batchItems batch
       schedule . traverse_ (sortedAddLstItem (view unreadLst gui)) $ pis \\\ oldPIs
       updateStatusBar gui ""
     Left _ -> updateStatusBar gui "Updating failed"

@@ -57,8 +57,8 @@ module Network.Pocket.Types (
   Hocket,
   runHocket,
 
-  PocketItemBatch(BatchTable),
-  batchTable,
+  PocketItemBatch(PocketItemBatch),
+  batchItems,
   batchTS,
 ) where
 
@@ -259,7 +259,6 @@ instance AsFormParams PocketCredentials where
                                           , "consumer_key" := ck
                                           ]
 
-data PocketItemBatch =
-  BatchTable { _batchTS :: POSIXTime
-             , _batchTable :: Table PocketItem}
+data PocketItemBatch = PocketItemBatch { _batchTS :: POSIXTime
+                                       , _batchItems :: [PocketItem]}
 makeLenses ''PocketItemBatch

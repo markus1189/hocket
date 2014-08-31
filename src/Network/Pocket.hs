@@ -13,7 +13,6 @@ module Network.Pocket (
 import           Control.Applicative ((<$>),(<*>))
 import           Control.Lens (_Left, view, _2, magnify, Getter)
 import           Control.Lens.Operators
-import qualified Data.Table as TB
 import           Control.Lens.TH
 import           Control.Monad.IO.Class (liftIO)
 import           Control.Monad.Reader.Class
@@ -49,7 +48,7 @@ pocket req = do
     AddItem _ -> resp ^. W.responseStatus == ok200
     ArchiveItem _ -> resp ^. W.responseStatus == ok200
     RenameItem _ _ -> resp ^. W.responseStatus == ok200
-    RetrieveItems _ -> BatchTable (fromInteger $ fromMaybe err t) (view TB.table is)
+    RetrieveItems _ -> PocketItemBatch (fromInteger $ fromMaybe err t) is
       where is = resp ^.. W.responseBody . key "list" . members . _JSON
             t = resp ^? W.responseBody . key "since" . _Integral
             err = error "Result did not contain a timestamp"
