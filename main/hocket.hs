@@ -1,13 +1,12 @@
 {-# LANGUAGE OverloadedStrings #-}
 {-# LANGUAGE ViewPatterns #-}
-{-# LANGUAGE GADTs #-}
 {-# LANGUAGE TemplateHaskell #-}
 
 import           Control.Applicative ((<*>), pure)
 import           Control.Concurrent (forkIO, MVar, takeMVar, readMVar, putMVar, newMVar, swapMVar, modifyMVar_)
 import           Control.Concurrent.Async (async, Async, poll, cancel)
 import           Control.Exception (try)
-import           Control.Lens (view, _Right, preview, preview, act, non, from)
+import           Control.Lens (_Right, act, non, preview, view)
 import           Control.Lens.Action (perform)
 import           Control.Lens.Operators
 import           Control.Lens.TH
