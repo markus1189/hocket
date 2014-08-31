@@ -37,7 +37,7 @@ library
                      , tables >= 0.4 && < 0.5
 
 executable hocket
-  ghc-options:         -Wall -O2
+  ghc-options:         -Wall -O2 -Werror
   main-is:             hocket.hs
   hs-source-dirs:      main
   build-depends:       ConfigFile >= 1.1.2 && < 1.2
