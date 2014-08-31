@@ -5,8 +5,6 @@ module GUI ( newList'
            , newEditDialog
            , listItems
            , addToListSortedBy
-           , addToFront
-           , addToBack
            , boldBlackOnOrange
 
            , EditDialog
@@ -78,15 +76,6 @@ listItems lst = do
   n <- W.getListSize lst
   catMaybes <$> for [0..(n-1)] getItem
   where getItem i = W.getListItem lst i <&> preview (_Just . _1)
-
-const2 :: a -> b -> c -> a
-const2 x = const . const x
-
-addToFront :: Show b => (a -> IO (Widget b)) -> Widget (List a b) -> a -> IO ()
-addToFront = addToListSortedBy (const2 LT)
-
-addToBack :: Show b => (a -> IO (Widget b)) -> Widget (List a b) -> a -> IO ()
-addToBack = addToListSortedBy (const2 GT)
 
 addToListSortedBy :: Show b =>
                      (a -> a -> Ordering)
