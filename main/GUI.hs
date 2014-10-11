@@ -46,6 +46,7 @@ newList' focus normal = do
   W.setFocusAttribute w focus
   W.setNormalAttribute w normal
   w `W.onKeyPressed` listWidgetVIKeys
+  w `W.onKeyPressed` listWidgetEmacsKeys
   return w
 
 newEditDialog :: IO (EditDialog b)
@@ -60,6 +61,14 @@ newEditDialog = do
 
 keepCurrent :: Attr
 keepCurrent = V.Attr V.KeepCurrent V.KeepCurrent V.KeepCurrent
+
+listWidgetEmacsKeys :: Widget (List a b) -> Key -> [Modifier] -> IO Bool
+listWidgetEmacsKeys this key _ = case key of
+  (V.KASCII 'n') -> W.scrollDown this >> return True
+  (V.KASCII 'p') -> W.scrollUp this >> return True
+  (V.KASCII '<') -> W.scrollToBeginning this >> return True
+  (V.KASCII '>') -> W.scrollToEnd this >> return True
+  _ -> return False
 
 listWidgetVIKeys :: Widget (List a b) -> Key -> [Modifier] -> IO Bool
 listWidgetVIKeys this key _ = case key of
