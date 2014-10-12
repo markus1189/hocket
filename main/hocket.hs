@@ -1,7 +1,6 @@
 {-# LANGUAGE OverloadedStrings #-}
 {-# LANGUAGE ViewPatterns #-}
 {-# LANGUAGE TemplateHaskell #-}
-
 import           Control.Applicative ((<*>), pure)
 import           Control.Concurrent (forkIO, MVar, takeMVar, readMVar, putMVar, newMVar, swapMVar, modifyMVar_)
 import           Control.Concurrent.Async (async, Async, poll, cancel)
@@ -278,6 +277,7 @@ createGUI shCmd cred = do
   gui <- HocketGUI <$> newList' focusedAttr normal
                    <*> newList' focusedAttr normal
                    <*> (plainText . T.intercalate " | " $ [ "q:Quit"
+                                                          , "Q:Force Quit"
                                                           , "d:Shift item"
                                                           , "D:Shift all"
                                                           , "u:Update"
@@ -344,7 +344,10 @@ createGUI shCmd cred = do
     displayMainGui
 
   fg `onKeyPressed` \_ k _ -> case k of
-    (KASCII 'q') -> exitSuccess
+    (KASCII 'q') -> do size <- gui ^. toArchiveLst & getListSize
+                       when (size == 0) exitSuccess
+                       return True
+    (KASCII 'Q') -> exitSuccess
     (KASCII 'u') -> retrieveNewItems gui >> return True
     (KASCII 'A') -> executeArchiveAction gui >> return True
     _ -> return False
