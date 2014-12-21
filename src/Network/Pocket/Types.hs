@@ -46,6 +46,7 @@ module Network.Pocket.Types (
   idEq,
 
   PocketItemId (..),
+  ItemStatus (..),
   BatchAction (..),
   _Archive,
   _UnArchive,

@@ -1,6 +1,7 @@
 {-# LANGUAGE OverloadedStrings #-}
 {-# LANGUAGE ViewPatterns #-}
 {-# LANGUAGE TemplateHaskell #-}
+{-# LANGUAGE TupleSections #-}
 import           Control.Applicative ((<*>), pure)
 import           Control.Concurrent (forkIO, MVar, takeMVar, readMVar, putMVar, newMVar, swapMVar, modifyMVar_)
 import           Control.Concurrent.Async (async, Async, poll, cancel)
@@ -14,11 +15,11 @@ import           Control.Monad.Error (runErrorT)
 import           Control.Monad.IO.Class (liftIO)
 import           Data.ConfigFile
 import           Data.Default
-import           Data.Foldable (traverse_, for_, Foldable, foldr')
+import           Data.Foldable (traverse_, for_, Foldable, foldr', find)
 import qualified Data.Function as F
 import           Data.Functor ((<$>))
-import           Data.List (deleteFirstsBy)
-import           Data.Maybe (isNothing)
+import           Data.List (deleteFirstsBy, partition)
+import           Data.Maybe (isNothing, catMaybes)
 import           Data.Table (Table)
 import qualified Data.Table as TB
 import           Data.Text (Text)
@@ -26,7 +27,7 @@ import qualified Data.Text as T
 import           Data.Time.Clock.POSIX (POSIXTime, posixSecondsToUTCTime)
 import           Data.Time.Format
 import           Data.Time.LocalTime (LocalTime(..), utcToLocalTime, getCurrentTimeZone)
-import           Data.Traversable (Traversable)
+import           Data.Traversable (Traversable, for)
 import           Graphics.Vty
 import           Graphics.Vty.Widgets.All hiding (Table)
 import           Network.HTTP.Client (HttpException)
@@ -45,6 +46,8 @@ import           Network.Pocket.Retrieve ( RetrieveConfig
                                          , retrieveSort
                                          , RetrieveSort(NewestFirst)
                                          , retrieveSince
+                                         , RetrieveState(All)
+                                         , retrieveState
                                          )
 import           Printing
 
@@ -63,7 +66,9 @@ consumeBatch bt1@(HocketData maybeTs1 tb1) (PocketItemBatch ts2 tb2) =
     Nothing -> HocketData (Just ts2) (tb1 `TB.union` view TB.table tb2)
     Just ts1 -> if ts1 >= ts2
                 then bt1
-                else HocketData (Just ts2) (tb1 `TB.union` view TB.table tb2)
+                else HocketData (Just ts2) (withoutArchived `TB.union` TB.fromList unreadItems)
+  where (unreadItems, archivedOrDeleted) = partition ((== Normal) . view status) tb2
+        withoutArchived = tb1 `TB.difference` TB.fromList archivedOrDeleted
 
 data HocketGUI = HocketGUI { _unreadLst :: Widget (List PocketItem FormattedText)
                            , _toArchiveLst :: Widget (List PocketItem FormattedText)
@@ -205,10 +210,17 @@ updateTimeStamp gui = do
 defaultRetrieval :: RetrieveConfig
 defaultRetrieval = def & retrieveSort ?~ NewestFirst & retrieveCount .~ NoLimit
 
+retrievalConfig :: HocketGUI -> IO RetrieveConfig
+retrievalConfig gui = do
+  isFirstRetrieval <- isNothing <$> lastRetrieval gui
+  return (if isFirstRetrieval
+             then defaultRetrieval
+             else defaultRetrieval & retrieveState .~ All)
+
 retrieveNewItems :: HocketGUI -> IO ()
 retrieveNewItems gui = tryAsync gui $ do
   lastRetrieved <- lastRetrieval gui
-  let retCfg = defaultRetrieval & retrieveSince .~ lastRetrieved
+  retCfg <- retrievalConfig gui <&> retrieveSince .~ lastRetrieved
   updateStatusBar gui "Updating"
   oldPIs <- (++) <$> listItems (view unreadLst gui)
                  <*> listItems (view toArchiveLst gui)
@@ -218,16 +230,27 @@ retrieveNewItems gui = tryAsync gui $ do
     Right batch -> do
       modifyData gui (`consumeBatch` batch)
       updateTimeStamp gui
-      let pis = view batchItems batch
-      schedule . traverse_ (sortedAddLstItem (view unreadLst gui)) $ pis \\\ oldPIs
+      let (unreadPis, archivedOrDeleted) =
+            partition ((== Normal) . view status) $ view batchItems batch
+      schedule $ do
+        traverse_ (removeItemFromLstBy idEq (view unreadLst gui)) archivedOrDeleted
+        traverse_ (sortedAddLstItem (view unreadLst gui)) $ unreadPis \\\ oldPIs
       updateStatusBar gui ""
     Left _ -> updateStatusBar gui "Updating failed"
   where (\\\) = deleteFirstsBy idEq
 
+removeItemFromLstBy :: (a -> a -> Bool) -> Widget (List a b) -> a -> IO ()
+removeItemFromLstBy eq w e = do
+  maybePos <- listFindFirstBy eq w e
+  traverse_ (removeFromList w) maybePos
+
+listFindFirstBy :: (a -> a -> Bool) -> Widget (List a b) -> a -> IO (Maybe Int)
+listFindFirstBy eq w e = do size <- getListSize w
+                            itms <- catMaybes <$> for [0..size-1] (\i -> fmap (i,) <$> getListItem w i)
+                            return $ fst <$> find (eq e . fst . snd) itms
+
 removeItemFromLst :: Eq a => Widget (List a b) -> a -> IO ()
-removeItemFromLst lst itm = do
-  maybePos <- listFindFirst lst itm
-  traverse_ (removeFromList lst) maybePos
+removeItemFromLst = removeItemFromLstBy (==)
 
 executeRenameSelected :: HocketGUI -> Widget (List PocketItem b) -> Text -> IO ()
 executeRenameSelected gui w newTxt = withSelection w $ \_ sel -> tryAsync gui $ do
@@ -355,7 +378,7 @@ createGUI shCmd cred = do
   return (gui,c)
 
 vty :: ShellCommand -> PocketCredentials -> [PocketItem] -> IO ()
-vty cmd cred  pis = do
+vty cmd cred pis = do
   (gui,c) <- createGUI cmd cred
   insertPocketItems (view unreadLst gui) pis
 
