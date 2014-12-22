@@ -19,6 +19,11 @@ with pocket, currently supported features:
 
 Hocket can be installed using `cabal`.
 
+Arguments to the executable:
+
+- `gui` - starts the gui
+- add <url> - adds the <url> to your pocket reading list and quits
+
 ## Authentication ##
 
 Hocket requires a `hocket.cfg` file to authenticate you. Example:
