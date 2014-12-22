@@ -234,6 +234,7 @@ retrieveNewItems gui = tryAsync gui $ do
             partition ((== Normal) . view status) $ view batchItems batch
       schedule $ do
         traverse_ (removeItemFromLstBy idEq (view unreadLst gui)) archivedOrDeleted
+        traverse_ (removeItemFromLstBy idEq (view toArchiveLst gui)) archivedOrDeleted
         traverse_ (sortedAddLstItem (view unreadLst gui)) $ unreadPis \\\ oldPIs
       updateStatusBar gui ""
     Left _ -> updateStatusBar gui "Updating failed"
