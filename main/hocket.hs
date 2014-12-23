@@ -2,11 +2,12 @@
 {-# LANGUAGE ViewPatterns #-}
 {-# LANGUAGE TemplateHaskell #-}
 {-# LANGUAGE TupleSections #-}
+import           Data.Monoid ((<>))
 import           Control.Applicative ((<*>), pure)
 import           Control.Concurrent (forkIO, MVar, takeMVar, readMVar, putMVar, newMVar, swapMVar, modifyMVar_)
 import           Control.Concurrent.Async (async, Async, poll, cancel)
 import           Control.Exception (try)
-import           Control.Lens (_Right, act, non, preview, view)
+import           Control.Lens (_Right, act, non, preview, view, folded, toListOf)
 import           Control.Lens.Action (perform)
 import           Control.Lens.Operators
 import           Control.Lens.TH
@@ -48,6 +49,8 @@ import           Network.Pocket.Retrieve ( RetrieveConfig
                                          , retrieveSince
                                          , RetrieveState(All)
                                          , retrieveState
+                                         , RetrieveDetailType(Complete)
+                                         , retrieveDetailType
                                          )
 import           Printing
 
@@ -136,10 +139,16 @@ shortenUrl (URL (T.pack -> t)) = T.take 60 . cleanUrl $ t
         cleanUrl = tryStripPrefix "www." . tryStripPrefix "http://" . tryStripPrefix "https://"
 
 displayText :: PocketItem -> Text
-displayText i = bestTitle i `T.append`
-                " " `T.append`
-                magicMarker `T.append`
-                shortenUrl (view resolvedUrl i)
+displayText i = T.concat [formatTags (view itemTags i)
+                         ,bestTitle i
+                         ," "
+                         ,magicMarker
+                         ,shortenUrl (view resolvedUrl i)]
+
+formatTags :: [Tag] -> Text
+formatTags tags = if null tags
+  then ""
+  else "" <> (T.intercalate "," $ toListOf (folded . tagName) tags) <> " | "
 
 alignRightAfter :: Text -> Formatter
 alignRightAfter marker = Formatter $ \(DisplayRegion w _) ts -> do
@@ -208,7 +217,9 @@ updateTimeStamp gui = do
     Just ts -> schedule $ setText (view timeStamp gui) =<< (T.pack <$> formatPosix ts)
 
 defaultRetrieval :: RetrieveConfig
-defaultRetrieval = def & retrieveSort ?~ NewestFirst & retrieveCount .~ NoLimit
+defaultRetrieval = def & retrieveSort ?~ NewestFirst
+                       & retrieveCount .~ NoLimit
+                       & retrieveDetailType ?~ Complete
 
 retrievalConfig :: HocketGUI -> IO RetrieveConfig
 retrievalConfig gui = do
