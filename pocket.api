@@ -1,0 +1,15 @@
+# -*- restclient -*-
+
+:consumer-key := (nth 1 (s-split "\"" (nth 1 (s-lines (f-read "hocket.cfg")))))
+:access-token := (nth 1 (s-split "\"" (nth 2 (s-lines (f-read "hocket.cfg")))))
+
+# list items
+GET https://getpocket.com/v3/get
+Content-Type: application/json
+
+{
+ "consumer_key": ":consumer-key",
+ "access_token": ":access-token",
+ "count": 10,
+ "detailType": "complete"
+}
