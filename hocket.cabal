@@ -22,19 +22,23 @@ library
                      , Network.Pocket.Types
                      , Printing
   Build-depends:       ConfigFile >= 1.1.2 && < 1.2
-                     , aeson >= 0.7 && < 0.8
+                     , aeson >= 0.7 && < 0.9
+                     , attoparsec
                      , base >= 4 && < 5
+                     , bytestring
                      , data-default >= 0.5 && < 0.6
-                     , http-client >= 0.3 && < 0.4
+                     , http-client >= 0.3 && < 0.5
                      , http-types >= 0.8 && < 0.9
-                     , lens >= 4.3 && < 4.4
+                     , lens >= 4.4 && < 5
+                     , lens-aeson >= 1.0 && < 1.1
                      , mtl >= 2.0 && < 2.2
                      , nats >= 0.2 && < 0.3
                      , tables >= 0.4 && < 0.5
                      , text >= 1.1 && < 1.2
                      , time >= 1.4 && < 1.5
                      , transformers >= 0.3 && < 0.4
-                     , wreq >= 0.1 && < 0.2
+                     , unordered-containers >= 0.2 && < 0.3
+                     , wreq >= 0.3 && < 0.4
 
 executable hocket
   ghc-options:         -Wall -O2 -Werror
@@ -43,10 +47,11 @@ executable hocket
   build-depends:       ConfigFile >= 1.1.2 && < 1.2
                      , async >= 2.0 && < 2.1
                      , base >= 4 && < 5
+                     , bytestring
                      , data-default >= 0.5 && < 0.6
                      , hocket
-                     , http-client >= 0.3 && < 0.4
-                     , lens >= 4.3 && < 4.4
+                     , http-client >= 0.3 && < 0.5
+                     , lens >= 4.4 && < 5
                      , mtl >= 2.0 && < 2.2
                      , nats >= 0.2 && < 0.3
                      , old-locale >= 1.0 && < 1.1

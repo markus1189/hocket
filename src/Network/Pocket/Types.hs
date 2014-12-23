@@ -43,6 +43,7 @@ module Network.Pocket.Types (
   timeRead,
   timeUpdated,
   wordCount,
+  itemTags,
   idEq,
 
   PocketItemId (..),
@@ -61,6 +62,10 @@ module Network.Pocket.Types (
   PocketItemBatch(PocketItemBatch),
   batchItems,
   batchTS,
+
+  Tag (Tag),
+  tagName,
+  tagId
 ) where
 
 import           Control.Applicative ((<$>),(<*>), empty, pure, Alternative)
@@ -69,13 +74,16 @@ import           Control.Lens.TH
 import           Control.Monad (mzero)
 import           Control.Monad.Trans.Reader (ReaderT, runReaderT)
 import           Data.Aeson
+import           Data.Aeson.Types (Parser)
 import           Data.Default
 import           Data.Function (on)
+import qualified Data.HashMap.Strict as Map
 import           Data.Table hiding (empty)
 import           Data.Text (Text)
 import qualified Data.Text as T
 import           Data.Time.Clock
 import           Data.Time.Clock.POSIX
+import           Data.Traversable (traverse)
 import           GHC.Generics
 import           Network.Wreq (FormValue, FormParam((:=)))
 
@@ -160,6 +168,19 @@ instance ToJSON BatchAction where
                             , "item_id" .= s ""
                             , "url" .= url]
 
+data Tag = Tag { _tagName :: !Text, _tagId :: !Text } deriving (Eq,Show)
+makeLenses ''Tag
+
+instance ToJSON Tag where
+  toJSON (Tag name ident) = object [ "tag" .= name, "item_id" .= ident]
+
+instance FromJSON Tag where
+  parseJSON (Object o) = Tag <$> o .: "tag" <*> o .: "item_id"
+  parseJSON _ = mzero
+
+parseTags :: Maybe Object -> Parser [Tag]
+parseTags = maybe (return []) (traverse parseJSON . Map.elems)
+
 data PocketItem =
   PocketItem { _excerpt :: Text
              , _favorite :: !Bool
@@ -180,6 +201,7 @@ data PocketItem =
              , _timeRead :: !POSIXTime
              , _timeUpdated :: !POSIXTime
              , _wordCount :: !Int
+             , _itemTags :: [Tag]
              } deriving (Show,Eq,Generic)
 makeLenses ''PocketItem
 
@@ -229,6 +251,7 @@ instance FromJSON PocketItem where
                      <*> (parseTime <$> o .: "time_read")
                      <*> (parseTime <$> o .: "time_updated")
                      <*> (read <$> (o .: "word_count"))
+                     <*> ((o .:? "tags") >>= parseTags)
   parseJSON _ = mzero
 
 instance ToJSON PocketItem
