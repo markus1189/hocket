@@ -316,6 +316,7 @@ createGUI shCmd cred = do
                                                           , "d:Shift item"
                                                           , "D:Shift all"
                                                           , "u:Update"
+                                                          , "U:Clear & update"
                                                           , "A:Archive pending"
                                                           , "C:Cancel"
                                                           , "SPC:Launch"
@@ -384,6 +385,11 @@ createGUI shCmd cred = do
                        return True
     (KASCII 'Q') -> exitSuccess
     (KASCII 'u') -> retrieveNewItems gui >> return True
+    (KASCII 'U') -> do
+      clearList (view unreadLst gui)
+      clearList (view toArchiveLst gui)
+      modifyData gui (dataTime .~ Nothing)
+      retrieveNewItems gui >> return True
     (KASCII 'A') -> executeArchiveAction gui >> return True
     _ -> return False
 
