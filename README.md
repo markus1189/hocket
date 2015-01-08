@@ -24,7 +24,7 @@ Hocket can be installed using `cabal`.
 Arguments to the executable:
 
 - `gui` - starts the gui
-- add <url> - adds the <url> to your pocket reading list and quits
+- `add <url>` - adds `<url>` to your pocket reading list and quits
 
 ## Authentication ##
 
