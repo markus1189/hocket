@@ -2,6 +2,8 @@
 
 Hocket - The Haskell [pocket](http://getpocket.com/) client
 
+[![Build Status](https://travis-ci.org/markus1189/hocket.png?branch=master)](https://travis-ci.org/markus1189/hocket)
+
 ## About ##
 
 Hocket is a minimalistic [pocket](http://getpocket.com/) client that
