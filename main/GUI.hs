@@ -38,11 +38,11 @@ makeLenses ''EditDialog
 
 boldBlackOnOrange :: Attr
 boldBlackOnOrange = realBlack `W.on` V.Color240 147 `W.mergeAttr` W.style V.bold
-  where realBlack = V.rgb_color (0::Int) 0 0
+  where realBlack = V.rgbColor (0::Int) 0 0
 
 newList' :: Show b => Attr -> Attr -> IO (Widget (List a b))
 newList' focus normal = do
-  w <- W.newList keepCurrent 1
+  w <- W.newList 1
   W.setFocusAttribute w focus
   W.setNormalAttribute w normal
   w `W.onKeyPressed` listWidgetVIKeys
@@ -59,25 +59,22 @@ newEditDialog = do
   m <- newMVar Nothing
   return $ EditDialog dlg e fg m
 
-keepCurrent :: Attr
-keepCurrent = V.Attr V.KeepCurrent V.KeepCurrent V.KeepCurrent
-
 listWidgetEmacsKeys :: Widget (List a b) -> Key -> [Modifier] -> IO Bool
 listWidgetEmacsKeys this key _ = case key of
-  (V.KASCII 'n') -> W.scrollDown this >> return True
-  (V.KASCII 'p') -> W.scrollUp this >> return True
-  (V.KASCII '<') -> W.scrollToBeginning this >> return True
-  (V.KASCII '>') -> W.scrollToEnd this >> return True
+  (V.KChar 'n') -> W.scrollDown this >> return True
+  (V.KChar 'p') -> W.scrollUp this >> return True
+  (V.KChar '<') -> W.scrollToBeginning this >> return True
+  (V.KChar '>') -> W.scrollToEnd this >> return True
   _ -> return False
 
 listWidgetVIKeys :: Widget (List a b) -> Key -> [Modifier] -> IO Bool
 listWidgetVIKeys this key _ = case key of
-  (V.KASCII 'j') -> W.scrollDown this >> return True
-  (V.KASCII 'k') -> W.scrollUp this >> return True
-  (V.KASCII 'J') -> replicateM_ 3 (W.scrollDown this) >> return True
-  (V.KASCII 'K') -> replicateM_ 3 (W.scrollUp this) >> return True
-  (V.KASCII 'g') -> W.scrollToBeginning this >> return True
-  (V.KASCII 'G') -> W.scrollToEnd this >> return True
+  (V.KChar 'j') -> W.scrollDown this >> return True
+  (V.KChar 'k') -> W.scrollUp this >> return True
+  (V.KChar 'J') -> replicateM_ 3 (W.scrollDown this) >> return True
+  (V.KChar 'K') -> replicateM_ 3 (W.scrollUp this) >> return True
+  (V.KChar 'g') -> W.scrollToBeginning this >> return True
+  (V.KChar 'G') -> W.scrollToEnd this >> return True
   _ -> return False
 
 listItems :: Widget (List a b) -> IO [a]

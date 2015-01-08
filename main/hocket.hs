@@ -151,12 +151,12 @@ formatTags tags = if null tags
   else "" <> (T.intercalate "," $ toListOf (folded . tagName) tags) <> " | "
 
 alignRightAfter :: Text -> Formatter
-alignRightAfter marker = Formatter $ \(DisplayRegion w _) ts -> do
+alignRightAfter marker = Formatter $ \(w, _) ts -> do
   let currentText = TT.serialize ts
       parts = T.splitOn marker currentText
       neededSpaces = 0 `max` (w - fromIntegral (T.length currentText - T.length marker))
       sp = T.replicate (fromIntegral neededSpaces) " "
-      newText = flip TT.tokenize def_attr $ T.intercalate sp parts
+      newText = flip TT.tokenize defAttr $ T.intercalate sp parts
   return newText
 
 sortedAddLstItem :: Widget (List PocketItem FormattedText) -> PocketItem -> IO ()
@@ -380,17 +380,18 @@ createGUI shCmd cred = do
     displayMainGui
 
   fg `onKeyPressed` \_ k _ -> case k of
-    (KASCII 'q') -> do size <- gui ^. toArchiveLst & getListSize
-                       when (size == 0) exitSuccess
-                       return True
-    (KASCII 'Q') -> exitSuccess
-    (KASCII 'u') -> retrieveNewItems gui >> return True
-    (KASCII 'U') -> do
+    (KChar 'q') -> do
+      size <- gui ^. toArchiveLst & getListSize
+      when (size == 0) exitSuccess
+      return True
+    (KChar 'Q') -> exitSuccess
+    (KChar 'u') -> retrieveNewItems gui >> return True
+    (KChar 'U') -> do
       clearList (view unreadLst gui)
       clearList (view toArchiveLst gui)
       modifyData gui (dataTime .~ Nothing)
       retrieveNewItems gui >> return True
-    (KASCII 'A') -> executeArchiveAction gui >> return True
+    (KChar 'A') -> executeArchiveAction gui >> return True
     _ -> return False
 
   return (gui,c)
@@ -405,16 +406,16 @@ vty cmd cred pis = do
     x `onKeyPressed` lstKeyPressedHandler gui
 
   view unreadLst gui `onKeyPressed` \this key _ -> case key of
-    (KASCII 'd') -> shiftSelected this (view toArchiveLst gui) >> return True
-    (KASCII 'D') -> do
+    (KChar 'd') -> shiftSelected this (view toArchiveLst gui) >> return True
+    (KChar 'D') -> do
       insertPocketItems (view toArchiveLst gui) =<< extractAndClear this
       focusNext (view mainFocusGroup gui)
       return True
     _ -> return False
 
   view toArchiveLst gui `onKeyPressed` \this key _ -> case key of
-    (KASCII 'd') -> shiftSelected this (view unreadLst gui) >> return True
-    (KASCII 'D') -> do
+    (KChar 'd') -> shiftSelected this (view unreadLst gui) >> return True
+    (KChar 'D') -> do
       traverse_ (sortedAddLstItem (view unreadLst gui)) =<< extractAndClear this
       focusNext (view mainFocusGroup gui)
       return True
@@ -430,8 +431,8 @@ lstKeyPressedHandler :: HocketGUI
                      -> t
                      -> IO Bool
 lstKeyPressedHandler gui this key _ = case key of
-  (KASCII 'C') -> abortAsync gui >> return True
-  (KASCII ' ') -> do
+  (KChar 'C') -> abortAsync gui >> return True
+  (KChar ' ') -> do
     void . forkIO $ do
       maybeSel <- getSelected this
       traverse_ (browseItem (view launchCommand gui) . view givenUrl . fst . snd) maybeSel
@@ -466,7 +467,7 @@ setUpEditHandler :: EditDialog FormattedText
                  -> IO a
                  -> IO ()
 setUpEditHandler e l switch = l `onKeyPressed` \_ k _  -> case k of
-  (KASCII 'e') -> do
+  (KChar 'e') -> do
     withSelection l $ \_ sel -> do
       let edit = e ^. editDlgWidget
       setEditText edit (bestTitle sel)
