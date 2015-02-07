@@ -26,15 +26,14 @@ import qualified Data.Table as TB
 import           Data.Text (Text)
 import qualified Data.Text as T
 import           Data.Time.Clock.POSIX (POSIXTime, posixSecondsToUTCTime)
-import           Data.Time.Format hiding (defaultTimeLocale)
+import           Data.Time.Format 
 import           Data.Time.LocalTime (LocalTime(..), utcToLocalTime, getCurrentTimeZone)
 import           Data.Traversable (Traversable, for)
 import           Graphics.Vty
-import           Graphics.Vty.Widgets.All hiding (Table)
+import           Graphics.Vty.Widgets.All hiding (Table, listFindFirstBy)
 import           Network.HTTP.Client (HttpException)
 import           System.Environment (getArgs)
 import           System.Exit (exitSuccess, exitWith, ExitCode(ExitFailure))
-import           System.Locale (defaultTimeLocale)
 import           System.Process
 import           Text.Printf (printf)
 import qualified Text.Trans.Tokenize as TT
