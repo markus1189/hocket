@@ -13,7 +13,7 @@ import           Control.Lens.Action (perform, act, (^!))
 import           Control.Lens.Operators
 import           Control.Lens.TH
 import           Control.Monad (join, void, when)
-import           Control.Monad.Except (runExceptT)
+import           Control.Monad.Error (runErrorT)
 import           Control.Monad.IO.Class (liftIO)
 import           Data.ConfigFile
 import           Data.Default
@@ -115,7 +115,7 @@ main = do
 
 readFromConfig :: FilePath -> IO (Maybe (PocketCredentials, ShellCommand))
 readFromConfig path = do
-  eitherErrorTuple <- runExceptT $ do
+  eitherErrorTuple <- runErrorT $ do
     cp <- join $ liftIO $ readfile emptyCP path
     consumerKey <- get cp "Credentials" "consumer_key"
     accessToken <- get cp "Credentials" "access_token"
