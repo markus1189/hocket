@@ -26,6 +26,7 @@ import           Data.Table (Table)
 import qualified Data.Table as TB
 import           Data.Text (Text)
 import qualified Data.Text as T
+import           Data.Time.Format (formatTime)
 import           Data.Time.Clock.POSIX (POSIXTime, posixSecondsToUTCTime)
 import           Data.Time.LocalTime (LocalTime(..), utcToLocalTime, getCurrentTimeZone)
 import           Data.Traversable (Traversable, for)
@@ -39,9 +40,9 @@ import           Text.Printf (printf)
 import qualified Text.Trans.Tokenize as TT
 
 #if MIN_VERSION_time(1,5,0)
-import Data.Time.Format (defaultTimeLocale)
+import           Data.Time.Format (defaultTimeLocale)
 #else
-import System.Locale (defaultTimeLocale)
+import           System.Locale (defaultTimeLocale)
 #endif
 
 import           GUI
