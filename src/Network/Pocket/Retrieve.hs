@@ -32,7 +32,6 @@ import Data.Text (Text)
 import Data.Time.Clock.POSIX (POSIXTime)
 import Network.Wreq (FormParam((:=)))
 import Network.Wreq.Types (FormValue(..))
-import Numeric.Natural
 
 class AsFormParams a where
   toFormParams :: a -> [FormParam]
@@ -74,7 +73,7 @@ instance FormValue RetrieveDetailType where
   renderFormValue Simple = renderFormValue . s $ "simple"
   renderFormValue Complete = renderFormValue . s $ "complete"
 
-data RetrieveCount = Count Natural | CountOffset Natural Natural | NoLimit
+data RetrieveCount = Count Int | CountOffset Int Int | NoLimit
 instance AsFormParams RetrieveCount where
   toFormParams (Count i) = ["count" := show i]
   toFormParams (CountOffset c o) = ["count" := show c, "offset" := show o]
