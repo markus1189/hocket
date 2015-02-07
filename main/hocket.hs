@@ -7,8 +7,8 @@ import           Control.Applicative ((<*>), pure)
 import           Control.Concurrent (forkIO, MVar, takeMVar, readMVar, putMVar, newMVar, swapMVar, modifyMVar_)
 import           Control.Concurrent.Async (async, Async, poll, cancel)
 import           Control.Exception (try)
-import           Control.Lens (_Right, act, non, preview, view, folded, toListOf)
-import           Control.Lens.Action (perform)
+import           Control.Lens (_Right, non, preview, view, folded, toListOf)
+import           Control.Lens.Action (perform, act, (^!))
 import           Control.Lens.Operators
 import           Control.Lens.TH
 import           Control.Monad (join, void, when)
@@ -26,7 +26,7 @@ import qualified Data.Table as TB
 import           Data.Text (Text)
 import qualified Data.Text as T
 import           Data.Time.Clock.POSIX (POSIXTime, posixSecondsToUTCTime)
-import           Data.Time.Format
+import           Data.Time.Format hiding (defaultTimeLocale)
 import           Data.Time.LocalTime (LocalTime(..), utcToLocalTime, getCurrentTimeZone)
 import           Data.Traversable (Traversable, for)
 import           Graphics.Vty
