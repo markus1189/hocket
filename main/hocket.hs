@@ -3,8 +3,23 @@
 {-# LANGUAGE ViewPatterns #-}
 {-# LANGUAGE TemplateHaskell #-}
 {-# LANGUAGE TupleSections #-}
-import           Data.Monoid ((<>))
+#if __GLASGOW_HASKELL__ >= 710
+
+import           Control.Monad.Except (runExceptT)
+import           Data.Foldable (traverse_, for_, foldr', find)
+import           Data.Time.Format (defaultTimeLocale)
+import           Data.Traversable (for)
+
+#else
+
 import           Control.Applicative ((<*>), pure)
+import           Control.Monad.Error (runErrorT)
+import           Data.Foldable (traverse_, for_, Foldable, foldr', find)
+import           Data.Traversable (Traversable, for)
+import           System.Locale (defaultTimeLocale)
+
+#endif
+
 import           Control.Concurrent (forkIO, MVar, takeMVar, readMVar, putMVar, newMVar, swapMVar, modifyMVar_)
 import           Control.Concurrent.Async (async, Async, poll, cancel)
 import           Control.Exception (try)
@@ -13,37 +28,29 @@ import           Control.Lens.Action (perform, act, (^!))
 import           Control.Lens.Operators
 import           Control.Lens.TH
 import           Control.Monad (join, void, when)
-import           Control.Monad.Error (runErrorT)
 import           Control.Monad.IO.Class (liftIO)
 import           Data.ConfigFile
 import           Data.Default
-import           Data.Foldable (traverse_, for_, Foldable, foldr', find)
 import qualified Data.Function as F
 import           Data.Functor ((<$>))
 import           Data.List (deleteFirstsBy, partition)
 import           Data.Maybe (isNothing, catMaybes)
+import           Data.Monoid ((<>))
 import           Data.Table (Table)
 import qualified Data.Table as TB
 import           Data.Text (Text)
 import qualified Data.Text as T
-import           Data.Time.Format (formatTime)
 import           Data.Time.Clock.POSIX (POSIXTime, posixSecondsToUTCTime)
+import           Data.Time.Format (formatTime)
 import           Data.Time.LocalTime (LocalTime(..), utcToLocalTime, getCurrentTimeZone)
-import           Data.Traversable (Traversable, for)
 import           Graphics.Vty
-import           Graphics.Vty.Widgets.All hiding (Table, listFindFirstBy)
+import           Graphics.Vty.Widgets.All hiding (Table)
 import           Network.HTTP.Client (HttpException)
 import           System.Environment (getArgs)
 import           System.Exit (exitSuccess, exitWith, ExitCode(ExitFailure))
 import           System.Process
 import           Text.Printf (printf)
 import qualified Text.Trans.Tokenize as TT
-
-#if MIN_VERSION_time(1,5,0)
-import           Data.Time.Format (defaultTimeLocale)
-#else
-import           System.Locale (defaultTimeLocale)
-#endif
 
 import           GUI
 import           Network.Pocket
@@ -115,7 +122,11 @@ main = do
 
 readFromConfig :: FilePath -> IO (Maybe (PocketCredentials, ShellCommand))
 readFromConfig path = do
+#if __GLASGOW_HASKELL__ >= 710
+  eitherErrorTuple <- runExceptT $ do
+#else
   eitherErrorTuple <- runErrorT $ do
+#endif
     cp <- join $ liftIO $ readfile emptyCP path
     consumerKey <- get cp "Credentials" "consumer_key"
     accessToken <- get cp "Credentials" "access_token"
@@ -259,7 +270,7 @@ retrieveNewItems gui = tryAsync gui $ do
 
 removeItemFromLstBy :: (a -> a -> Bool) -> Widget (List a b) -> a -> IO ()
 removeItemFromLstBy eq w e = do
-  maybePos <- listFindFirstBy eq w e
+  maybePos <- Main.listFindFirstBy eq w e
   traverse_ (removeFromList w) maybePos
 
 listFindFirstBy :: (a -> a -> Bool) -> Widget (List a b) -> a -> IO (Maybe Int)

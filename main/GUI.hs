@@ -37,8 +37,9 @@ data EditDialog b = EditDialog { _editDlgDialog :: Dialog
 makeLenses ''EditDialog
 
 boldBlackOnOrange :: Attr
-boldBlackOnOrange = realBlack `W.on` V.rgbColor 215 135 0 `W.mergeAttr` W.style V.bold
-  where realBlack = V.rgbColor (0::Int) 0 0
+boldBlackOnOrange = realBlack `W.on` V.rgbColor 215 135 zero `W.mergeAttr` W.style V.bold
+  where realBlack = V.rgbColor zero zero zero
+        zero = 0 :: Int
 
 newList' :: Show b => Attr -> Attr -> IO (Widget (List a b))
 newList' focus normal = do

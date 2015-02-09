@@ -15,7 +15,7 @@ build-type:          Simple
 cabal-version:       >=1.8
 
 library
-  ghc-options:         -Wall
+  ghc-options:         -Wall -Werror
   hs-source-dirs:      src
   exposed-modules:     Network.Pocket
                      , Network.Pocket.Retrieve
@@ -41,7 +41,7 @@ library
                      , wreq >= 0.3 && < 0.4
 
 executable hocket
-  ghc-options:         -Wall -threaded
+  ghc-options:         -Wall -threaded -Werror
   main-is:             hocket.hs
   hs-source-dirs:      main
   build-depends:       ConfigFile >= 1.1.2 && < 1.2
