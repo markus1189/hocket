@@ -37,14 +37,14 @@ data EditDialog b = EditDialog { _editDlgDialog :: Dialog
 makeLenses ''EditDialog
 
 boldBlackOnOrange :: Attr
-boldBlackOnOrange = realBlack `W.on` V.Color240 147 `W.mergeAttr` W.style V.bold
+boldBlackOnOrange = realBlack `W.on` V.rgbColor 215 135 0 `W.mergeAttr` W.style V.bold
   where realBlack = V.rgbColor (0::Int) 0 0
 
 newList' :: Show b => Attr -> Attr -> IO (Widget (List a b))
 newList' focus normal = do
   w <- W.newList 1
-  W.setFocusAttribute w focus
-  W.setNormalAttribute w normal
+  W.setSelectedFocusedAttr w (Just focus)
+  W.setSelectedUnfocusedAttr w (Just normal)
   w `W.onKeyPressed` listWidgetVIKeys
   w `W.onKeyPressed` listWidgetEmacsKeys
   return w
