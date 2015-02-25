@@ -324,9 +324,8 @@ deleteAll ts table = foldr' TB.delete table ts
 
 createGUI :: ShellCommand -> PocketCredentials -> IO (HocketGUI, Collection)
 createGUI shCmd cred = do
-  let focusedAttr = boldBlackOnOrange
-  gui <- HocketGUI <$> newList' focusedAttr defAttr
-                   <*> newList' focusedAttr defAttr
+  gui <- HocketGUI <$> newList' boldBlackOnOrange (defAttr `withForeColor` white)
+                   <*> newList' boldBlackOnOrange (defAttr `withForeColor` white)
                    <*> (plainText . T.intercalate " | " $ [ "q:Quit"
                                                           , "Q:Force Quit"
                                                           , "d:Shift item"
