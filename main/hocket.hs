@@ -13,7 +13,7 @@ import           Data.Traversable (for)
 #else
 
 import           Control.Applicative ((<*>), pure)
-import           Control.Monad.Error (runErrorT)
+import           Control.Monad.Except (runExceptT)
 import           Data.Foldable (traverse_, for_, Foldable, foldr', find)
 import           Data.Traversable (Traversable, for)
 import           System.Locale (defaultTimeLocale)
@@ -125,7 +125,7 @@ readFromConfig path = do
 #if __GLASGOW_HASKELL__ >= 710
   eitherErrorTuple <- runExceptT $ do
 #else
-  eitherErrorTuple <- runErrorT $ do
+  eitherErrorTuple <- runExceptT $ do
 #endif
     cp <- join $ liftIO $ readfile emptyCP path
     consumerKey <- get cp "Credentials" "consumer_key"
