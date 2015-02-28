@@ -326,17 +326,27 @@ createGUI :: ShellCommand -> PocketCredentials -> IO (HocketGUI, Collection)
 createGUI shCmd cred = do
   gui <- HocketGUI <$> newList' boldBlackOnOrange (defAttr `withForeColor` white)
                    <*> newList' boldBlackOnOrange (defAttr `withForeColor` white)
-                   <*> (plainText . T.intercalate " | " $ [ "q:Quit"
-                                                          , "Q:Force Quit"
-                                                          , "d:Shift item"
-                                                          , "D:Shift all"
-                                                          , "u:Update"
-                                                          , "U:Clear & update"
-                                                          , "A:Archive pending"
-                                                          , "C:Cancel"
-                                                          , "SPC:Launch"
-                                                          , "Enter:Launch & Shift"
-                                                          ])
+                   <*> (plainTextWithAttrs [("q",defAttr `withForeColor` orange)
+                                           ,(":Quit | ",defAttr)
+                                           ,("Q",defAttr `withForeColor` orange)
+                                           ,(":Force Quit | ",defAttr)
+                                           ,("d",defAttr `withForeColor` orange)
+                                           ,(":Shift item | ",defAttr)
+                                           ,("D",defAttr `withForeColor` orange)
+                                           ,(":Shift all | ",defAttr)
+                                           ,("u",defAttr `withForeColor` orange)
+                                           ,(":Update | ",defAttr)
+                                           ,("U",defAttr `withForeColor` orange)
+                                           ,(":Clear & update | ",defAttr)
+                                           ,("A",defAttr `withForeColor` orange)
+                                           ,(":Archive pending | ",defAttr)
+                                           ,("C",defAttr `withForeColor` orange)
+                                           ,(":Cancel | ",defAttr)
+                                           ,("SPC",defAttr `withForeColor` orange)
+                                           ,(":Launch | ",defAttr)
+                                           ,("Enter",defAttr `withForeColor` orange)
+                                           ,(":Launch & Shift",defAttr)
+                                           ])
                    <*> plainText ""
                    <*> plainText "<never>"
                    <*> pure cred

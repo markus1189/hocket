@@ -6,6 +6,7 @@ module GUI ( newList'
            , listItems
            , addToListSortedBy
            , boldBlackOnOrange
+           , orange
 
            , EditDialog
            , editDlgDialog
@@ -36,8 +37,11 @@ data EditDialog b = EditDialog { _editDlgDialog :: Dialog
                                }
 makeLenses ''EditDialog
 
+orange :: V.Color
+orange = V.rgbColor 215 135 (0::Int)
+
 boldBlackOnOrange :: Attr
-boldBlackOnOrange = realBlack `W.on` V.rgbColor 215 135 zero `W.mergeAttr` W.style V.bold
+boldBlackOnOrange = realBlack `W.on` orange `W.mergeAttr` W.style V.bold
   where realBlack = V.rgbColor zero zero zero
         zero = 0 :: Int
 
