@@ -38,7 +38,7 @@ library
                      , time >= 1.4 && < 1.6
                      , transformers >= 0.3 && < 0.5
                      , unordered-containers >= 0.2 && < 0.3
-                     , wreq >= 0.3 && < 0.4
+                     , wreq >= 0.4 && < 0.5
 
 executable hocket
   ghc-options:         -Wall -threaded -Werror
@@ -61,4 +61,4 @@ executable hocket
                      , time >= 1.4 && < 1.6
                      , transformers >= 0.3 && < 0.5
                      , vty >= 4.7 && < 5.3
-                     , vty-ui >= 1.7 && < 1.9
+                     , vty-ui >= 1.7 && < 2.0
