@@ -6,6 +6,7 @@
 {-# LANGUAGE TemplateHaskell #-}
 {-# LANGUAGE DeriveGeneric #-}
 {-# LANGUAGE TypeFamilies #-}
+{-# LANGUAGE CPP #-}
 
 module Network.Pocket.Types (
   ConsumerKey (..),
@@ -68,7 +69,12 @@ module Network.Pocket.Types (
   tagId
 ) where
 
-import           Control.Applicative ((<$>),(<*>), empty, pure, Alternative)
+#if __GLASGOW_HASKELL__ < 710
+import           Control.Applicative ((<$>),(<*>),pure)
+import           Data.Traversable (traverse)
+#endif
+
+import           Control.Applicative (empty, Alternative)
 import           Control.Lens (view)
 import           Control.Lens.TH
 import           Control.Monad (mzero)
@@ -83,7 +89,6 @@ import           Data.Text (Text)
 import qualified Data.Text as T
 import           Data.Time.Clock
 import           Data.Time.Clock.POSIX
-import           Data.Traversable (traverse)
 import           GHC.Generics
 import           Network.Wreq (FormValue, FormParam((:=)))
 

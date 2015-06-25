@@ -4,20 +4,16 @@
 {-# LANGUAGE TemplateHaskell #-}
 {-# LANGUAGE TupleSections #-}
 #if __GLASGOW_HASKELL__ >= 710
-
 import           Control.Monad.Except (runExceptT)
 import           Data.Foldable (traverse_, for_, foldr', find)
 import           Data.Time.Format (defaultTimeLocale)
 import           Data.Traversable (for)
-
 #else
-
-import           Control.Applicative ((<*>), pure)
+import           Control.Applicative ((<*>), pure,(<$>))
 import           Control.Monad.Except (runExceptT)
 import           Data.Foldable (traverse_, for_, Foldable, foldr', find)
 import           Data.Traversable (Traversable, for)
 import           System.Locale (defaultTimeLocale)
-
 #endif
 
 import           Control.Concurrent (forkIO, MVar, takeMVar, readMVar, putMVar, newMVar, swapMVar, modifyMVar_)
@@ -32,7 +28,6 @@ import           Control.Monad.IO.Class (liftIO)
 import           Data.ConfigFile
 import           Data.Default
 import qualified Data.Function as F
-import           Data.Functor ((<$>))
 import           Data.List (deleteFirstsBy, partition)
 import           Data.Maybe (isNothing, catMaybes)
 import           Data.Monoid ((<>))

@@ -1,3 +1,4 @@
+{-# LANGUAGE CPP #-}
 {-# LANGUAGE OverloadedStrings #-}
 {-# LANGUAGE TemplateHaskell #-}
 
@@ -15,7 +16,10 @@ module GUI ( newList'
            , editVar
            ) where
 
+#if __GLASGOW_HASKELL__ < 710
 import           Control.Applicative ((<$>))
+#endif
+
 import           Control.Concurrent.MVar (MVar, newMVar)
 import           Control.Lens (preview, _Just, _1)
 import           Control.Lens.Operators

@@ -1,8 +1,9 @@
-{-# LANGUAGE TemplateHaskell #-}
-{-# LANGUAGE OverloadedStrings #-}
+{-# LANGUAGE CPP #-}
 {-# LANGUAGE GADTs #-}
 {-# LANGUAGE NumDecimals #-}
+{-# LANGUAGE OverloadedStrings #-}
 {-# LANGUAGE RankNTypes #-}
+{-# LANGUAGE TemplateHaskell #-}
 module Network.Pocket (
   module Network.Pocket.Types,
 
@@ -10,7 +11,10 @@ module Network.Pocket (
   PocketRequest (..)
 ) where
 
+#if __GLASGOW_HASKELL__ < 710
 import           Control.Applicative ((<$>),(<*>))
+#endif
+
 import           Control.Lens (_Left, view, _2, magnify, Getter)
 import           Control.Lens.Operators
 import           Control.Lens.TH
