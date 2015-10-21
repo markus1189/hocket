@@ -39,7 +39,30 @@ access_token = "abcdefgh-1234-abcd-1234-abcdef"
 launch_cmd = firefox '%s'
 ```
 
-Where `launch_cmd` is used to open a browser for the current pocket item.
+Where `launch_cmd` is used to open a browser for the current pocket
+item.
+
+## How to get a consumer key and access token ##
+
+NOTE: this is a little rough currently, because it has to be done only
+once (and currently I am the only user).  Ideally this should be added
+to `hocket` so that the user does not have to do the steps manually,
+if you think so too, prs welcome!
+
+1. Get a consumer key from http://getpocket.com/developer/apps/new
+2.
+  ```
+  curl --data-urlencode consumer_key=YOUR_CONSUMER_KEY --data-urlencode redirect_uri=https://github.com/markus1189/hocket https://getpocket.com/v3/oauth/request`
+  ```
+  to get a request token
+3. Go to
+https://getpocket.com/auth/authorize?request_token=YOUR_REQUEST_TOKEN&redirect_uri=https://github.com/markus1189/hocket
+4. Finally, get the access_token:
+  ```
+  curl --data-urlencode consumer_key='YOUR_CONSUMER_KEY' --data-urlencode code='YOUR_REQUEST_TOKEN' https://getpocket.com/v3/oauth/authorize
+  ```
+
+5. Fill in `consumer_key` and `access_token` into hour `hocket.cfg`
 
 ## Is it done? ##
 
