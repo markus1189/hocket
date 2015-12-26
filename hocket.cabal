@@ -22,18 +22,17 @@ library
                      , Network.Pocket.Types
                      , Printing
   Build-depends:       ConfigFile >= 1.1.2 && < 1.2
-                     , aeson >= 0.7 && < 0.9
+                     , aeson >= 0.7 && < 0.10
                      , attoparsec
                      , base >= 4 && < 5
                      , bytestring
                      , data-default >= 0.5 && < 0.6
                      , http-client >= 0.3 && < 0.5
-                     , http-types >= 0.8 && < 0.9
+                     , http-types >= 0.8 && < 0.10
                      , lens >= 4.4 && < 5
-                     , lens-action >= 0.1 && < 0.2
+                     , lens-action >= 0.1 && < 0.3
                      , lens-aeson >= 1.0 && < 1.1
                      , mtl >= 2.0 && < 2.3
-                     , tables >= 0.4 && < 0.5
                      , text >= 1.1 && < 1.3
                      , time >= 1.4 && < 1.6
                      , transformers >= 0.3 && < 0.5
@@ -52,13 +51,11 @@ executable hocket
                      , hocket
                      , http-client >= 0.3 && < 0.5
                      , lens >= 4.4 && < 5
-                     , lens-action >= 0.1 && < 0.2
+                     , lens-action >= 0.1 && < 0.3
                      , mtl >= 2.0 && < 2.3
                      , old-locale >= 1.0 && < 1.1
                      , process >= 1.2 && < 1.4
-                     , tables >= 0.4 && < 0.5
                      , text >= 1.1 && < 1.3
                      , time >= 1.4 && < 1.6
                      , transformers >= 0.3 && < 0.5
-                     , vty >= 4.7 && < 5.3
-                     , vty-ui >= 1.7 && < 2.0
+                     , brick >= 0.3.1 && < 0.4
