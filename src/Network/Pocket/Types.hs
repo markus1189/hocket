@@ -84,7 +84,6 @@ import           Data.Aeson.Types (Parser)
 import           Data.Default
 import           Data.Function (on)
 import qualified Data.HashMap.Strict as Map
-import           Data.Table hiding (empty)
 import           Data.Text (Text)
 import qualified Data.Text as T
 import           Data.Time.Clock
@@ -209,21 +208,6 @@ data PocketItem =
              , _itemTags :: [Tag]
              } deriving (Show,Eq,Generic)
 makeLenses ''PocketItem
-
-instance Tabular PocketItem where
-  type PKT PocketItem = PocketItemId
-  data Key k PocketItem b where
-    PocketItemTId :: Key Primary PocketItem PocketItemId
-  data Tab PocketItem i = PIT (i Primary PocketItemId)
-
-  fetch PocketItemTId = view itemId
-
-  primary = PocketItemTId
-  primarily PocketItemTId r = r
-
-  mkTab f               = PIT <$> f PocketItemTId
-  forTab (PIT x) f = PIT <$> f PocketItemTId x
-  ixTab (PIT x) PocketItemTId  = x
 
 idEq :: PocketItem -> PocketItem -> Bool
 idEq = (==) `on` view itemId
