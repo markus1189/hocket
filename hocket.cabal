@@ -42,6 +42,7 @@ library
 executable hocket
   ghc-options:         -Wall -threaded -Werror
   main-is:             hocket.hs
+  other-modules:       State
   hs-source-dirs:      main
   build-depends:       ConfigFile >= 1.1.2 && < 1.2
                      , async >= 2.0 && < 2.1
