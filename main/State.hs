@@ -28,7 +28,7 @@ data HocketState = HocketState { _itemListVi :: ViList PocketItem
 makeLenses ''HocketState
 
 initialState :: HocketState
-initialState = HocketState (ViList $ L.list itemListName V.empty 2)
+initialState = HocketState (ViList $ L.list itemListName V.empty 1)
                            (ViList $ L.list pendingListName V.empty 1)
                            (F.focusRing [itemListName, pendingListName])
 
