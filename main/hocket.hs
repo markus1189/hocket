@@ -4,6 +4,7 @@ module Main (main) where
 import           Brick
 import qualified Brick.Focus as F
 import           Brick.Widgets.Border (hBorder)
+import           Brick.Widgets.List (List)
 import qualified Brick.Widgets.List as L
 import           Control.Concurrent.Chan (newChan)
 import           Control.Exception.Base (try)
@@ -11,10 +12,12 @@ import           Control.Lens
 import           Control.Monad (void)
 import           Control.Monad.IO.Class (liftIO)
 import           Data.Default (def)
+import qualified Data.Function as Fun
 import           Data.Maybe (fromMaybe, listToMaybe)
 import           Data.Monoid ((<>))
 import           Data.Text (Text)
 import qualified Data.Text as T
+import qualified Data.Vector as V
 import           Graphics.Vty (Event, mkVty, Key (KChar), Event (EvKey))
 import qualified Graphics.Vty as Vty
 import           Network.HTTP.Client (HttpException)
@@ -37,8 +40,7 @@ eventHandler s (VtyEvent e) =
 main :: IO ()
 main = do
   events <- newChan
-  let s = initialState
-  void (customMain (mkVty def) events app s)
+  void (customMain (mkVty def) events app initialState)
 
 app :: App HocketState HocketEvent
 app = App {appDraw = drawGui
@@ -48,7 +50,7 @@ app = App {appDraw = drawGui
              eitherErrorPIs <- liftIO retrieveItems
              case eitherErrorPIs of
                Left _ -> return s
-               Right (PocketItemBatch _ pis) -> return $ s & itemList %~ applyAll (map (L.listInsert 0) pis)
+               Right (PocketItemBatch _ pis) -> return $ s & itemList %~ applyAll (map (listInsertSorted (view timeUpdated)) pis) & itemList . L.listElementsL %~ V.reverse
           ,appAttrMap = const hocketAttrMap
           ,appLiftVtyEvent = VtyEvent
           }
@@ -60,11 +62,12 @@ hocketAttrMap =
                       ,("bar", Vty.defAttr `Vty.withBackColor` Vty.black `Vty.withForeColor` Vty.white)]
 
 drawGui :: HocketState -> [Widget]
-drawGui s = [hBar "This is hocket!"
-         <=> L.renderList (s ^. itemList) listDrawElement
-         <=> hBorder
-         <=> L.renderList (s ^. pendingList) listDrawElement
-         <=> hBar "This is the bottom"]
+drawGui s = [w]
+  where w = vBox [hBar "This is hocket!"
+                 ,L.renderList (s ^. itemList) listDrawElement
+                 ,hBorder
+                 ,vLimit 10 (L.renderList (s ^. pendingList) listDrawElement)
+                 ,hBar "This is the bottom"]
 
 listDrawElement :: Bool -> PocketItem -> Widget
 listDrawElement sel e = (if sel
@@ -117,3 +120,10 @@ display pit = fromMaybe "<empty>" $ listToMaybe $ filter (not . T.null) [given,r
   where resolved = view resolvedTitle pit
         given = view givenTitle pit
         (URL url) = view resolvedUrl pit
+
+listInsertSorted :: Ord b => (a -> b) -> a -> List a -> List a
+listInsertSorted toOrd x lxs = L.listInsert insertPos x lxs
+  where insertPos :: Int
+        insertPos = fromMaybe (length xs)
+                              (V.findIndex (((<) `Fun.on`) toOrd x) xs)
+        xs = L.listElements lxs
