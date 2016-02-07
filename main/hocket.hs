@@ -61,14 +61,19 @@ hocketAttrMap :: AttrMap
 hocketAttrMap =
   attrMap Vty.defAttr [("list" <> "selectedItem", boldBlackOnOrange)
                       ,("list" <> "unselectedItem", whiteFg)
-                      ,("bar", Vty.defAttr `Vty.withBackColor` Vty.black `Vty.withForeColor` Vty.white)]
+                      ,("bar", Vty.defAttr `Vty.withBackColor`
+                               Vty.black `Vty.withForeColor`
+                               Vty.white)]
 
 drawGui :: HocketState -> [Widget]
 drawGui s = [w]
-  where w = vBox [hBar ("This is hocket! (" <> uncurry (sformat (F.int % " + " % F.int)) (hsNumItems s) <> ")")
+  where w = vBox [hBar ("This is hocket! ("
+                     <> uncurry (sformat (F.int % " + " % F.int)) (hsNumItems s)
+                     <> ")")
                  ,L.renderList (s ^. itemList) (listDrawElement (s ^. hsLastUpdated))
                  ,hBorder
-                 ,vLimit 10 (L.renderList (s ^. pendingList) (listDrawElement (s ^. hsLastUpdated)))
+                 ,vLimit 10 (L.renderList (s ^. pendingList)
+                                          (listDrawElement (s ^. hsLastUpdated)))
                  ,hBar "This is the bottom"]
 
 listDrawElement :: Maybe POSIXTime -> Bool -> PocketItem -> Widget
@@ -115,8 +120,11 @@ defaultRetrieval = def & retrieveSort ?~ NewestFirst
                        & retrieveDetailType ?~ Complete
 
 display :: Maybe POSIXTime -> PocketItem -> Text
-display mtime pit = T.justifyRight 16 ' ' ("(" <> maybe "?" (sformat (F.diff True)) dt <> ") ")
-                 <> fromMaybe "<empty>" (listToMaybe $ filter (not . T.null) [given,resolved,T.pack url])
+display mtime pit = T.justifyRight 16 ' '
+                                      ("(" <> maybe "?" (sformat (F.diff True)) dt <> ") ")
+                 <> fromMaybe "<empty>"
+                              (listToMaybe $ filter (not . T.null)
+                                                    [given,resolved,T.pack url])
   where resolved = view resolvedTitle pit
         given = view givenTitle pit
         (URL url) = view resolvedUrl pit
