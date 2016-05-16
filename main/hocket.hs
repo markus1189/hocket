@@ -37,8 +37,8 @@ data InternalEvent = ShiftItem PocketItemId
 trigger :: Chan HocketEvent -> HocketEvent -> EventM ()
 trigger es e = liftIO (writeChan es e)
 
-eventHandler :: Chan HocketEvent -> HocketState -> HocketEvent -> EventM (Next HocketState)
-eventHandler es s (VtyEvent (EvKey (KChar 'd') [])) = do
+vtyEventHandler :: Chan HocketEvent -> HocketState -> Event -> EventM (Next HocketState)
+vtyEventHandler es s (EvKey (KChar 'd') []) = do
   for_ maybePid $ \pid -> es `trigger` Internal (ShiftItem pid)
   continue s
   where
@@ -47,25 +47,34 @@ eventHandler es s (VtyEvent (EvKey (KChar 'd') [])) = do
       list <- focusedList s
       item <- snd <$> L.listSelectedElement list
       return $ item ^. itemId
-eventHandler _ s (VtyEvent (EvKey (KChar 'q') [])) = halt s
-eventHandler _ s (VtyEvent (EvKey (KChar '\t') [])) =
+vtyEventHandler _ s (EvKey (KChar 'q') []) = halt s
+vtyEventHandler _ s (EvKey (KChar '\t') []) =
   s & focusRing %~ Focus.focusNext & continue
-eventHandler _ s (VtyEvent e) =
+vtyEventHandler _ s e =
   continue =<< case focused s of
                  Just n | n == itemListName -> handleEventLensed s itemListVi e
                  Just n | n == pendingListName -> handleEventLensed s pendingListVi e
                  _ -> return s
-eventHandler _ s (Internal (ShiftItem pid)) =
+
+internalEventHandler :: Chan HocketEvent
+                     -> HocketState
+                     -> InternalEvent
+                     -> EventM (Next HocketState)
+internalEventHandler _ s (ShiftItem pid) =
   continue =<< case focused s of
                  Just n | n == itemListName -> shiftItem s pid itemList pendingList
                  Just n | n == pendingListName -> shiftItem s pid pendingList itemList
                  _ -> return s
 
+eventHandler :: Chan HocketEvent -> HocketState -> HocketEvent -> EventM (Next HocketState)
+eventHandler es s (VtyEvent e) = vtyEventHandler es s e
+eventHandler es s (Internal e) = internalEventHandler es s e
+
 shiftItem :: HocketState
-          -> PocketItemId
-          -> Lens' HocketState (L.List PocketItem)
-          -> Lens' HocketState (L.List PocketItem)
-          -> EventM HocketState
+           -> PocketItemId
+           -> Lens' HocketState (L.List PocketItem)
+           -> Lens' HocketState (L.List PocketItem)
+           -> EventM HocketState
 shiftItem s _ src tgt = do
   let (maybeRemoved, srcList) = listRemoveSelected (s ^. src)
       tgtList = s ^. tgt
