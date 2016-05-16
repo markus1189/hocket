@@ -22,6 +22,7 @@ import qualified Formatting.Time as F
 import           Graphics.Vty (Event, mkVty, Key (KChar), Event (EvKey))
 import qualified Graphics.Vty as Vty
 import           Network.HTTP.Client (HttpException)
+import           Network.URI
 
 import           Network.Pocket
 import           Network.Pocket.Retrieve
@@ -119,14 +120,25 @@ defaultRetrieval = def & retrieveSort ?~ NewestFirst
                        & retrieveDetailType ?~ Complete
 
 txtDisplay :: PocketItem -> Widget
-txtDisplay pit = txt (T.justifyRight 9 ' ' leftEdge)
+txtDisplay pit = txt (T.justifyRight 12 ' ' leftEdge)
              <+> txt (fromMaybe "<empty>"
                                  (listToMaybe $ filter (not . T.null)
                                                        [given,resolved,T.pack url]))
-             <+> padLeft Max (txt trimmedUrl)
+             <+> padLeft Max (hLimit horizontalUriLimit (txt trimmedUrl))
   where resolved = view resolvedTitle pit
         given = view givenTitle pit
         (URL url) = view resolvedUrl pit
         added = posixSecondsToUTCTime (view timeUpdated pit)
-        leftEdge = "(" <> sformat (F.dayOfMonth <> " " % F.monthNameShort) added <> ") "
-        trimmedUrl = T.pack url
+        leftEdge = "("
+                <> sformat (F.dayOfMonth <> " " % F.monthNameShort <> " " % F.yy) added
+                <> ") "
+        trimmedUrl = T.pack (trimURI url)
+
+horizontalUriLimit :: Int
+horizontalUriLimit = 60
+
+trimURI :: String -> String
+trimURI uri = fromMaybe uri $ do
+  parsed <- parseURI uri
+  auth <- uriAuthority parsed
+  return (uriRegName auth <> uriPath parsed)
