@@ -13,8 +13,12 @@ import           Control.Monad (void)
 import           Control.Monad.IO.Class (liftIO)
 import           Data.Default (def)
 import           Data.Foldable (for_)
+import qualified Data.Map as Map
 import           Data.Maybe (fromMaybe, listToMaybe)
 import           Data.Monoid ((<>))
+import qualified Data.Ord as Ord
+import           Data.Set (Set)
+import qualified Data.Set as Set
 import           Data.Text (Text)
 import qualified Data.Text as T
 import           Data.Time.Clock.POSIX (posixSecondsToUTCTime)
@@ -32,12 +36,16 @@ import           State
 import           Widgets
 
 data HocketEvent = Internal InternalEvent | VtyEvent Event
-data InternalEvent = ShiftItem PocketItemId
+data InternalEvent = ShiftItem PocketItemId | RemoveItems (Set PocketItemId)
 
 trigger :: Chan HocketEvent -> HocketEvent -> EventM ()
 trigger es e = liftIO (writeChan es e)
 
 vtyEventHandler :: Chan HocketEvent -> HocketState -> Event -> EventM (Next HocketState)
+vtyEventHandler es s (EvKey (KChar 'A') []) = do
+  es `trigger`
+    Internal (RemoveItems (Set.fromList $ s^..pendingList.L.listElementsL.each.itemId))
+  continue s
 vtyEventHandler es s (EvKey (KChar 'd') []) = do
   for_ maybePid $ \pid -> es `trigger` Internal (ShiftItem pid)
   continue s
@@ -56,19 +64,20 @@ vtyEventHandler _ s e =
                  Just n | n == pendingListName -> handleEventLensed s pendingListVi e
                  _ -> return s
 
-internalEventHandler :: Chan HocketEvent
-                     -> HocketState
+internalEventHandler :: HocketState
                      -> InternalEvent
                      -> EventM (Next HocketState)
-internalEventHandler _ s (ShiftItem pid) =
+internalEventHandler s (ShiftItem pid) =
   continue =<< case focused s of
                  Just n | n == itemListName -> shiftItem s pid itemList pendingList
                  Just n | n == pendingListName -> shiftItem s pid pendingList itemList
                  _ -> return s
+internalEventHandler s (RemoveItems pis) =
+  continue (withContents (Map.filterWithKey (\k _ -> not (Set.member k pis))) s)
 
 eventHandler :: Chan HocketEvent -> HocketState -> HocketEvent -> EventM (Next HocketState)
 eventHandler es s (VtyEvent e) = vtyEventHandler es s e
-eventHandler es s (Internal e) = internalEventHandler es s e
+eventHandler _ s (Internal e) = internalEventHandler s e
 
 shiftItem :: HocketState
            -> PocketItemId
@@ -79,7 +88,9 @@ shiftItem s _ src tgt = do
   let (maybeRemoved, srcList) = listRemoveSelected (s ^. src)
       tgtList = s ^. tgt
       newTgtList = maybe tgtList
-                         (\removed -> listInsertSorted (view timeAdded) removed tgtList)
+                         (\removed -> listInsertSorted (Ord.Down . view timeUpdated)
+                                                       removed
+                                                       tgtList)
                          maybeRemoved
   return $ s & src .~ srcList
              & tgt .~ newTgtList

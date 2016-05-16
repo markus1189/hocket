@@ -23,9 +23,11 @@ import qualified Brick.Focus as F
 import qualified Brick.Widgets.List as L
 import           Control.Lens
 import           Data.Foldable (foldl',toList)
+import           Data.List (sortOn)
 import           Data.Map (Map)
 import qualified Data.Map as Map
 import           Data.Monoid ((<>))
+import           Data.Ord (Down(..))
 import qualified Data.Set as Set
 import           Data.Time.Clock.POSIX (POSIXTime)
 import qualified Data.Vector as V
@@ -62,15 +64,14 @@ itemList = itemListVi . _ViList
 addItemsUnread :: (Functor f, Foldable f)
                => POSIXTime -> f PocketItem -> HocketState -> HocketState
 addItemsUnread ts pis s =
-  s & itemList %~ applyAll (fmap (listInsertSorted (view timeUpdated)) pis)
-    & itemList . L.listElementsL %~ V.reverse
+  s & itemList %~ applyAll (fmap (listInsertSorted (Down . view timeUpdated)) pis)
     & hsLastUpdated ?~ ts
 
 pendingList :: Lens' HocketState (L.List PocketItem)
 pendingList = pendingListVi . _ViList
 
 applyAll :: Foldable f => f (a -> a) -> a -> a
-applyAll fs z = foldl (&) z fs
+applyAll fs z = foldl' (&) z fs
 
 contentsView :: HocketState -> Map PocketItemId PocketItem
 contentsView hs = buildMap (extract itemList hs <> extract pendingList hs)
@@ -83,8 +84,10 @@ fromContentsView contents s = s & itemList . L.listElementsL .~ V.fromList newIt
                                 & pendingList . L.listElementsL .~ V.fromList newPendings
   where oldItemIds = Set.fromList (toListOf (itemList.L.listElementsL.each.itemId) s)
         oldPendingIds = Set.fromList (toListOf (pendingList.L.listElementsL.each.itemId) s)
-        newItems = toList $ Map.filterWithKey (knownFrom oldItemIds) contents
-        newPendings = toList $ Map.filterWithKey (knownFrom oldPendingIds) contents
+        newItems = sortOn (Down . view timeUpdated) . toList $
+          Map.filterWithKey (knownFrom oldItemIds) contents
+        newPendings = sortOn (Down . view timeUpdated) . toList $
+          Map.filterWithKey (knownFrom oldPendingIds) contents
         knownFrom frm pid _ = Set.member pid frm
 
 withContents :: (Map PocketItemId PocketItem -> Map PocketItemId PocketItem)
