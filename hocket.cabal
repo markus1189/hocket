@@ -20,7 +20,6 @@ library
   exposed-modules:     Network.Pocket
                      , Network.Pocket.Retrieve
                      , Network.Pocket.Types
-                     , Printing
   Build-depends:       ConfigFile >= 1.1.2 && < 1.2
                      , aeson >= 0.7 && < 0.10
                      , attoparsec
