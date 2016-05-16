@@ -8,6 +8,7 @@ module State (HocketState
              ,focusRing
              ,hsNumItems
              ,hsLastUpdated
+             ,hsContents
              ,itemListName
              ,pendingListName
 
@@ -20,6 +21,8 @@ import qualified Brick.Focus as F
 import qualified Brick.Widgets.List as L
 import           Control.Lens
 import           Data.Function (on)
+import           Data.Map (Map)
+import qualified Data.Map as Map
 import           Data.Maybe (fromMaybe)
 import           Data.Time.Clock.POSIX (POSIXTime)
 import qualified Data.Vector as V
@@ -31,6 +34,7 @@ data HocketState = HocketState { _itemListVi :: ViList PocketItem
                                , _pendingListVi :: ViList PocketItem
                                , _focusRing :: F.FocusRing
                                , _hsLastUpdated :: Maybe POSIXTime
+                               , _hsContents :: Map PocketItemId [PocketItem]
                                }
 makeLenses ''HocketState
 
@@ -43,6 +47,7 @@ initialState = HocketState (ViList $ L.list itemListName V.empty 1)
                            (ViList $ L.list pendingListName V.empty 1)
                            (F.focusRing [itemListName, pendingListName])
                            Nothing
+                           Map.empty
 
 itemListName :: Name
 itemListName = "items"

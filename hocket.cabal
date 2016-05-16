@@ -26,6 +26,7 @@ library
                      , attoparsec
                      , base >= 4 && < 5
                      , bytestring
+                     , containers
                      , data-default >= 0.5 && < 0.6
                      , http-client >= 0.3 && < 0.5
                      , http-types >= 0.8 && < 0.10
@@ -44,23 +45,23 @@ executable hocket
   main-is:             hocket.hs
   other-modules:       State
   hs-source-dirs:      main
-  build-depends:
-                         ConfigFile >= 1.1.2 && < 1.2
-                       , async >= 2.0 && < 2.1
-                       , base >= 4 && < 5
-                       , brick >= 0.3.1 && < 0.4
-                       , bytestring
-                       , data-default >= 0.5 && < 0.6
-                       , formatting >= 6.2 && < 6.3
-                       , hocket
-                       , http-client >= 0.3 && < 0.5
-                       , lens >= 4.4 && < 5
-                       , lens-action >= 0.1 && < 0.3
-                       , mtl >= 2.0 && < 2.3
-                       , old-locale >= 1.0 && < 1.1
-                       , process >= 1.2 && < 1.4
-                       , text >= 1.1 && < 1.3
-                       , time >= 1.4 && < 1.6
-                       , transformers >= 0.3 && < 0.5
-                       , vector >= 0.10 && < 0.11
-                       , vty >= 5.4 && < 5.5
+  build-depends:       ConfigFile >= 1.1.2 && < 1.2
+                     , async >= 2.0 && < 2.1
+                     , base >= 4 && < 5
+                     , brick >= 0.3.1 && < 0.4
+                     , bytestring
+                     , containers
+                     , data-default >= 0.5 && < 0.6
+                     , formatting >= 6.2 && < 6.3
+                     , hocket
+                     , http-client >= 0.3 && < 0.5
+                     , lens >= 4.4 && < 5
+                     , lens-action >= 0.1 && < 0.3
+                     , mtl >= 2.0 && < 2.3
+                     , old-locale >= 1.0 && < 1.1
+                     , process >= 1.2 && < 1.4
+                     , text >= 1.1 && < 1.3
+                     , time >= 1.4 && < 1.6
+                     , transformers >= 0.3 && < 0.5
+                     , vector >= 0.10 && < 0.11
+                     , vty >= 5.4 && < 5.5

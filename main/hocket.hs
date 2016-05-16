@@ -2,7 +2,7 @@
 module Main (main) where
 
 import           Brick
-import qualified Brick.Focus as F
+import qualified Brick.Focus as Focus
 import           Brick.Widgets.Border (hBorder)
 import qualified Brick.Widgets.List as L
 import           Control.Concurrent.Chan (newChan)
@@ -15,8 +15,7 @@ import           Data.Maybe (fromMaybe, listToMaybe)
 import           Data.Monoid ((<>))
 import           Data.Text (Text)
 import qualified Data.Text as T
-import           Data.Time.Clock (diffUTCTime)
-import           Data.Time.Clock.POSIX (posixSecondsToUTCTime, POSIXTime)
+import           Data.Time.Clock.POSIX (posixSecondsToUTCTime)
 import           Formatting (sformat, (%))
 import qualified Formatting as F
 import qualified Formatting.Time as F
@@ -32,9 +31,10 @@ data HocketEvent = VtyEvent Event
 
 eventHandler :: HocketState -> HocketEvent -> EventM (Next HocketState)
 eventHandler s (VtyEvent (EvKey (KChar 'q') [])) = halt s
-eventHandler s (VtyEvent (EvKey (KChar '\t') [])) = s & focusRing %~ F.focusNext & continue
+eventHandler s (VtyEvent (EvKey (KChar '\t') [])) =
+  s & focusRing %~ Focus.focusNext & continue
 eventHandler s (VtyEvent e) =
-  continue =<< case F.focusGetCurrent $ view focusRing s of
+  continue =<< case Focus.focusGetCurrent $ view focusRing s of
                  Just n | n == itemListName -> handleEventLensed s itemListVi e
                  Just n | n == pendingListName -> handleEventLensed s pendingListVi e
                  _ -> return s
@@ -46,7 +46,7 @@ main = do
 
 app :: App HocketState HocketEvent
 app = App {appDraw = drawGui
-          ,appChooseCursor = F.focusRingCursor (view focusRing)
+          ,appChooseCursor = Focus.focusRingCursor (view focusRing)
           ,appHandleEvent = eventHandler
           ,appStartEvent = \s -> do
              eitherErrorPIs <- liftIO retrieveItems
@@ -70,17 +70,16 @@ drawGui s = [w]
   where w = vBox [hBar ("This is hocket! ("
                      <> uncurry (sformat (F.int % " + " % F.int)) (hsNumItems s)
                      <> ")")
-                 ,L.renderList (s ^. itemList) (listDrawElement (s ^. hsLastUpdated))
+                 ,L.renderList (s ^. itemList) listDrawElement
                  ,hBorder
-                 ,vLimit 10 (L.renderList (s ^. pendingList)
-                                          (listDrawElement (s ^. hsLastUpdated)))
+                 ,vLimit 10 (L.renderList (s ^. pendingList) listDrawElement)
                  ,hBar "This is the bottom"]
 
-listDrawElement :: Maybe POSIXTime -> Bool -> PocketItem -> Widget
-listDrawElement mtime sel e = (if sel
-                                 then withAttr ("list" <> "selectedItem")
-                                 else withAttr ("list" <> "unselectedItem"))
-                                 (padRight Max (txt (display mtime e)))
+listDrawElement :: Bool -> PocketItem -> Widget
+listDrawElement sel e = (if sel
+                          then withAttr ("list" <> "selectedItem")
+                          else withAttr ("list" <> "unselectedItem"))
+                        (padRight Max (txt (display e)))
 
 orange :: Vty.Color
 orange = Vty.rgbColor 215 135 (0::Int)
@@ -111,22 +110,21 @@ tryHttpException :: IO a -> IO (Either HttpException a)
 tryHttpException = try
 
 pocketCredentials :: PocketCredentials
-pocketCredentials = PocketCredentials (ConsumerKey "123")
-                                      (AccessToken "456")
+pocketCredentials = PocketCredentials (ConsumerKey "<consumer-key>")
+                                      (AccessToken "<access-token>")
 
 defaultRetrieval :: RetrieveConfig
 defaultRetrieval = def & retrieveSort ?~ NewestFirst
                        & retrieveCount .~ NoLimit
                        & retrieveDetailType ?~ Complete
 
-display :: Maybe POSIXTime -> PocketItem -> Text
-display mtime pit = T.justifyRight 16 ' '
-                                      ("(" <> maybe "?" (sformat (F.diff True)) dt <> ") ")
-                 <> fromMaybe "<empty>"
-                              (listToMaybe $ filter (not . T.null)
-                                                    [given,resolved,T.pack url])
+display :: PocketItem -> Text
+display pit = T.justifyRight 9 ' ' leftEdge
+           <> fromMaybe "<empty>"
+                        (listToMaybe $ filter (not . T.null)
+                                              [given,resolved,T.pack url])
   where resolved = view resolvedTitle pit
         given = view givenTitle pit
         (URL url) = view resolvedUrl pit
         added = posixSecondsToUTCTime (view timeUpdated pit)
-        dt = fmap (diffUTCTime added . posixSecondsToUTCTime) mtime
+        leftEdge = "(" <> sformat (F.dayOfMonth <> " " % F.monthNameShort) added <> ") "
