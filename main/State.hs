@@ -16,13 +16,18 @@ module State (HocketState
              ,contentsView
              ,fromContentsView
              ,withContents
+             ,asynchronously
              ) where
 
 import           Brick (Name)
 import qualified Brick.Focus as F
 import qualified Brick.Widgets.List as L
+import           Control.Concurrent.Async (Async, async)
+import           Control.Exception (IOException, handle, finally)
 import           Control.Lens
 import           Data.Foldable (foldl',toList)
+import           Data.Functor (void)
+import           Data.IORef (IORef, readIORef, newIORef, atomicWriteIORef)
 import           Data.List (sortOn)
 import           Data.Map (Map)
 import qualified Data.Map as Map
@@ -39,6 +44,7 @@ data HocketState = HocketState { _itemListVi :: ViList PocketItem
                                , _pendingListVi :: ViList PocketItem
                                , _focusRing :: F.FocusRing
                                , _hsLastUpdated :: Maybe POSIXTime
+                               , _hsAsync :: IORef (Maybe (Async ()))
                                }
 makeLenses ''HocketState
 
@@ -46,11 +52,12 @@ hsNumItems :: HocketState -> (Int,Int)
 hsNumItems = (,) <$> V.length . view (itemList . L.listElementsL)
                  <*> V.length . view (pendingList . L.listElementsL)
 
-initialState :: HocketState
+initialState :: IO HocketState
 initialState = HocketState (ViList $ L.list itemListName V.empty 1)
                            (ViList $ L.list pendingListName V.empty 1)
                            (F.focusRing [itemListName, pendingListName])
                            Nothing
+           <$> newIORef Nothing
 
 itemListName :: Name
 itemListName = "items"
@@ -94,3 +101,14 @@ withContents :: (Map PocketItemId PocketItem -> Map PocketItemId PocketItem)
              -> HocketState
              -> HocketState
 withContents f s = fromContentsView (f (contentsView s)) s
+
+asynchronously :: String -> HocketState -> (String -> IO ()) -> IO () -> IO ()
+asynchronously name s setMsg act = do
+  maybeAsync <- readIORef (s ^. hsAsync)
+  case maybeAsync of
+    Just _ -> return ()
+    Nothing -> void . async $ do
+      setMsg (name <> " started")
+      handle onError (act >> setMsg "") `finally` atomicWriteIORef (s ^. hsAsync) Nothing
+  where onError :: IOException -> IO ()
+        onError _ = setMsg (name <> " failed!")

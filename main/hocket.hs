@@ -21,7 +21,7 @@ import           Data.Set (Set)
 import qualified Data.Set as Set
 import           Data.Text (Text)
 import qualified Data.Text as T
-import           Data.Time.Clock.POSIX (posixSecondsToUTCTime)
+import           Data.Time.Clock.POSIX (posixSecondsToUTCTime, POSIXTime)
 import           Formatting (sformat, (%))
 import qualified Formatting as F
 import qualified Formatting.Time as F
@@ -42,18 +42,22 @@ data HocketEvent = Internal InternalEvent
 data InternalEvent = ShiftItem PocketItemId
                    | RemoveItems (Set PocketItemId)
                    | FetchItems
+                   | FetchedItems POSIXTime [PocketItem]
                    deriving (Show,Eq)
 
-trigger :: Chan HocketEvent -> HocketEvent -> EventM ()
-trigger es e = liftIO (writeChan es e)
+trigger :: Chan HocketEvent -> HocketEvent -> IO ()
+trigger = writeChan
 
 vtyEventHandler :: Chan HocketEvent -> HocketState -> Event -> EventM (Next HocketState)
+vtyEventHandler es s (EvKey (KChar 'u') []) = do
+  liftIO $ es `trigger` Internal FetchItems
+  continue s
 vtyEventHandler es s (EvKey (KChar 'A') []) = do
-  es `trigger`
+  liftIO $ es `trigger`
     Internal (RemoveItems (Set.fromList $ s^..pendingList.L.listElementsL.each.itemId))
   continue s
 vtyEventHandler es s (EvKey (KChar 'd') []) = do
-  for_ maybePid $ \pid -> es `trigger` Internal (ShiftItem pid)
+  liftIO $ for_ maybePid $ \pid -> es `trigger` Internal (ShiftItem pid)
   continue s
   where
     maybePid :: Maybe PocketItemId
@@ -70,25 +74,28 @@ vtyEventHandler _ s e =
                  Just n | n == pendingListName -> handleEventLensed s pendingListVi e
                  _ -> return s
 
-internalEventHandler :: HocketState
+internalEventHandler :: Chan HocketEvent
+                     -> HocketState
                      -> InternalEvent
                      -> EventM (Next HocketState)
-internalEventHandler s (ShiftItem pid) =
+internalEventHandler _ s (ShiftItem pid) =
   continue =<< case focused s of
                  Just n | n == itemListName -> shiftItem s pid itemList pendingList
                  Just n | n == pendingListName -> shiftItem s pid pendingList itemList
                  _ -> return s
-internalEventHandler s (RemoveItems pis) =
+internalEventHandler _ s (RemoveItems pis) =
   continue (withContents (Map.filterWithKey (\k _ -> not (Set.member k pis))) s)
-internalEventHandler s FetchItems = do
-  eitherErrorPIs <- liftIO retrieveItems
-  continue $ case eitherErrorPIs of
-    Left _ -> s
-    Right (PocketItemBatch ts pis) -> addItemsUnread ts pis s
+internalEventHandler es s FetchItems = do
+  liftIO $ asynchronously "Update" s (const (return ())) $ do
+    eitherErrorPIs <- retrieveItems
+    for_ eitherErrorPIs $
+      \(PocketItemBatch ts pis) -> es `trigger` Internal (FetchedItems ts pis)
+  continue s
+internalEventHandler _ s (FetchedItems ts pis) = continue (addItemsUnread ts pis s)
 
 eventHandler :: Chan HocketEvent -> HocketState -> HocketEvent -> EventM (Next HocketState)
 eventHandler es s (VtyEvent e) = vtyEventHandler es s e
-eventHandler _ s (Internal e) = internalEventHandler s e
+eventHandler es s (Internal e) = internalEventHandler es s e
 
 shiftItem :: HocketState
            -> PocketItemId
@@ -116,7 +123,7 @@ app :: Chan HocketEvent -> App HocketState HocketEvent
 app events = App {appDraw = drawGui
                  ,appChooseCursor = Focus.focusRingCursor (view focusRing)
                  ,appHandleEvent = eventHandler events
-                 ,appStartEvent = \s -> do events `trigger` Internal FetchItems
+                 ,appStartEvent = \s -> do liftIO (events `trigger` Internal FetchItems)
                                            return s
                  ,appAttrMap = const hocketAttrMap
                  ,appLiftVtyEvent = VtyEvent
