@@ -9,9 +9,12 @@ packages:
 
 # Packages to be pulled from upstream that are not in the resolver (e.g., acme-missiles-0.3)
 extra-deps:
-  - brick-0.3.1
+  - brick-0.6
   - text-zipper-0.3.1
-  - vty-5.4.0
+  - vty-5.5.0
+  - microlens-0.4.3.0
+  - microlens-th-0.4.0.0
+  - microlens-mtl-0.1.7.1
 
 # Override default flag values for local packages and extra-deps
 flags: {}

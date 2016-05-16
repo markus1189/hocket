@@ -48,7 +48,7 @@ executable hocket
   build-depends:       ConfigFile >= 1.1.2 && < 1.2
                      , async >= 2.0 && < 2.1
                      , base >= 4 && < 5
-                     , brick >= 0.3.1 && < 0.4
+                     , brick >= 0.6 && < 0.7
                      , bytestring
                      , containers
                      , data-default >= 0.5 && < 0.6
@@ -57,6 +57,7 @@ executable hocket
                      , http-client >= 0.3 && < 0.5
                      , lens >= 4.4 && < 5
                      , lens-action >= 0.1 && < 0.3
+                     , microlens >= 0.3.0.0
                      , mtl >= 2.0 && < 2.3
                      , old-locale >= 1.0 && < 1.1
                      , process >= 1.2 && < 1.4
@@ -64,4 +65,4 @@ executable hocket
                      , time >= 1.4 && < 1.6
                      , transformers >= 0.3 && < 0.5
                      , vector >= 0.10 && < 0.11
-                     , vty >= 5.4 && < 5.5
+                     , vty >= 5.5 && < 5.6
