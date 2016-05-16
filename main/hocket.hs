@@ -79,7 +79,7 @@ listDrawElement :: Bool -> PocketItem -> Widget
 listDrawElement sel e = (if sel
                           then withAttr ("list" <> "selectedItem")
                           else withAttr ("list" <> "unselectedItem"))
-                        (padRight Max (txt (display e)))
+                        (padRight Max (txtDisplay e))
 
 orange :: Vty.Color
 orange = Vty.rgbColor 215 135 (0::Int)
@@ -118,13 +118,15 @@ defaultRetrieval = def & retrieveSort ?~ NewestFirst
                        & retrieveCount .~ NoLimit
                        & retrieveDetailType ?~ Complete
 
-display :: PocketItem -> Text
-display pit = T.justifyRight 9 ' ' leftEdge
-           <> fromMaybe "<empty>"
-                        (listToMaybe $ filter (not . T.null)
-                                              [given,resolved,T.pack url])
+txtDisplay :: PocketItem -> Widget
+txtDisplay pit = txt (T.justifyRight 9 ' ' leftEdge)
+             <+> txt (fromMaybe "<empty>"
+                                 (listToMaybe $ filter (not . T.null)
+                                                       [given,resolved,T.pack url]))
+             <+> padLeft Max (txt trimmedUrl)
   where resolved = view resolvedTitle pit
         given = view givenTitle pit
         (URL url) = view resolvedUrl pit
         added = posixSecondsToUTCTime (view timeUpdated pit)
         leftEdge = "(" <> sformat (F.dayOfMonth <> " " % F.monthNameShort) added <> ") "
+        trimmedUrl = T.pack url
