@@ -1,3 +1,4 @@
+{-# LANGUAGE RankNTypes #-}
 {-# LANGUAGE OverloadedStrings #-}
 module Main (main) where
 
@@ -5,12 +6,13 @@ import           Brick
 import qualified Brick.Focus as Focus
 import           Brick.Widgets.Border (hBorder)
 import qualified Brick.Widgets.List as L
-import           Control.Concurrent.Chan (newChan)
+import           Control.Concurrent.Chan (newChan,Chan,writeChan)
 import           Control.Exception.Base (try)
 import           Control.Lens
 import           Control.Monad (void)
 import           Control.Monad.IO.Class (liftIO)
 import           Data.Default (def)
+import           Data.Foldable (for_)
 import           Data.Maybe (fromMaybe, listToMaybe)
 import           Data.Monoid ((<>))
 import           Data.Text (Text)
@@ -27,36 +29,70 @@ import           Network.URI
 import           Network.Pocket
 import           Network.Pocket.Retrieve
 import           State
+import           Widgets
 
-data HocketEvent = VtyEvent Event
+data HocketEvent = Internal InternalEvent | VtyEvent Event
+data InternalEvent = ShiftItem PocketItemId
 
-eventHandler :: HocketState -> HocketEvent -> EventM (Next HocketState)
-eventHandler s (VtyEvent (EvKey (KChar 'q') [])) = halt s
-eventHandler s (VtyEvent (EvKey (KChar '\t') [])) =
+trigger :: Chan HocketEvent -> HocketEvent -> EventM ()
+trigger es e = liftIO (writeChan es e)
+
+eventHandler :: Chan HocketEvent -> HocketState -> HocketEvent -> EventM (Next HocketState)
+eventHandler es s (VtyEvent (EvKey (KChar 'd') [])) = do
+  for_ maybePid $ \pid -> es `trigger` Internal (ShiftItem pid)
+  continue s
+  where
+    maybePid :: Maybe PocketItemId
+    maybePid = do
+      list <- focusedList s
+      item <- snd <$> L.listSelectedElement list
+      return $ item ^. itemId
+eventHandler _ s (VtyEvent (EvKey (KChar 'q') [])) = halt s
+eventHandler _ s (VtyEvent (EvKey (KChar '\t') [])) =
   s & focusRing %~ Focus.focusNext & continue
-eventHandler s (VtyEvent e) =
-  continue =<< case Focus.focusGetCurrent $ view focusRing s of
+eventHandler _ s (VtyEvent e) =
+  continue =<< case focused s of
                  Just n | n == itemListName -> handleEventLensed s itemListVi e
                  Just n | n == pendingListName -> handleEventLensed s pendingListVi e
                  _ -> return s
+eventHandler _ s (Internal (ShiftItem pid)) =
+  continue =<< case focused s of
+                 Just n | n == itemListName -> shiftItem s pid itemList pendingList
+                 Just n | n == pendingListName -> shiftItem s pid pendingList itemList
+                 _ -> return s
+
+shiftItem :: HocketState
+          -> PocketItemId
+          -> Lens' HocketState (L.List PocketItem)
+          -> Lens' HocketState (L.List PocketItem)
+          -> EventM HocketState
+shiftItem s _ src tgt = do
+  let (maybeRemoved, srcList) = listRemoveSelected (s ^. src)
+      tgtList = s ^. tgt
+      newTgtList = maybe tgtList
+                         (\removed -> listInsertSorted (view timeAdded) removed tgtList)
+                         maybeRemoved
+  return $ s & src .~ srcList
+             & tgt .~ newTgtList
+
 
 main :: IO ()
 main = do
   events <- newChan
-  void (customMain (mkVty def) events app initialState)
+  void (customMain (mkVty def) events (app events) initialState)
 
-app :: App HocketState HocketEvent
-app = App {appDraw = drawGui
-          ,appChooseCursor = Focus.focusRingCursor (view focusRing)
-          ,appHandleEvent = eventHandler
-          ,appStartEvent = \s -> do
-             eitherErrorPIs <- liftIO retrieveItems
-             case eitherErrorPIs of
-               Left _ -> return s
-               Right (PocketItemBatch ts pis) -> return (addItemsUnread ts pis s)
-          ,appAttrMap = const hocketAttrMap
-          ,appLiftVtyEvent = VtyEvent
-          }
+app :: Chan HocketEvent -> App HocketState HocketEvent
+app events = App {appDraw = drawGui
+                 ,appChooseCursor = Focus.focusRingCursor (view focusRing)
+                 ,appHandleEvent = eventHandler events
+                 ,appStartEvent = \s -> do
+                    eitherErrorPIs <- liftIO retrieveItems
+                    case eitherErrorPIs of
+                      Left _ -> return s
+                      Right (PocketItemBatch ts pis) -> return (addItemsUnread ts pis s)
+                 ,appAttrMap = const hocketAttrMap
+                 ,appLiftVtyEvent = VtyEvent
+                 }
 
 hocketAttrMap :: AttrMap
 hocketAttrMap =
@@ -68,19 +104,32 @@ hocketAttrMap =
 
 drawGui :: HocketState -> [Widget]
 drawGui s = [w]
-  where w = vBox [hBar ("This is hocket! ("
-                     <> uncurry (sformat (F.int % " + " % F.int)) (hsNumItems s)
+  where w = vBox [hBar ("Hocket: ("
+                     <> uncurry (sformat (F.int % "|" % F.int)) (hsNumItems s)
                      <> ")")
-                 ,L.renderList (s ^. itemList) listDrawElement
+                 ,L.renderList (s ^. itemList) (listDrawElement (isFocused s itemListName))
                  ,hBorder
-                 ,vLimit 10 (L.renderList (s ^. pendingList) listDrawElement)
+                 ,vLimit 10 $
+                    L.renderList (s ^. pendingList) (listDrawElement (isFocused s pendingListName))
                  ,hBar "This is the bottom"]
 
-listDrawElement :: Bool -> PocketItem -> Widget
-listDrawElement sel e = (if sel
-                          then withAttr ("list" <> "selectedItem")
-                          else withAttr ("list" <> "unselectedItem"))
-                        (padRight Max (txtDisplay e))
+focused :: HocketState -> Maybe Name
+focused = Focus.focusGetCurrent . view focusRing
+
+focusedList :: HocketState -> Maybe (L.List PocketItem)
+focusedList s = case focused s of
+                  Just n | n == itemListName -> Just $ s ^. itemList
+                  Just n | n == pendingListName -> Just $ s ^. pendingList
+                  _ -> Nothing
+
+isFocused :: HocketState -> Name -> Bool
+isFocused s name = maybe False (==name) (focused s)
+
+listDrawElement :: Bool -> Bool -> PocketItem -> Widget
+listDrawElement hasFocus sel e = (if hasFocus && sel
+                                    then withAttr ("list" <> "selectedItem")
+                                    else withAttr ("list" <> "unselectedItem"))
+                                 (padRight Max (txtDisplay e))
 
 orange :: Vty.Color
 orange = Vty.rgbColor 215 135 (0::Int)

@@ -21,10 +21,8 @@ import qualified Brick.Focus as F
 import qualified Brick.Widgets.List as L
 import           Control.Lens
 import           Data.Foldable (foldl')
-import           Data.Function (on)
 import           Data.Map (Map)
 import qualified Data.Map as Map
-import           Data.Maybe (fromMaybe)
 import           Data.Monoid ((<>))
 import           Data.Time.Clock.POSIX (POSIXTime)
 import           Data.Vector (Vector)
@@ -71,13 +69,6 @@ pendingList = pendingListVi . _ViList
 
 applyAll :: Foldable f => f (a -> a) -> a -> a
 applyAll fs z = foldl (&) z fs
-
-listInsertSorted :: Ord b => (a -> b) -> a -> L.List a -> L.List a
-listInsertSorted toOrd x lxs = L.listInsert insertPos x lxs
-  where insertPos :: Int
-        insertPos = fromMaybe (length xs)
-                              (V.findIndex (((<) `on`) toOrd x) xs)
-        xs = L.listElements lxs
 
 contentsView :: HocketState -> Map PocketItemId (Vector PocketItem)
 contentsView hs = buildMap $ extract itemList hs <> extract pendingList hs
