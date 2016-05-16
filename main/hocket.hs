@@ -35,8 +35,14 @@ import           Network.Pocket.Retrieve
 import           State
 import           Widgets
 
-data HocketEvent = Internal InternalEvent | VtyEvent Event
-data InternalEvent = ShiftItem PocketItemId | RemoveItems (Set PocketItemId)
+data HocketEvent = Internal InternalEvent
+                 | VtyEvent Event
+                 deriving (Show,Eq)
+
+data InternalEvent = ShiftItem PocketItemId
+                   | RemoveItems (Set PocketItemId)
+                   | FetchItems
+                   deriving (Show,Eq)
 
 trigger :: Chan HocketEvent -> HocketEvent -> EventM ()
 trigger es e = liftIO (writeChan es e)
@@ -74,6 +80,11 @@ internalEventHandler s (ShiftItem pid) =
                  _ -> return s
 internalEventHandler s (RemoveItems pis) =
   continue (withContents (Map.filterWithKey (\k _ -> not (Set.member k pis))) s)
+internalEventHandler s FetchItems = do
+  eitherErrorPIs <- liftIO retrieveItems
+  continue $ case eitherErrorPIs of
+    Left _ -> s
+    Right (PocketItemBatch ts pis) -> addItemsUnread ts pis s
 
 eventHandler :: Chan HocketEvent -> HocketState -> HocketEvent -> EventM (Next HocketState)
 eventHandler es s (VtyEvent e) = vtyEventHandler es s e
@@ -95,21 +106,18 @@ shiftItem s _ src tgt = do
   return $ s & src .~ srcList
              & tgt .~ newTgtList
 
-
 main :: IO ()
 main = do
   events <- newChan
-  void (customMain (mkVty def) events (app events) initialState)
+  s <- initialState
+  void (customMain (mkVty def) events (app events) s)
 
 app :: Chan HocketEvent -> App HocketState HocketEvent
 app events = App {appDraw = drawGui
                  ,appChooseCursor = Focus.focusRingCursor (view focusRing)
                  ,appHandleEvent = eventHandler events
-                 ,appStartEvent = \s -> do
-                    eitherErrorPIs <- liftIO retrieveItems
-                    case eitherErrorPIs of
-                      Left _ -> return s
-                      Right (PocketItemBatch ts pis) -> return (addItemsUnread ts pis s)
+                 ,appStartEvent = \s -> do events `trigger` Internal FetchItems
+                                           return s
                  ,appAttrMap = const hocketAttrMap
                  ,appLiftVtyEvent = VtyEvent
                  }
