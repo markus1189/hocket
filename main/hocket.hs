@@ -1,3 +1,5 @@
+{-# LANGUAGE FlexibleContexts #-}
+{-# LANGUAGE ViewPatterns #-}
 {-# LANGUAGE RankNTypes #-}
 {-# LANGUAGE OverloadedStrings #-}
 module Main (main) where
@@ -6,6 +8,7 @@ import           Brick
 import qualified Brick.Focus as Focus
 import           Brick.Widgets.Border (hBorder)
 import qualified Brick.Widgets.List as L
+import           Control.Concurrent.Async (async)
 import           Control.Concurrent.Chan (newChan,Chan,writeChan)
 import           Control.Exception.Base (try)
 import           Control.Lens
@@ -13,6 +16,7 @@ import           Control.Monad (void)
 import           Control.Monad.IO.Class (liftIO)
 import           Data.Default (def)
 import           Data.Foldable (for_)
+import           Data.List (isPrefixOf)
 import qualified Data.Map as Map
 import           Data.Maybe (fromMaybe, listToMaybe)
 import           Data.Monoid ((<>))
@@ -43,6 +47,7 @@ data InternalEvent = ShiftItem PocketItemId
                    | RemoveItems (Set PocketItemId)
                    | FetchItems
                    | FetchedItems POSIXTime [PocketItem]
+                   | SetStatus (Maybe Text)
                    deriving (Show,Eq)
 
 trigger :: Chan HocketEvent -> HocketEvent -> IO ()
@@ -85,13 +90,20 @@ internalEventHandler _ s (ShiftItem pid) =
                  _ -> return s
 internalEventHandler _ s (RemoveItems pis) =
   continue (withContents (Map.filterWithKey (\k _ -> not (Set.member k pis))) s)
-internalEventHandler es s FetchItems = do
-  liftIO $ asynchronously "Update" s (const (return ())) $ do
-    eitherErrorPIs <- retrieveItems
-    for_ eitherErrorPIs $
-      \(PocketItemBatch ts pis) -> es `trigger` Internal (FetchedItems ts pis)
-  continue s
-internalEventHandler _ s (FetchedItems ts pis) = continue (addItemsUnread ts pis s)
+internalEventHandler es s@(view hsAsync -> Nothing) FetchItems = do
+  fetchAsync <- liftIO . async $ do
+    es `trigger` Internal (SetStatus (Just "fetching"))
+    eitherErrorPis <- retrieveItems
+    case eitherErrorPis of
+      Left _ ->  es `trigger` Internal (SetStatus (Just "failed"))
+      Right (PocketItemBatch ts pis) -> do
+        es `trigger` Internal (SetStatus Nothing)
+        es `trigger` Internal (FetchedItems ts pis)
+  continue (s & hsAsync ?~ fetchAsync)
+internalEventHandler _ s (FetchedItems ts pis) =
+  continue (addItemsUnread ts pis s & hsAsync .~ Nothing)
+internalEventHandler _ s (SetStatus t) = continue (s & hsStatus .~ t)
+internalEventHandler _ s FetchItems = continue s
 
 eventHandler :: Chan HocketEvent -> HocketState -> HocketEvent -> EventM (Next HocketState)
 eventHandler es s (VtyEvent e) = vtyEventHandler es s e
@@ -116,8 +128,7 @@ shiftItem s _ src tgt = do
 main :: IO ()
 main = do
   events <- newChan
-  s <- initialState
-  void (customMain (mkVty def) events (app events) s)
+  void (customMain (mkVty def) events (app events) initialState)
 
 app :: Chan HocketEvent -> App HocketState HocketEvent
 app events = App {appDraw = drawGui
@@ -146,7 +157,9 @@ drawGui s = [w]
                  ,hBorder
                  ,vLimit 10 $
                     L.renderList (s ^. pendingList) (listDrawElement (isFocused s pendingListName))
-                 ,hBar "This is the bottom"]
+                 ,hBar "This is the bottom" <+> withAttr "bar" (padLeft Max (txt (maybe "<never>" (sformat F.hms . posixSecondsToUTCTime) (s ^. hsLastUpdated))))
+                 ,txt (fromMaybe " " (s ^. hsStatus))
+                 ]
 
 focused :: HocketState -> Maybe Name
 focused = Focus.focusGetCurrent . view focusRing
@@ -225,4 +238,7 @@ trimURI :: String -> String
 trimURI uri = fromMaybe uri $ do
   parsed <- parseURI uri
   auth <- uriAuthority parsed
-  return (uriRegName auth <> uriPath parsed)
+  return (strip "reddit.com/" (strip "www." (uriRegName auth)
+                            <> uriPath parsed
+                            <> uriQuery parsed))
+  where strip prefix s = if prefix `isPrefixOf` s then drop (length prefix) s else s
