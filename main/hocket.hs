@@ -50,17 +50,20 @@ data InternalEvent = ShiftItem PocketItemId
 trigger :: Chan HocketEvent -> HocketEvent -> IO ()
 trigger = writeChan
 
+continueSynced :: HocketState -> EventM (Next HocketState)
+continueSynced = continue . syncForRender
+
 vtyEventHandler :: Chan HocketEvent -> HocketState -> Event -> EventM (Next HocketState)
 vtyEventHandler es s (EvKey (KChar 'u') []) = do
   liftIO $ es `trigger` Internal FetchItems
-  continue s
+  continueSynced s
 vtyEventHandler es s (EvKey (KChar 'A') []) = do
   liftIO $ es `trigger`
     Internal (RemoveItems (Set.fromList $ s^..pendingList.L.listElementsL.each.itemId))
-  continue s
+  continueSynced s
 vtyEventHandler es s (EvKey (KChar 'd') []) = do
   liftIO $ for_ maybePid $ \pid -> es `trigger` Internal (ShiftItem pid)
-  continue s
+  continueSynced s
   where
     maybePid :: Maybe PocketItemId
     maybePid = do
@@ -69,9 +72,9 @@ vtyEventHandler es s (EvKey (KChar 'd') []) = do
       return $ item ^. itemId
 vtyEventHandler _ s (EvKey (KChar 'q') []) = halt s
 vtyEventHandler _ s (EvKey (KChar '\t') []) =
-  s & focusRing %~ Focus.focusNext & continue
+  s & focusRing %~ Focus.focusNext & continueSynced
 vtyEventHandler _ s e =
-  continue =<< case focused s of
+  continueSynced =<< case focused s of
                  Just n | n == itemListName -> handleEventLensed s itemListVi e
                  Just n | n == pendingListName -> handleEventLensed s pendingListVi e
                  _ -> return s
@@ -80,8 +83,8 @@ internalEventHandler :: Chan HocketEvent
                      -> HocketState
                      -> InternalEvent
                      -> EventM (Next HocketState)
-internalEventHandler _ s (ShiftItem pid) = continue (toggleStatus pid s)
-internalEventHandler _ s (RemoveItems pis) = continue (removeItems pis s)
+internalEventHandler _ s (ShiftItem pid) = continueSynced (toggleStatus pid s)
+internalEventHandler _ s (RemoveItems pis) = continueSynced (removeItems pis s)
 
 internalEventHandler es s@(view hsAsync -> Nothing) FetchItems = do
   fetchAsync <- liftIO . async $ do
@@ -92,12 +95,12 @@ internalEventHandler es s@(view hsAsync -> Nothing) FetchItems = do
       Right (PocketItemBatch ts pis) -> do
         es `trigger` Internal (SetStatus Nothing)
         es `trigger` Internal (FetchedItems ts pis)
-  continue (s & hsAsync ?~ fetchAsync)
-internalEventHandler _ s FetchItems = continue s
+  continueSynced (s & hsAsync ?~ fetchAsync)
+internalEventHandler _ s FetchItems = continueSynced s
 
 internalEventHandler _ s (FetchedItems ts pis) =
-  continue (s & insertItems pis & hsAsync .~ Nothing & hsLastUpdated ?~ ts)
-internalEventHandler _ s (SetStatus t) = continue (s & hsStatus .~ t)
+  continueSynced (s & insertItems pis & hsAsync .~ Nothing & hsLastUpdated ?~ ts)
+internalEventHandler _ s (SetStatus t) = continueSynced (s & hsStatus .~ t)
 
 eventHandler :: Chan HocketEvent -> HocketState -> HocketEvent -> EventM (Next HocketState)
 eventHandler es s (VtyEvent e) = vtyEventHandler es s e
@@ -135,7 +138,7 @@ drawGui s = [w]
                  ,hBorder
                  ,vLimit 10 $
                     L.renderList (s ^. pendingList) (listDrawElement (isFocused s pendingListName))
-                 ,hBar "This is the bottom" <+> withAttr "bar" (padLeft Max (txt (maybe "<never>" (sformat F.hms . posixSecondsToUTCTime) (s ^. hsLastUpdated))))
+                 ,hBar " " <+> withAttr "bar" (padLeft Max (txt (maybe "<never>" (sformat F.hms . posixSecondsToUTCTime) (s ^. hsLastUpdated))))
                  ,txt (fromMaybe " " (s ^. hsStatus))
                  ]
 
@@ -144,8 +147,8 @@ focused = Focus.focusGetCurrent . view focusRing
 
 focusedList :: HocketState -> Maybe (L.List PocketItem)
 focusedList s = case focused s of
-                  Just n | n == itemListName -> Just $ s ^. itemList
-                  Just n | n == pendingListName -> Just $ s ^. pendingList
+                  Just n | n == itemListName -> s ^? itemList
+                  Just n | n == pendingListName -> s ^? pendingList
                   _ -> Nothing
 
 isFocused :: HocketState -> Name -> Bool

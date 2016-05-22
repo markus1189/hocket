@@ -29,6 +29,7 @@ module Network.Pocket.Ui.State (HocketState
                                ,syncForRender
                                ) where
 
+import Control.Applicative ((<|>))
 import           Brick (Name)
 import qualified Brick.Focus as F
 import qualified Brick.Widgets.List as L
@@ -36,6 +37,7 @@ import           Control.Concurrent.Async (Async)
 import           Control.Lens
 import           Data.Foldable (foldl',maximumBy,toList)
 import           Data.Function (on)
+import           Data.Functor (($>))
 import           Data.Map (Map)
 import qualified Data.Map as Map
 import           Data.Monoid ((<>))
@@ -125,7 +127,9 @@ toggleStatus pid = hsContents . ix pid . _1 %~ toggle
 
 syncForRender :: HocketState -> HocketState
 syncForRender s = s & itemList . L.listElementsL .~ sortedUnread
+                    & itemList . L.listSelectedL .~ (view (itemList . L.listSelectedL) s <|> (sortedUnread ^? _head $> 0))
                     & pendingList . L.listElementsL .~ sortedPending
+                    & pendingList . L.listSelectedL .~ (view (pendingList . L.listSelectedL) s <|> (sortedPending ^? _head $> 0))
   where partitioned = partitionItems s
         sortedUnread = toVectorOf (at Unread . each . to SL.reverse . to toList . each . to (\(Down (SBU x)) -> x)) partitioned
         sortedPending = toVectorOf (at Pending . each . to SL.reverse . to toList . each . to (\(Down (SBU x)) -> x)) partitioned
