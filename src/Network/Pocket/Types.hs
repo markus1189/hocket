@@ -65,7 +65,9 @@ module Network.Pocket.Types (
 
   Tag (Tag),
   tagName,
-  tagId
+  tagId,
+
+  Has (..)
 ) where
 
 #if __GLASGOW_HASKELL__ < 710

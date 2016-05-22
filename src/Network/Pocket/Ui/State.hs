@@ -104,10 +104,10 @@ pendingList :: Lens' HocketState (L.List PocketItem)
 pendingList = pendingListVi . _ViList
 
 insertItem :: PocketItem -> HocketState -> HocketState
-insertItem pit@(view itemId -> pid) =
-  hsContents . at pid . non (Unread,pit) . _2 %~ newer pit
-  where newer :: PocketItem -> PocketItem -> PocketItem
-        newer pi1 pi2 = maximumBy (comparing (view timeUpdated)) [pi1,pi2]
+insertItem pit@(view itemId -> pid) s =
+  s & hsContents %~ Map.insertWith newer pid (Unread,pit)
+  where newer :: (a,PocketItem) -> (a,PocketItem) -> (a,PocketItem)
+        newer pi1 pi2 = maximumBy (comparing (view timeUpdated . snd)) [pi1,pi2]
 
 insertItems :: Foldable f => f PocketItem -> HocketState -> HocketState
 insertItems = flip (foldl' (flip insertItem))
