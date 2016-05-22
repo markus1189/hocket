@@ -17,10 +17,8 @@ import           Control.Monad.IO.Class (liftIO)
 import           Data.Default (def)
 import           Data.Foldable (for_)
 import           Data.List (isPrefixOf)
-import qualified Data.Map as Map
 import           Data.Maybe (fromMaybe, listToMaybe)
 import           Data.Monoid ((<>))
-import qualified Data.Ord as Ord
 import           Data.Set (Set)
 import qualified Data.Set as Set
 import           Data.Text (Text)
@@ -36,8 +34,7 @@ import           Network.URI
 
 import           Network.Pocket
 import           Network.Pocket.Retrieve
-import           State
-import           Widgets
+import           Network.Pocket.Ui.State
 
 data HocketEvent = Internal InternalEvent
                  | VtyEvent Event
@@ -83,47 +80,28 @@ internalEventHandler :: Chan HocketEvent
                      -> HocketState
                      -> InternalEvent
                      -> EventM (Next HocketState)
-internalEventHandler _ s (ShiftItem pid) =
-  continue =<< case focused s of
-                 Just n | n == itemListName -> shiftItem s pid itemList pendingList
-                 Just n | n == pendingListName -> shiftItem s pid pendingList itemList
-                 _ -> return s
-internalEventHandler _ s (RemoveItems pis) =
-  continue (withContents (Map.filterWithKey (\k _ -> not (Set.member k pis))) s)
+internalEventHandler _ s (ShiftItem pid) = continue (toggleStatus pid s)
+internalEventHandler _ s (RemoveItems pis) = continue (removeItems pis s)
+
 internalEventHandler es s@(view hsAsync -> Nothing) FetchItems = do
   fetchAsync <- liftIO . async $ do
     es `trigger` Internal (SetStatus (Just "fetching"))
     eitherErrorPis <- retrieveItems
     case eitherErrorPis of
-      Left _ ->  es `trigger` Internal (SetStatus (Just "failed"))
+      Left _ -> es `trigger` Internal (SetStatus (Just "failed")) -- TODO reset async
       Right (PocketItemBatch ts pis) -> do
         es `trigger` Internal (SetStatus Nothing)
         es `trigger` Internal (FetchedItems ts pis)
   continue (s & hsAsync ?~ fetchAsync)
-internalEventHandler _ s (FetchedItems ts pis) =
-  continue (addItemsUnread ts pis s & hsAsync .~ Nothing)
-internalEventHandler _ s (SetStatus t) = continue (s & hsStatus .~ t)
 internalEventHandler _ s FetchItems = continue s
+
+internalEventHandler _ s (FetchedItems ts pis) =
+  continue (s & insertItems pis & hsAsync .~ Nothing & hsLastUpdated ?~ ts)
+internalEventHandler _ s (SetStatus t) = continue (s & hsStatus .~ t)
 
 eventHandler :: Chan HocketEvent -> HocketState -> HocketEvent -> EventM (Next HocketState)
 eventHandler es s (VtyEvent e) = vtyEventHandler es s e
 eventHandler es s (Internal e) = internalEventHandler es s e
-
-shiftItem :: HocketState
-           -> PocketItemId
-           -> Lens' HocketState (L.List PocketItem)
-           -> Lens' HocketState (L.List PocketItem)
-           -> EventM HocketState
-shiftItem s _ src tgt = do
-  let (maybeRemoved, srcList) = listRemoveSelected (s ^. src)
-      tgtList = s ^. tgt
-      newTgtList = maybe tgtList
-                         (\removed -> listInsertSorted (Ord.Down . view timeUpdated)
-                                                       removed
-                                                       tgtList)
-                         maybeRemoved
-  return $ s & src .~ srcList
-             & tgt .~ newTgtList
 
 main :: IO ()
 main = do

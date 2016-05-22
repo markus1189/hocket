@@ -1,5 +1,5 @@
 {-# LANGUAGE TemplateHaskell #-}
-module Widgets (ViList(ViList)
+module Network.Pocket.Ui.Widgets (ViList(ViList)
                ,_ViList
                ,EmacsList(..)
                ,_EmacsList
