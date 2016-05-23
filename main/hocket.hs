@@ -45,6 +45,7 @@ data InternalEvent = ShiftItem PocketItemId
                    | FetchItems
                    | FetchedItems POSIXTime [PocketItem]
                    | SetStatus (Maybe Text)
+                   | AsyncActionFailed
                    deriving (Show,Eq)
 
 trigger :: Chan HocketEvent -> HocketEvent -> IO ()
@@ -91,7 +92,8 @@ internalEventHandler es s@(view hsAsync -> Nothing) FetchItems = do
     es `trigger` Internal (SetStatus (Just "fetching"))
     eitherErrorPis <- retrieveItems
     case eitherErrorPis of
-      Left _ -> es `trigger` Internal (SetStatus (Just "failed")) -- TODO reset async
+      Left _ ->
+        es `trigger` Internal AsyncActionFailed
       Right (PocketItemBatch ts pis) -> do
         es `trigger` Internal (SetStatus Nothing)
         es `trigger` Internal (FetchedItems ts pis)
@@ -101,6 +103,9 @@ internalEventHandler _ s FetchItems = continueSynced s
 internalEventHandler _ s (FetchedItems ts pis) =
   continueSynced (s & insertItems pis & hsAsync .~ Nothing & hsLastUpdated ?~ ts)
 internalEventHandler _ s (SetStatus t) = continueSynced (s & hsStatus .~ t)
+internalEventHandler es s AsyncActionFailed = do
+  liftIO (es `trigger` Internal (SetStatus (Just "failed")))
+  continue (s & hsAsync .~ Nothing)
 
 eventHandler :: Chan HocketEvent -> HocketState -> HocketEvent -> EventM (Next HocketState)
 eventHandler es s (VtyEvent e) = vtyEventHandler es s e
