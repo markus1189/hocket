@@ -9,7 +9,7 @@ packages:
 
 # Packages to be pulled from upstream that are not in the resolver (e.g., acme-missiles-0.3)
 extra-deps:
-  - brick-0.6
+  - brick-0.6.4
   - text-zipper-0.3.1
   - vty-5.5.0
   - microlens-0.4.3.0
