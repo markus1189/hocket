@@ -130,6 +130,14 @@ syncForRender s = s & itemList . L.listElementsL .~ sortedUnread
                     & itemList . L.listSelectedL .~ (view (itemList . L.listSelectedL) s <|> (sortedUnread ^? _head $> 0))
                     & pendingList . L.listElementsL .~ sortedPending
                     & pendingList . L.listSelectedL .~ (view (pendingList . L.listSelectedL) s <|> (sortedPending ^? _head $> 0))
+                    & itemList %~ adjustFocus
+                    & pendingList %~ adjustFocus
   where partitioned = partitionItems s
         sortedUnread = toVectorOf (at Unread . each . to SL.reverse . to toList . each . to (\(Down (SBU x)) -> x)) partitioned
         sortedPending = toVectorOf (at Pending . each . to SL.reverse . to toList . each . to (\(Down (SBU x)) -> x)) partitioned
+
+adjustFocus :: L.List a -> L.List a
+adjustFocus l = if n > 0
+                  then l & L.listSelectedL . _Just %~ clamp 0 (n-1)
+                  else l & L.listSelectedL .~ Nothing
+ where n = length (l ^. L.listElementsL)

@@ -4,7 +4,8 @@ module Network.Pocket.Ui.Widgets (ViList(ViList)
                ,EmacsList(..)
                ,_EmacsList
                ,listRemoveSelected
-               ,listInsertSorted) where
+               ,listInsertSorted
+               ,clamp) where
 
 import           Brick (HandleEvent(handleEvent))
 import           Brick.Widgets.List (List)

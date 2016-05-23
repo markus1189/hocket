@@ -51,20 +51,17 @@ data InternalEvent = ShiftItem PocketItemId
 trigger :: Chan HocketEvent -> HocketEvent -> IO ()
 trigger = writeChan
 
-continueSynced :: HocketState -> EventM (Next HocketState)
-continueSynced = continue . syncForRender
-
 vtyEventHandler :: Chan HocketEvent -> HocketState -> Event -> EventM (Next HocketState)
 vtyEventHandler es s (EvKey (KChar 'u') []) = do
   liftIO $ es `trigger` Internal FetchItems
-  continueSynced s
+  continue s
 vtyEventHandler es s (EvKey (KChar 'A') []) = do
   liftIO $ es `trigger`
     Internal (RemoveItems (Set.fromList $ s^..pendingList.L.listElementsL.each.itemId))
-  continueSynced s
+  continue s
 vtyEventHandler es s (EvKey (KChar 'd') []) = do
   liftIO $ for_ maybePid $ \pid -> es `trigger` Internal (ShiftItem pid)
-  continueSynced s
+  continue s
   where
     maybePid :: Maybe PocketItemId
     maybePid = do
@@ -73,9 +70,9 @@ vtyEventHandler es s (EvKey (KChar 'd') []) = do
       return $ item ^. itemId
 vtyEventHandler _ s (EvKey (KChar 'q') []) = halt s
 vtyEventHandler _ s (EvKey (KChar '\t') []) =
-  s & focusRing %~ Focus.focusNext & continueSynced
+  s & focusRing %~ Focus.focusNext & continue
 vtyEventHandler _ s e =
-  continueSynced =<< case focused s of
+  continue =<< case focused s of
                  Just n | n == itemListName -> handleEventLensed s itemListVi e
                  Just n | n == pendingListName -> handleEventLensed s pendingListVi e
                  _ -> return s
@@ -84,8 +81,8 @@ internalEventHandler :: Chan HocketEvent
                      -> HocketState
                      -> InternalEvent
                      -> EventM (Next HocketState)
-internalEventHandler _ s (ShiftItem pid) = continueSynced (toggleStatus pid s)
-internalEventHandler _ s (RemoveItems pis) = continueSynced (removeItems pis s)
+internalEventHandler _ s (ShiftItem pid) = continue (toggleStatus pid s)
+internalEventHandler _ s (RemoveItems pis) = continue (removeItems pis s)
 
 internalEventHandler es s@(view hsAsync -> Nothing) FetchItems = do
   fetchAsync <- liftIO . async $ do
@@ -97,12 +94,12 @@ internalEventHandler es s@(view hsAsync -> Nothing) FetchItems = do
       Right (PocketItemBatch ts pis) -> do
         es `trigger` Internal (SetStatus Nothing)
         es `trigger` Internal (FetchedItems ts pis)
-  continueSynced (s & hsAsync ?~ fetchAsync)
-internalEventHandler _ s FetchItems = continueSynced s
+  continue (s & hsAsync ?~ fetchAsync)
+internalEventHandler _ s FetchItems = continue s
 
 internalEventHandler _ s (FetchedItems ts pis) =
-  continueSynced (s & insertItems pis & hsAsync .~ Nothing & hsLastUpdated ?~ ts)
-internalEventHandler _ s (SetStatus t) = continueSynced (s & hsStatus .~ t)
+  continue (s & insertItems pis & hsAsync .~ Nothing & hsLastUpdated ?~ ts)
+internalEventHandler _ s (SetStatus t) = continue (s & hsStatus .~ t)
 internalEventHandler es s AsyncActionFailed = do
   liftIO (es `trigger` Internal (SetStatus (Just "failed")))
   continue (s & hsAsync .~ Nothing)
@@ -119,7 +116,7 @@ main = do
 app :: Chan HocketEvent -> App HocketState HocketEvent
 app events = App {appDraw = drawGui
                  ,appChooseCursor = Focus.focusRingCursor (view focusRing)
-                 ,appHandleEvent = eventHandler events
+                 ,appHandleEvent = \s e -> fmap syncForRender <$> eventHandler events s e
                  ,appStartEvent = \s -> do liftIO (events `trigger` Internal FetchItems)
                                            return s
                  ,appAttrMap = const hocketAttrMap
