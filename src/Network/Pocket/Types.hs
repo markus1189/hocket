@@ -97,8 +97,8 @@ import           Network.Pocket.Retrieve
 s :: String -> String
 s = id
 
-newtype ConsumerKey = ConsumerKey Text deriving (Show, FormValue)
-newtype AccessToken = AccessToken Text deriving (Show, FormValue)
+newtype ConsumerKey = ConsumerKey Text deriving (Show, FormValue, FromJSON)
+newtype AccessToken = AccessToken Text deriving (Show, FormValue, FromJSON)
 newtype URL = URL String deriving (Show, Eq, FormValue, FromJSON, ToJSON)
 
 data ItemStatus = Normal | IsArchived | ShouldBeDeleted deriving (Show, Eq, Enum, Bounded)
@@ -126,6 +126,11 @@ data PocketCredentials = PocketCredentials { _credConsumerKey :: ConsumerKey
                                            , _credAccessToken :: AccessToken
                                            }
 makeLenses ''PocketCredentials
+
+instance FromJSON PocketCredentials where
+  parseJSON (Object o) = PocketCredentials <$> o .: "consumer-key"
+                                           <*> o .: "access-token"
+  parseJSON _ = mempty
 
 data PocketAPIUrls = PocketAPIUrls { _addEndpoint :: URL
                                    , _retrieveEndpoint :: URL
