@@ -87,7 +87,6 @@ import           Data.Function (on)
 import qualified Data.HashMap.Strict as Map
 import           Data.Text (Text)
 import qualified Data.Text as T
-import           Data.Time.Clock
 import           Data.Time.Clock.POSIX
 import           GHC.Generics
 import           Network.Wreq (FormValue, FormParam((:=)))
@@ -250,9 +249,6 @@ instance FromJSON PocketItem where
   parseJSON _ = mzero
 
 instance ToJSON PocketItem
-
-instance ToJSON NominalDiffTime where
-  toJSON = toJSON . (floor :: NominalDiffTime -> Integer)
 
 data PocketRequest a where
   AddItem :: Text -> PocketRequest Bool
