@@ -12,15 +12,14 @@ import           Control.Concurrent.Async (async)
 import           Control.Concurrent.Chan (newChan,Chan,writeChan)
 import           Control.Exception.Base (try)
 import           Control.Lens
-import           Control.Monad (void)
+import           Control.Monad (void, mfilter)
 import           Control.Monad.IO.Class (liftIO)
 import           Data.Default (def)
 import           Data.Foldable (for_)
 import           Data.List (isPrefixOf)
-import           Data.Maybe (fromMaybe, listToMaybe)
+import           Data.Maybe (fromMaybe, listToMaybe, mapMaybe)
 import           Data.Monoid ((<>))
 import           Data.Set (Set)
-import qualified Data.Set as Set
 import           Data.Text (Text)
 import qualified Data.Text as T
 import           Data.Time.Clock.POSIX (posixSecondsToUTCTime, POSIXTime)
@@ -44,7 +43,7 @@ data InternalEvent = ShiftItem PocketItemId
                    | RemoveItems (Set PocketItemId)
                    | FetchItems
                    | ArchiveItems
-                   | ArchivedItems
+                   | ArchivedItems [PocketItemId]
                    | FetchedItems POSIXTime [PocketItem]
                    | SetStatus (Maybe Text)
                    | AsyncActionFailed
@@ -90,8 +89,7 @@ internalEventHandler es s@(view hsAsync -> Nothing) FetchItems = do
     es `trigger` Internal (SetStatus (Just "fetching"))
     eitherErrorPis <- retrieveItems
     case eitherErrorPis of
-      Left _ ->
-        es `trigger` Internal AsyncActionFailed
+      Left _ -> es `trigger` Internal AsyncActionFailed
       Right (PocketItemBatch ts pis) -> do
         es `trigger` Internal (SetStatus Nothing)
         es `trigger` Internal (FetchedItems ts pis)
@@ -104,6 +102,23 @@ internalEventHandler _ s (SetStatus t) = continue (s & hsStatus .~ t)
 internalEventHandler es s AsyncActionFailed = do
   liftIO (es `trigger` Internal (SetStatus (Just "failed")))
   continue (s & hsAsync .~ Nothing)
+internalEventHandler es s@(view hsAsync -> Nothing) ArchiveItems =
+  case hsNumItems s of
+    (_,0) -> continue s
+    (_,_) -> do
+      archiveAsync <- liftIO . async $ do
+        es `trigger` Internal (SetStatus (Just "archiving"))
+        eitherErrorResults <- performArchive (s ^.. pendingList . L.listElementsL . each)
+        case eitherErrorResults of
+          Left _ -> es `trigger` Internal AsyncActionFailed
+          Right results ->
+            es `trigger` Internal (
+              ArchivedItems (
+                  mapMaybe (\(pit,successful) -> mfilter (const successful)
+                                                 (Just (view itemId pit))) results))
+      continue (s & hsAsync ?~ archiveAsync)
+internalEventHandler _ s ArchiveItems = continue s
+internalEventHandler _ s (ArchivedItems pis) = continue (removeItems pis s)
 
 eventHandler :: Chan HocketEvent -> HocketState -> HocketEvent -> EventM (Next HocketState)
 eventHandler es s (VtyEvent e) = vtyEventHandler es s e
