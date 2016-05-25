@@ -43,6 +43,8 @@ data HocketEvent = Internal InternalEvent
 data InternalEvent = ShiftItem PocketItemId
                    | RemoveItems (Set PocketItemId)
                    | FetchItems
+                   | ArchiveItems
+                   | ArchivedItems
                    | FetchedItems POSIXTime [PocketItem]
                    | SetStatus (Maybe Text)
                    | AsyncActionFailed
@@ -56,8 +58,7 @@ vtyEventHandler es s (EvKey (KChar 'u') []) = do
   liftIO $ es `trigger` Internal FetchItems
   continue s
 vtyEventHandler es s (EvKey (KChar 'A') []) = do
-  liftIO $ es `trigger`
-    Internal (RemoveItems (Set.fromList $ s^..pendingList.L.listElementsL.each.itemId))
+  liftIO $ es `trigger` Internal ArchiveItems
   continue s
 vtyEventHandler es s (EvKey (KChar 'd') []) = do
   liftIO $ for_ maybePid $ \pid -> es `trigger` Internal (ShiftItem pid)
@@ -186,6 +187,13 @@ retrieveItems = tryHttpException
               . runHocket (pocketCredentials, def)
               . pocket
               $ RetrieveItems defaultRetrieval
+
+performArchive :: [PocketItem] -> IO (Either HttpException [(PocketItem, Bool)])
+performArchive items = tryHttpException
+                     . fmap (zip items)
+                     . runHocket (pocketCredentials, def)
+                     . pocket
+                     $ Batch (map (Archive . view itemId) items)
 
 tryHttpException :: IO a -> IO (Either HttpException a)
 tryHttpException = try
