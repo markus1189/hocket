@@ -16,7 +16,7 @@ import           Control.Monad (void, mfilter)
 import           Control.Monad.IO.Class (liftIO)
 import           Data.Default (def)
 import           Data.Foldable (for_)
-import           Data.List (isPrefixOf)
+import           Data.List (isPrefixOf, partition)
 import           Data.Maybe (fromMaybe, listToMaybe, mapMaybe)
 import           Data.Monoid ((<>))
 import           Data.Set (Set)
@@ -96,8 +96,12 @@ internalEventHandler es s@(view hsAsync -> Nothing) FetchItems = do
   continue (s & hsAsync ?~ fetchAsync)
 internalEventHandler _ s FetchItems = continue s
 
-internalEventHandler _ s (FetchedItems ts pis) =
-  continue (s & insertItems pis & hsAsync .~ Nothing & hsLastUpdated ?~ ts)
+internalEventHandler _ s (FetchedItems ts pis) = do
+  let (newItems,toBeDeleted) = partition ((==Normal) . view status) pis
+  continue (s & insertItems newItems
+              & removeItems (toBeDeleted ^.. each . itemId)
+              & hsAsync .~ Nothing
+              & hsLastUpdated ?~ ts)
 internalEventHandler _ s (SetStatus t) = continue (s & hsStatus .~ t)
 internalEventHandler es s AsyncActionFailed = do
   liftIO (es `trigger` Internal (SetStatus (Just "failed")))
