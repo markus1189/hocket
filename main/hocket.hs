@@ -123,7 +123,8 @@ internalEventHandler es s@(view hsAsync -> Nothing) ArchiveItems =
             es `trigger` Internal (SetStatus Nothing)
       continue (s & hsAsync ?~ archiveAsync)
 internalEventHandler _ s ArchiveItems = continue s
-internalEventHandler _ s (ArchivedItems pis) = continue (removeItems pis s)
+internalEventHandler _ s (ArchivedItems pis) = continue (s & removeItems pis
+                                                           & hsAsync .~ Nothing)
 
 eventHandler :: Chan HocketEvent -> HocketState -> HocketEvent -> EventM (Next HocketState)
 eventHandler es s (VtyEvent e) = vtyEventHandler es s e
