@@ -1,3 +1,4 @@
+{-# LANGUAGE TemplateHaskell #-}
 {-# LANGUAGE FlexibleContexts #-}
 {-# LANGUAGE ViewPatterns #-}
 {-# LANGUAGE RankNTypes #-}
@@ -28,12 +29,18 @@ import qualified Formatting as F
 import qualified Formatting.Time as F
 import           Graphics.Vty (Event, mkVty, Key (KChar), Event (EvKey))
 import qualified Graphics.Vty as Vty
+import           Graphics.Vty.Input.Events (Key(KEnter))
 import           Network.HTTP.Client (HttpException)
 import           Network.URI
+import           System.Process (shell, createProcess, createProcess, CreateProcess)
+import           System.Process.Internals (StdStream(CreatePipe))
+import           Text.Printf (printf)
 
 import           Network.Pocket
 import           Network.Pocket.Retrieve
 import           Network.Pocket.Ui.State
+
+makeLensesFor [("std_err", "stdErr"), ("std_out", "stdOut")] ''CreateProcess
 
 data HocketEvent = Internal InternalEvent
                  | VtyEvent Event
@@ -47,12 +54,18 @@ data InternalEvent = ShiftItem PocketItemId
                    | ArchivedItems [PocketItemId]
                    | SetStatus (Maybe Text)
                    | AsyncActionFailed
+                   | BrowseItem PocketItem
                    deriving (Show,Eq)
 
 trigger :: Chan HocketEvent -> HocketEvent -> IO ()
 trigger = writeChan
 
 vtyEventHandler :: Chan HocketEvent -> HocketState -> Event -> EventM (Next HocketState)
+vtyEventHandler es s (EvKey KEnter []) = do
+  liftIO $ for_ (focusedItem s) $ \pit -> do
+    es `trigger` Internal (BrowseItem pit)
+    es `trigger` Internal (ShiftItem (pit ^. itemId))
+  continue s
 vtyEventHandler es s (EvKey (KChar 'u') []) = do
   liftIO $ es `trigger` Internal FetchItems
   continue s
@@ -60,14 +73,8 @@ vtyEventHandler es s (EvKey (KChar 'A') []) = do
   liftIO $ es `trigger` Internal ArchiveItems
   continue s
 vtyEventHandler es s (EvKey (KChar 'd') []) = do
-  liftIO $ for_ maybePid $ \pid -> es `trigger` Internal (ShiftItem pid)
+  liftIO $ for_ (focusedItem s) $ \pit -> es `trigger` Internal (ShiftItem (pit ^. itemId))
   continue s
-  where
-    maybePid :: Maybe PocketItemId
-    maybePid = do
-      list <- focusedList s
-      item <- snd <$> L.listSelectedElement list
-      return $ item ^. itemId
 vtyEventHandler _ s (EvKey (KChar 'q') []) = halt s
 vtyEventHandler _ s (EvKey (KChar '\t') []) =
   s & focusRing %~ Focus.focusNext & continue
@@ -125,6 +132,9 @@ internalEventHandler es s@(view hsAsync -> Nothing) ArchiveItems =
 internalEventHandler _ s ArchiveItems = continue s
 internalEventHandler _ s (ArchivedItems pis) = continue (s & removeItems pis
                                                            & hsAsync .~ Nothing)
+internalEventHandler _ s (BrowseItem pit) = do
+  liftIO $ browseItem "firefox %s" (pit ^. resolvedUrl)
+  continue s
 
 eventHandler :: Chan HocketEvent -> HocketState -> HocketEvent -> EventM (Next HocketState)
 eventHandler es s (VtyEvent e) = vtyEventHandler es s e
@@ -258,3 +268,15 @@ trimURI uri = fromMaybe uri $ do
                             <> uriPath parsed
                             <> uriQuery parsed))
   where strip prefix s = if prefix `isPrefixOf` s then drop (length prefix) s else s
+
+focusedItem :: HocketState -> Maybe PocketItem
+focusedItem s = do
+  list <- focusedList s
+  item <- snd <$> L.listSelectedElement list
+  return item
+
+browseItem :: String -> URL -> IO ()
+browseItem shellCmd (URL url) = do
+  let spec = shell $ printf shellCmd url
+  void . createProcess $ spec & stdOut .~ CreatePipe
+                              & stdErr .~ CreatePipe
