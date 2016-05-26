@@ -87,7 +87,7 @@ internalEventHandler _ s (RemoveItems pis) = continue (removeItems pis s)
 internalEventHandler es s@(view hsAsync -> Nothing) FetchItems = do
   fetchAsync <- liftIO . async $ do
     es `trigger` Internal (SetStatus (Just "fetching"))
-    eitherErrorPis <- retrieveItems
+    eitherErrorPis <- retrieveItems (s ^. hsLastUpdated)
     case eitherErrorPis of
       Left _ -> es `trigger` Internal AsyncActionFailed
       Right (PocketItemBatch ts pis) -> do
@@ -201,11 +201,15 @@ whiteFg = Vty.defAttr `Vty.withForeColor` Vty.white
 hBar :: Text -> Widget
 hBar = withAttr "bar" . padRight Max . txt
 
-retrieveItems :: IO (Either HttpException PocketItemBatch)
+retrieveItems :: Maybe POSIXTime -> IO (Either HttpException PocketItemBatch)
 retrieveItems = tryHttpException
               . runHocket (pocketCredentials, def)
               . pocket
-              $ RetrieveItems defaultRetrieval
+              . RetrieveItems
+              . maybe retrieveAllUnread retrieveDeltaSince
+  where retrieveAllUnread = defaultRetrieval
+        retrieveDeltaSince ts = defaultRetrieval & retrieveSince ?~ ts
+                                                 & retrieveState .~ All
 
 performArchive :: [PocketItem] -> IO (Either HttpException [(PocketItem, Bool)])
 performArchive items = tryHttpException
