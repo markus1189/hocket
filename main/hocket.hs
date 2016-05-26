@@ -42,9 +42,9 @@ data HocketEvent = Internal InternalEvent
 data InternalEvent = ShiftItem PocketItemId
                    | RemoveItems (Set PocketItemId)
                    | FetchItems
+                   | FetchedItems POSIXTime [PocketItem]
                    | ArchiveItems
                    | ArchivedItems [PocketItemId]
-                   | FetchedItems POSIXTime [PocketItem]
                    | SetStatus (Maybe Text)
                    | AsyncActionFailed
                    deriving (Show,Eq)
