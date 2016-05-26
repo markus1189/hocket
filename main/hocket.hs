@@ -115,11 +115,12 @@ internalEventHandler es s@(view hsAsync -> Nothing) ArchiveItems =
         eitherErrorResults <- performArchive (s ^.. pendingList . L.listElementsL . each)
         case eitherErrorResults of
           Left _ -> es `trigger` Internal AsyncActionFailed
-          Right results ->
+          Right results -> do
             es `trigger` Internal (
               ArchivedItems (
                   mapMaybe (\(pit,successful) -> mfilter (const successful)
                                                  (Just (view itemId pit))) results))
+            es `trigger` Internal (SetStatus Nothing)
       continue (s & hsAsync ?~ archiveAsync)
 internalEventHandler _ s ArchiveItems = continue s
 internalEventHandler _ s (ArchivedItems pis) = continue (removeItems pis s)
