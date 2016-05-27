@@ -62,6 +62,10 @@ trigger :: Chan HocketEvent -> HocketEvent -> IO ()
 trigger = writeChan
 
 vtyEventHandler :: Chan HocketEvent -> HocketState -> Event -> EventM (Next HocketState)
+vtyEventHandler es s (EvKey (KChar ' ') []) = do
+  liftIO $ for_ (focusedItem s) $ \pit ->
+    es `trigger` Internal (BrowseItem pit)
+  continue s
 vtyEventHandler es s (EvKey KEnter []) = do
   liftIO $ for_ (focusedItem s) $ \pit -> do
     es `trigger` Internal (BrowseItem pit)
