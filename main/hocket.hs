@@ -24,6 +24,7 @@ import           Data.Set (Set)
 import           Data.Text (Text)
 import qualified Data.Text as T
 import           Data.Time.Clock.POSIX (posixSecondsToUTCTime, POSIXTime)
+import           Data.Time.LocalTime (utcToLocalTime, getCurrentTimeZone, TimeZone, utcToLocalTime)
 import           Formatting (sformat, (%))
 import qualified Formatting as F
 import qualified Formatting.Time as F
@@ -143,17 +144,18 @@ eventHandler es s (Internal e) = internalEventHandler es s e
 main :: IO ()
 main = do
   events <- newChan
-  void (customMain (mkVty def) events (app events) initialState)
+  tz <- getCurrentTimeZone
+  void (customMain (mkVty def) events (app tz events) initialState)
 
-app :: Chan HocketEvent -> App HocketState HocketEvent
-app events = App {appDraw = drawGui
-                 ,appChooseCursor = Focus.focusRingCursor (view focusRing)
-                 ,appHandleEvent = \s e -> fmap syncForRender <$> eventHandler events s e
-                 ,appStartEvent = \s -> do liftIO (events `trigger` Internal FetchItems)
-                                           return s
-                 ,appAttrMap = const hocketAttrMap
-                 ,appLiftVtyEvent = VtyEvent
-                 }
+app :: TimeZone -> Chan HocketEvent -> App HocketState HocketEvent
+app tz events = App {appDraw = drawGui tz
+                    ,appChooseCursor = Focus.focusRingCursor (view focusRing)
+                    ,appHandleEvent = \s e -> fmap syncForRender <$> eventHandler events s e
+                    ,appStartEvent = \s -> do liftIO (events `trigger` Internal FetchItems)
+                                              return s
+                    ,appAttrMap = const hocketAttrMap
+                    ,appLiftVtyEvent = VtyEvent
+                    }
 
 hocketAttrMap :: AttrMap
 hocketAttrMap =
@@ -163,8 +165,8 @@ hocketAttrMap =
                                Vty.black `Vty.withForeColor`
                                Vty.white)]
 
-drawGui :: HocketState -> [Widget]
-drawGui s = [w]
+drawGui :: TimeZone -> HocketState -> [Widget]
+drawGui tz s = [w]
   where w = vBox [hBar ("Hocket: ("
                      <> uncurry (sformat (F.int % "|" % F.int)) (hsNumItems s)
                      <> ")")
@@ -172,7 +174,7 @@ drawGui s = [w]
                  ,hBorder
                  ,vLimit 10 $
                     L.renderList (s ^. pendingList) (listDrawElement (isFocused s pendingListName))
-                 ,hBar " " <+> withAttr "bar" (padLeft Max (txt (maybe "<never>" (sformat F.hms . posixSecondsToUTCTime) (s ^. hsLastUpdated))))
+                 ,hBar " " <+> withAttr "bar" (padLeft Max (txt (maybe "<never>" (sformat F.hms . utcToLocalTime tz . posixSecondsToUTCTime) (s ^. hsLastUpdated))))
                  ,txt (fromMaybe " " (s ^. hsStatus))
                  ]
 
@@ -272,8 +274,7 @@ trimURI uri = fromMaybe uri $ do
 focusedItem :: HocketState -> Maybe PocketItem
 focusedItem s = do
   list <- focusedList s
-  item <- snd <$> L.listSelectedElement list
-  return item
+  snd <$> L.listSelectedElement list
 
 browseItem :: String -> URL -> IO ()
 browseItem shellCmd (URL url) = do
