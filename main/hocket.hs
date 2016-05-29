@@ -15,14 +15,15 @@ import           Control.Exception.Base (try)
 import           Control.Lens
 import           Control.Monad (void, mfilter)
 import           Control.Monad.IO.Class (liftIO)
+import qualified Data.CaseInsensitive as CI
 import           Data.Default (def)
 import           Data.Foldable (for_)
-import           Data.List (isPrefixOf, partition)
+import           Data.List (isPrefixOf, partition, find)
 import           Data.Maybe (fromMaybe, listToMaybe, mapMaybe)
 import           Data.Monoid ((<>))
-import           Data.Set (Set)
 import           Data.Text (Text)
 import qualified Data.Text as T
+import qualified Data.Text.Encoding as T
 import           Data.Time.Clock.POSIX (posixSecondsToUTCTime, POSIXTime)
 import           Data.Time.LocalTime (utcToLocalTime, getCurrentTimeZone, TimeZone, utcToLocalTime)
 import           Formatting (sformat, (%))
@@ -31,32 +32,18 @@ import qualified Formatting.Time as F
 import           Graphics.Vty (Event, mkVty, Key (KChar), Event (EvKey))
 import qualified Graphics.Vty as Vty
 import           Graphics.Vty.Input.Events (Key(KEnter))
-import           Network.HTTP.Client (HttpException)
+import           Network.HTTP.Client (HttpException(StatusCodeException))
 import           Network.URI
 import           System.Process (shell, createProcess, createProcess, CreateProcess)
 import           System.Process.Internals (StdStream(CreatePipe))
 import           Text.Printf (printf)
 
+import           Events
 import           Network.Pocket
 import           Network.Pocket.Retrieve
 import           Network.Pocket.Ui.State
 
 makeLensesFor [("std_err", "stdErr"), ("std_out", "stdOut")] ''CreateProcess
-
-data HocketEvent = Internal InternalEvent
-                 | VtyEvent Event
-                 deriving (Show,Eq)
-
-data InternalEvent = ShiftItem PocketItemId
-                   | RemoveItems (Set PocketItemId)
-                   | FetchItems
-                   | FetchedItems POSIXTime [PocketItem]
-                   | ArchiveItems
-                   | ArchivedItems [PocketItemId]
-                   | SetStatus (Maybe Text)
-                   | AsyncActionFailed
-                   | BrowseItem PocketItem
-                   deriving (Show,Eq)
 
 trigger :: Chan HocketEvent -> HocketEvent -> IO ()
 trigger = writeChan
@@ -64,21 +51,21 @@ trigger = writeChan
 vtyEventHandler :: Chan HocketEvent -> HocketState -> Event -> EventM (Next HocketState)
 vtyEventHandler es s (EvKey (KChar ' ') []) = do
   liftIO $ for_ (focusedItem s) $ \pit ->
-    es `trigger` Internal (BrowseItem pit)
+    es `trigger` browseItemEvt pit
   continue s
 vtyEventHandler es s (EvKey KEnter []) = do
   liftIO $ for_ (focusedItem s) $ \pit -> do
-    es `trigger` Internal (BrowseItem pit)
-    es `trigger` Internal (ShiftItem (pit ^. itemId))
+    es `trigger` browseItemEvt pit
+    es `trigger` shiftItemEvt (pit ^. itemId)
   continue s
 vtyEventHandler es s (EvKey (KChar 'u') []) = do
-  liftIO $ es `trigger` Internal FetchItems
+  liftIO $ es `trigger` fetchItemsEvt
   continue s
 vtyEventHandler es s (EvKey (KChar 'A') []) = do
-  liftIO $ es `trigger` Internal ArchiveItems
+  liftIO $ es `trigger` archiveItemsEvt
   continue s
 vtyEventHandler es s (EvKey (KChar 'd') []) = do
-  liftIO $ for_ (focusedItem s) $ \pit -> es `trigger` Internal (ShiftItem (pit ^. itemId))
+  liftIO $ for_ (focusedItem s) $ \pit -> es `trigger` shiftItemEvt (pit ^. itemId)
   continue s
 vtyEventHandler _ s (EvKey (KChar 'q') []) = halt s
 vtyEventHandler _ s (EvKey (KChar '\t') []) =
@@ -93,53 +80,59 @@ internalEventHandler :: Chan HocketEvent
                      -> HocketState
                      -> InternalEvent
                      -> EventM (Next HocketState)
-internalEventHandler _ s (ShiftItem pid) = continue (toggleStatus pid s)
-internalEventHandler _ s (RemoveItems pis) = continue (removeItems pis s)
+internalEventHandler es s (InternalAsync e) = asyncCommandEventHandler es s e
+internalEventHandler es s (InternalUi e) = uiCommandEventHandler es s e
 
-internalEventHandler es s@(view hsAsync -> Nothing) FetchItems = do
+asyncCommandEventHandler :: Chan HocketEvent -> HocketState -> AsyncCommand -> EventM (Next HocketState)
+asyncCommandEventHandler es s@(view hsAsync -> Nothing) FetchItems = do
   fetchAsync <- liftIO . async $ do
-    es `trigger` Internal (SetStatus (Just "fetching"))
+    es `trigger` setStatusEvt (Just "fetching")
     eitherErrorPis <- retrieveItems (s ^. hsLastUpdated)
     case eitherErrorPis of
-      Left _ -> es `trigger` Internal AsyncActionFailed
+      Left e -> es `trigger` (asyncActionFailedEvt (errorMessageFromException e))
       Right (PocketItemBatch ts pis) -> do
-        es `trigger` Internal (SetStatus Nothing)
-        es `trigger` Internal (FetchedItems ts pis)
+        es `trigger` setStatusEvt Nothing
+        es `trigger` fetchedItemsEvt ts pis
   continue (s & hsAsync ?~ fetchAsync)
-internalEventHandler _ s FetchItems = continue s
+asyncCommandEventHandler _ s FetchItems = continue s
 
-internalEventHandler _ s (FetchedItems ts pis) = do
+asyncCommandEventHandler _ s (FetchedItems ts pis) = do
   let (newItems,toBeDeleted) = partition ((==Normal) . view status) pis
   continue (s & insertItems newItems
               & removeItems (toBeDeleted ^.. each . itemId)
               & hsAsync .~ Nothing
               & hsLastUpdated ?~ ts)
-internalEventHandler _ s (SetStatus t) = continue (s & hsStatus .~ t)
-internalEventHandler es s AsyncActionFailed = do
-  liftIO (es `trigger` Internal (SetStatus (Just "failed")))
+asyncCommandEventHandler es s (AsyncActionFailed err) = do
+  liftIO (es `trigger` setStatusEvt (Just ("failed" <> maybe "" (": " <>) err)))
   continue (s & hsAsync .~ Nothing)
-internalEventHandler es s@(view hsAsync -> Nothing) ArchiveItems =
+asyncCommandEventHandler es s@(view hsAsync -> Nothing) ArchiveItems =
   case hsNumItems s of
     (_,0) -> continue s
     (_,_) -> do
       archiveAsync <- liftIO . async $ do
-        es `trigger` Internal (SetStatus (Just "archiving"))
+        es `trigger` setStatusEvt (Just "archiving")
         eitherErrorResults <- performArchive (s ^.. pendingList . L.listElementsL . each)
         case eitherErrorResults of
-          Left _ -> es `trigger` Internal AsyncActionFailed
+          Left e -> es `trigger` asyncActionFailedEvt (errorMessageFromException e)
           Right results -> do
-            es `trigger` Internal (
-              ArchivedItems (
+            es `trigger` archivedItemsEvt (
                   mapMaybe (\(pit,successful) -> mfilter (const successful)
-                                                 (Just (view itemId pit))) results))
-            es `trigger` Internal (SetStatus Nothing)
+                                                 (Just (view itemId pit))) results)
+            es `trigger` setStatusEvt Nothing
       continue (s & hsAsync ?~ archiveAsync)
-internalEventHandler _ s ArchiveItems = continue s
-internalEventHandler _ s (ArchivedItems pis) = continue (s & removeItems pis
-                                                           & hsAsync .~ Nothing)
-internalEventHandler _ s (BrowseItem pit) = do
+asyncCommandEventHandler _ s ArchiveItems = continue s
+asyncCommandEventHandler _ s (ArchivedItems pis) = continue (s & removeItems pis
+                                                                                 & hsAsync .~ Nothing)
+
+uiCommandEventHandler :: Chan HocketEvent -> HocketState -> UiCommand -> EventM (Next HocketState)
+uiCommandEventHandler _ s (ShiftItem pid) = continue (toggleStatus pid s)
+uiCommandEventHandler _ s (RemoveItems pis) = continue (removeItems pis s)
+uiCommandEventHandler _ s (SetStatus t) = continue (s & hsStatus .~ t)
+uiCommandEventHandler _ s (BrowseItem pit) = do
   liftIO $ browseItem "firefox %s" (pit ^. resolvedUrl)
   continue s
+
+
 
 eventHandler :: Chan HocketEvent -> HocketState -> HocketEvent -> EventM (Next HocketState)
 eventHandler es s (VtyEvent e) = vtyEventHandler es s e
@@ -155,7 +148,7 @@ app :: TimeZone -> Chan HocketEvent -> App HocketState HocketEvent
 app tz events = App {appDraw = drawGui tz
                     ,appChooseCursor = Focus.focusRingCursor (view focusRing)
                     ,appHandleEvent = \s e -> fmap syncForRender <$> eventHandler events s e
-                    ,appStartEvent = \s -> do liftIO (events `trigger` Internal FetchItems)
+                    ,appStartEvent = \s -> do liftIO (events `trigger` fetchItemsEvt)
                                               return s
                     ,appAttrMap = const hocketAttrMap
                     ,appLiftVtyEvent = VtyEvent
@@ -285,3 +278,8 @@ browseItem shellCmd (URL url) = do
   let spec = shell $ printf shellCmd url
   void . createProcess $ spec & stdOut .~ CreatePipe
                               & stdErr .~ CreatePipe
+
+errorMessageFromException :: HttpException -> Maybe Text
+errorMessageFromException (StatusCodeException _ hs _) =
+  fmap (T.decodeUtf8 . snd) $ (find (\(k,_) -> k == CI.mk ("x-error"))) hs
+errorMessageFromException _ = Nothing
