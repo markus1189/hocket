@@ -68,10 +68,10 @@ makeLenses ''HocketState
 newtype SortByUpdated = SBU PocketItem
 
 instance Eq SortByUpdated where
-  SBU pi1 == SBU pi2 = ((==) `on` view timeUpdated) pi1 pi2
+  SBU pi1 == SBU pi2 = ((==) `on` view timeAdded) pi1 pi2
 
 instance Ord SortByUpdated where
-  compare (SBU pi1) (SBU pi2) = (compare `on` view timeUpdated) pi1 pi2
+  compare (SBU pi1) (SBU pi2) = (compare `on` view timeAdded) pi1 pi2
 
 partitionItems :: HocketState -> Map Status (SortedList SortByUpdated)
 partitionItems = Map.fromListWith (<>)
@@ -109,7 +109,7 @@ insertItem :: PocketItem -> HocketState -> HocketState
 insertItem pit@(view itemId -> pid) s =
   s & hsContents %~ Map.insertWith newer pid (Unread,pit)
   where newer :: (a,PocketItem) -> (a,PocketItem) -> (a,PocketItem)
-        newer pi1 pi2 = maximumBy (comparing (view timeUpdated . snd)) [pi1,pi2]
+        newer pi1 pi2 = maximumBy (comparing (view timeAdded . snd)) [pi1,pi2]
 
 insertItems :: Foldable f => f PocketItem -> HocketState -> HocketState
 insertItems = flip (foldl' (flip insertItem))

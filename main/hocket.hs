@@ -250,7 +250,7 @@ txtDisplay pit = txt (T.justifyRight 12 ' ' leftEdge)
   where resolved = view resolvedTitle pit
         given = view givenTitle pit
         (URL url) = view resolvedUrl pit
-        added = posixSecondsToUTCTime (view timeUpdated pit)
+        added = posixSecondsToUTCTime (view timeAdded pit)
         leftEdge = "("
                 <> sformat (F.dayOfMonth <> " " % F.monthNameShort <> " " % F.yy) added
                 <> ") "
