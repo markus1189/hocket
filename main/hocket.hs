@@ -129,7 +129,7 @@ uiCommandEventHandler _ s (ShiftItem pid) = continue (toggleStatus pid s)
 uiCommandEventHandler _ s (RemoveItems pis) = continue (removeItems pis s)
 uiCommandEventHandler _ s (SetStatus t) = continue (s & hsStatus .~ t)
 uiCommandEventHandler _ s (BrowseItem pit) = do
-  liftIO $ browseItem "firefox %s" (pit ^. resolvedUrl)
+  liftIO $ browseItem "firefox '%s'" (pit ^. resolvedUrl)
   continue s
 
 
