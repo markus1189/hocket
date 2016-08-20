@@ -1,10 +1,10 @@
-resolver: lts-6.0
+resolver: lts-6.12
 
 packages:
 - '.'
 
 extra-deps:
-  - brick-0.6.4
+  - brick-0.8
 
 flags: {}
 

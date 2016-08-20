@@ -10,8 +10,7 @@ module Network.Pocket.Ui.State (HocketState
                                ,hsNumItems
                                ,hsLastUpdated
                                ,hsContents
-                               ,itemListName
-                               ,pendingListName
+                               ,Name (..)
                                ,hsAsync
                                ,hsStatus
 
@@ -30,7 +29,6 @@ module Network.Pocket.Ui.State (HocketState
                                ) where
 
 import Control.Applicative ((<|>))
-import           Brick (Name)
 import qualified Brick.Focus as F
 import qualified Brick.Widgets.List as L
 import           Control.Concurrent.Async (Async)
@@ -54,9 +52,11 @@ import           Network.Pocket.Types
 
 data Status = Pending | Unread deriving (Show,Eq,Ord)
 
-data HocketState = HocketState { _itemListVi :: ViList PocketItem
-                               , _pendingListVi :: ViList PocketItem
-                               , _focusRing :: F.FocusRing
+data Name = ItemListName | PendingListName deriving (Show,Eq,Ord)
+
+data HocketState = HocketState { _itemListVi :: ViList Name PocketItem
+                               , _pendingListVi :: ViList Name PocketItem
+                               , _focusRing :: F.FocusRing Name
                                , _hsLastUpdated :: Maybe POSIXTime
                                , _hsAsync :: Maybe (Async ())
                                , _hsStatus :: Maybe Text
@@ -85,24 +85,18 @@ hsNumItems s = (length $ partitioned ^. at Unread . non (SL.toSortedList [])
   where partitioned = partitionItems s
 
 initialState :: HocketState
-initialState = HocketState (ViList $ L.list itemListName V.empty 1)
-                           (ViList $ L.list pendingListName V.empty 1)
-                           (F.focusRing [itemListName, pendingListName])
+initialState = HocketState (ViList $ L.list ItemListName V.empty 1)
+                           (ViList $ L.list PendingListName V.empty 1)
+                           (F.focusRing [ItemListName, PendingListName])
                            Nothing
                            Nothing
                            Nothing
                            Map.empty
 
-itemListName :: Name
-itemListName = "items"
-
-pendingListName :: Name
-pendingListName = "pending"
-
-itemList :: Lens' HocketState (L.List PocketItem)
+itemList :: Lens' HocketState (L.List Name PocketItem)
 itemList = itemListVi . _ViList
 
-pendingList :: Lens' HocketState (L.List PocketItem)
+pendingList :: Lens' HocketState (L.List Name PocketItem)
 pendingList = pendingListVi . _ViList
 
 insertItem :: PocketItem -> HocketState -> HocketState
@@ -136,7 +130,7 @@ syncForRender s = s & itemList . L.listElementsL .~ sortedUnread
         sortedUnread = toVectorOf (at Unread . each . to SL.reverse . to toList . each . to (\(Down (SBU x)) -> x)) partitioned
         sortedPending = toVectorOf (at Pending . each . to SL.reverse . to toList . each . to (\(Down (SBU x)) -> x)) partitioned
 
-adjustFocus :: L.List a -> L.List a
+adjustFocus :: L.List n a -> L.List n a
 adjustFocus l = if n > 0
                   then l & L.listSelectedL . _Just %~ clamp 0 (n-1)
                   else l & L.listSelectedL .~ Nothing

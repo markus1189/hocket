@@ -42,13 +42,14 @@ import           Events
 import           Network.Pocket
 import           Network.Pocket.Retrieve
 import           Network.Pocket.Ui.State
+import           Network.Pocket.Ui.Widgets
 
 makeLensesFor [("std_err", "stdErr"), ("std_out", "stdOut")] ''CreateProcess
 
 trigger :: Chan HocketEvent -> HocketEvent -> IO ()
 trigger = writeChan
 
-vtyEventHandler :: Chan HocketEvent -> HocketState -> Event -> EventM (Next HocketState)
+vtyEventHandler :: Chan HocketEvent -> HocketState -> Event -> EventM Name (Next HocketState)
 vtyEventHandler es s (EvKey (KChar ' ') []) = do
   liftIO $ for_ (focusedItem s) $ \pit ->
     es `trigger` browseItemEvt pit
@@ -72,18 +73,18 @@ vtyEventHandler _ s (EvKey (KChar '\t') []) =
   s & focusRing %~ Focus.focusNext & continue
 vtyEventHandler _ s e =
   continue =<< case focused s of
-                 Just n | n == itemListName -> handleEventLensed s itemListVi e
-                 Just n | n == pendingListName -> handleEventLensed s pendingListVi e
+                 Just ItemListName -> handleEventLensed s itemListVi handleViListEvent e
+                 Just PendingListName -> handleEventLensed s pendingListVi handleViListEvent e
                  _ -> return s
 
 internalEventHandler :: Chan HocketEvent
                      -> HocketState
                      -> InternalEvent
-                     -> EventM (Next HocketState)
+                     -> EventM Name (Next HocketState)
 internalEventHandler es s (InternalAsync e) = asyncCommandEventHandler es s e
 internalEventHandler es s (InternalUi e) = uiCommandEventHandler es s e
 
-asyncCommandEventHandler :: Chan HocketEvent -> HocketState -> AsyncCommand -> EventM (Next HocketState)
+asyncCommandEventHandler :: Chan HocketEvent -> HocketState -> AsyncCommand -> EventM Name (Next HocketState)
 asyncCommandEventHandler es s@(view hsAsync -> Nothing) FetchItems = do
   fetchAsync <- liftIO . async $ do
     es `trigger` setStatusEvt (Just "fetching")
@@ -124,7 +125,7 @@ asyncCommandEventHandler _ s ArchiveItems = continue s
 asyncCommandEventHandler _ s (ArchivedItems pis) = continue (s & removeItems pis
                                                                                  & hsAsync .~ Nothing)
 
-uiCommandEventHandler :: Chan HocketEvent -> HocketState -> UiCommand -> EventM (Next HocketState)
+uiCommandEventHandler :: Chan HocketEvent -> HocketState -> UiCommand -> EventM Name (Next HocketState)
 uiCommandEventHandler _ s (ShiftItem pid) = continue (toggleStatus pid s)
 uiCommandEventHandler _ s (RemoveItems pis) = continue (removeItems pis s)
 uiCommandEventHandler _ s (SetStatus t) = continue (s & hsStatus .~ t)
@@ -134,7 +135,7 @@ uiCommandEventHandler _ s (BrowseItem pit) = do
 
 
 
-eventHandler :: Chan HocketEvent -> HocketState -> HocketEvent -> EventM (Next HocketState)
+eventHandler :: Chan HocketEvent -> HocketState -> HocketEvent -> EventM Name (Next HocketState)
 eventHandler es s (VtyEvent e) = vtyEventHandler es s e
 eventHandler es s (Internal e) = internalEventHandler es s e
 
@@ -144,7 +145,7 @@ main = do
   tz <- getCurrentTimeZone
   void (customMain (mkVty def) events (app tz events) initialState)
 
-app :: TimeZone -> Chan HocketEvent -> App HocketState HocketEvent
+app :: TimeZone -> Chan HocketEvent -> App HocketState HocketEvent Name
 app tz events = App {appDraw = drawGui tz
                     ,appChooseCursor = Focus.focusRingCursor (view focusRing)
                     ,appHandleEvent = \s e -> fmap syncForRender <$> eventHandler events s e
@@ -156,21 +157,21 @@ app tz events = App {appDraw = drawGui tz
 
 hocketAttrMap :: AttrMap
 hocketAttrMap =
-  attrMap Vty.defAttr [("list" <> "selectedItem", boldBlackOnOrange)
+  attrMap Vty.defAttr [("list" <> "selected" <> "focused", boldBlackOnOrange)
                       ,("list" <> "unselectedItem", whiteFg)
                       ,("bar", Vty.defAttr `Vty.withBackColor`
                                Vty.black `Vty.withForeColor`
                                Vty.white)]
 
-drawGui :: TimeZone -> HocketState -> [Widget]
+drawGui :: TimeZone -> HocketState -> [Widget Name]
 drawGui tz s = [w]
   where w = vBox [hBar ("Hocket: ("
                      <> uncurry (sformat (F.int % "|" % F.int)) (hsNumItems s)
                      <> ")")
-                 ,L.renderList (s ^. itemList) (listDrawElement (isFocused s itemListName))
+                 ,L.renderList listDrawElement (isFocused s ItemListName) (s ^. itemList)
                  ,hBorder
                  ,vLimit 10 $
-                    L.renderList (s ^. pendingList) (listDrawElement (isFocused s pendingListName))
+                    L.renderList listDrawElement (isFocused s PendingListName) (s ^. pendingList)
                  ,hBar " " <+> withAttr "bar" (padLeft Max (txt (maybe "<never>" (sformat F.hms . utcToLocalTime tz . posixSecondsToUTCTime) (s ^. hsLastUpdated))))
                  ,txt (fromMaybe " " (s ^. hsStatus))
                  ]
@@ -178,20 +179,20 @@ drawGui tz s = [w]
 focused :: HocketState -> Maybe Name
 focused = Focus.focusGetCurrent . view focusRing
 
-focusedList :: HocketState -> Maybe (L.List PocketItem)
+focusedList :: HocketState -> Maybe (L.List Name PocketItem)
 focusedList s = case focused s of
-                  Just n | n == itemListName -> s ^? itemList
-                  Just n | n == pendingListName -> s ^? pendingList
+                  Just n | n == ItemListName -> s ^? itemList
+                  Just n | n == PendingListName -> s ^? pendingList
                   _ -> Nothing
 
 isFocused :: HocketState -> Name -> Bool
 isFocused s name = maybe False (==name) (focused s)
 
-listDrawElement :: Bool -> Bool -> PocketItem -> Widget
-listDrawElement hasFocus sel e = (if hasFocus && sel
-                                    then withAttr ("list" <> "selectedItem")
-                                    else withAttr ("list" <> "unselectedItem"))
-                                 (padRight Max (txtDisplay e))
+listDrawElement :: Bool -> PocketItem -> Widget Name
+listDrawElement sel e = (if sel
+                           then withAttr ("list" <> "selectedItem")
+                           else withAttr ("list" <> "unselectedItem"))
+                        (padRight Max (txtDisplay e))
 
 orange :: Vty.Color
 orange = Vty.rgbColor 215 135 (0::Int)
@@ -209,7 +210,7 @@ black = Vty.rgbColor zero zero zero
 whiteFg :: Vty.Attr
 whiteFg = Vty.defAttr `Vty.withForeColor` Vty.white
 
-hBar :: Text -> Widget
+hBar :: Text -> Widget Name
 hBar = withAttr "bar" . padRight Max . txt
 
 retrieveItems :: Maybe POSIXTime -> IO (Either HttpException PocketItemBatch)
@@ -241,7 +242,7 @@ defaultRetrieval = def & retrieveSort ?~ NewestFirst
                        & retrieveCount .~ NoLimit
                        & retrieveDetailType ?~ Complete
 
-txtDisplay :: PocketItem -> Widget
+txtDisplay :: PocketItem -> Widget Name
 txtDisplay pit = txt (T.justifyRight 12 ' ' leftEdge)
              <+> txt (fromMaybe "<empty>"
                                  (listToMaybe $ filter (not . T.null)
