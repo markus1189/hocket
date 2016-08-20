@@ -103,7 +103,7 @@ insertItem :: PocketItem -> HocketState -> HocketState
 insertItem pit@(view itemId -> pid) s =
   s & hsContents %~ Map.insertWith newer pid (Unread,pit)
   where newer :: (a,PocketItem) -> (a,PocketItem) -> (a,PocketItem)
-        newer pi1 pi2 = maximumBy (comparing (view timeAdded . snd)) [pi1,pi2]
+        newer pi1 pi2 = maximumBy (comparing (view timeUpdated . snd)) [pi1,pi2]
 
 insertItems :: Foldable f => f PocketItem -> HocketState -> HocketState
 insertItems = flip (foldl' (flip insertItem))
