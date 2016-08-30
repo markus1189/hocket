@@ -34,6 +34,8 @@ import qualified Graphics.Vty as Vty
 import           Graphics.Vty.Input.Events (Key(KEnter))
 import           Network.HTTP.Client (HttpException(StatusCodeException))
 import           Network.URI
+import           System.Environment (getArgs)
+import           System.Exit (exitSuccess, exitFailure)
 import           System.Process (shell, createProcess, createProcess, CreateProcess)
 import           System.Process.Internals (StdStream(CreatePipe))
 import           Text.Printf (printf)
@@ -90,7 +92,7 @@ asyncCommandEventHandler es s@(view hsAsync -> Nothing) FetchItems = do
     es `trigger` setStatusEvt (Just "fetching")
     eitherErrorPis <- retrieveItems (s ^. hsLastUpdated)
     case eitherErrorPis of
-      Left e -> es `trigger` (asyncActionFailedEvt (errorMessageFromException e))
+      Left e -> es `trigger` asyncActionFailedEvt (errorMessageFromException e)
       Right (PocketItemBatch ts pis) -> do
         es `trigger` setStatusEvt Nothing
         es `trigger` fetchedItemsEvt ts pis
@@ -141,9 +143,34 @@ eventHandler es s (Internal e) = internalEventHandler es s e
 
 main :: IO ()
 main = do
-  events <- newChan
-  tz <- getCurrentTimeZone
-  void (customMain (mkVty def) events (app tz events) initialState)
+  args <- getArgs
+  case length args of
+    1 -> addToPocket (head args)
+    0 -> do
+      events <- newChan
+      tz <- getCurrentTimeZone
+      void (customMain (mkVty def) events (app tz events) initialState)
+    _ -> do
+      putStrLn $ "Invalid args: " ++ show args
+      exitFailure
+
+addToPocket :: String -> IO ()
+addToPocket url = do
+  putStrLn url
+  res <- tryHttpException
+           . runHocket (pocketCredentials, def)
+           . pocket
+           . AddItem
+           $ T.pack url
+  case res of
+    Left e -> do
+      putStrLn $ "Error during request: " ++ show e
+      exitFailure
+    Right False -> do
+      putStrLn "Could not add item."
+      exitFailure
+    Right True ->
+      exitSuccess
 
 app :: TimeZone -> Chan HocketEvent -> App HocketState HocketEvent Name
 app tz events = App {appDraw = drawGui tz
@@ -282,5 +309,5 @@ browseItem shellCmd (URL url) = do
 
 errorMessageFromException :: HttpException -> Maybe Text
 errorMessageFromException (StatusCodeException _ hs _) =
-  fmap (T.decodeUtf8 . snd) $ (find (\(k,_) -> k == CI.mk ("x-error"))) hs
+  T.decodeUtf8 . snd <$> find (\(k,_) -> k == CI.mk "x-error") hs
 errorMessageFromException _ = Nothing
