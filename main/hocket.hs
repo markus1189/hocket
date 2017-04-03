@@ -5,12 +5,13 @@
 {-# LANGUAGE OverloadedStrings #-}
 module Main (main) where
 
-import           Brick
+import qualified Brick as B
+import           Brick hiding (VtyEvent)
+import           Brick.BChan (newBChan, BChan, writeBChan)
 import qualified Brick.Focus as Focus
 import           Brick.Widgets.Border (hBorder)
 import qualified Brick.Widgets.List as L
 import           Control.Concurrent.Async (async)
-import           Control.Concurrent.Chan (newChan,Chan,writeChan)
 import           Control.Exception.Base (try)
 import           Control.Lens
 import           Control.Monad (void, mfilter)
@@ -32,7 +33,7 @@ import qualified Formatting.Time as F
 import           Graphics.Vty (Event, mkVty, Key (KChar), Event (EvKey))
 import qualified Graphics.Vty as Vty
 import           Graphics.Vty.Input.Events (Key(KEnter))
-import           Network.HTTP.Client (HttpException(StatusCodeException))
+import           Network.HTTP.Client (HttpException(HttpExceptionRequest), HttpExceptionContent(StatusCodeException), responseHeaders)
 import           Network.URI
 import           System.Environment (getArgs)
 import           System.Exit (exitSuccess, exitFailure)
@@ -48,10 +49,10 @@ import           Network.Pocket.Ui.Widgets
 
 makeLensesFor [("std_err", "stdErr"), ("std_out", "stdOut")] ''CreateProcess
 
-trigger :: Chan HocketEvent -> HocketEvent -> IO ()
-trigger = writeChan
+trigger :: BChan HocketEvent -> HocketEvent -> IO ()
+trigger = writeBChan
 
-vtyEventHandler :: Chan HocketEvent -> HocketState -> Event -> EventM Name (Next HocketState)
+vtyEventHandler :: BChan HocketEvent -> HocketState -> Event -> EventM Name (Next HocketState)
 vtyEventHandler es s (EvKey (KChar ' ') []) = do
   liftIO $ for_ (focusedItem s) $ \pit ->
     es `trigger` browseItemEvt pit
@@ -79,14 +80,14 @@ vtyEventHandler _ s e =
                  Just PendingListName -> handleEventLensed s pendingListVi handleViListEvent e
                  _ -> return s
 
-internalEventHandler :: Chan HocketEvent
+internalEventHandler :: BChan HocketEvent
                      -> HocketState
                      -> InternalEvent
                      -> EventM Name (Next HocketState)
 internalEventHandler es s (InternalAsync e) = asyncCommandEventHandler es s e
 internalEventHandler es s (InternalUi e) = uiCommandEventHandler es s e
 
-asyncCommandEventHandler :: Chan HocketEvent -> HocketState -> AsyncCommand -> EventM Name (Next HocketState)
+asyncCommandEventHandler :: BChan HocketEvent -> HocketState -> AsyncCommand -> EventM Name (Next HocketState)
 asyncCommandEventHandler es s@(view hsAsync -> Nothing) FetchItems = do
   fetchAsync <- liftIO . async $ do
     es `trigger` setStatusEvt (Just "fetching")
@@ -127,7 +128,7 @@ asyncCommandEventHandler _ s ArchiveItems = continue s
 asyncCommandEventHandler _ s (ArchivedItems pis) = continue (s & removeItems pis
                                                                                  & hsAsync .~ Nothing)
 
-uiCommandEventHandler :: Chan HocketEvent -> HocketState -> UiCommand -> EventM Name (Next HocketState)
+uiCommandEventHandler :: BChan HocketEvent -> HocketState -> UiCommand -> EventM Name (Next HocketState)
 uiCommandEventHandler _ s (ShiftItem pid) = continue (toggleStatus pid s)
 uiCommandEventHandler _ s (RemoveItems pis) = continue (removeItems pis s)
 uiCommandEventHandler _ s (SetStatus t) = continue (s & hsStatus .~ t)
@@ -137,9 +138,10 @@ uiCommandEventHandler _ s (BrowseItem pit) = do
 
 
 
-eventHandler :: Chan HocketEvent -> HocketState -> HocketEvent -> EventM Name (Next HocketState)
-eventHandler es s (VtyEvent e) = vtyEventHandler es s e
-eventHandler es s (Internal e) = internalEventHandler es s e
+eventHandler :: BChan HocketEvent -> HocketState -> BrickEvent Name HocketEvent -> EventM Name (Next HocketState)
+eventHandler es s (B.VtyEvent e) = vtyEventHandler es s e
+eventHandler es s (AppEvent (VtyEvent e)) = vtyEventHandler es s e
+eventHandler es s (AppEvent (Internal e)) = internalEventHandler es s e
 
 main :: IO ()
 main = do
@@ -147,9 +149,9 @@ main = do
   case length args of
     1 -> addToPocket (head args)
     0 -> do
-      events <- newChan
+      events <- newBChan 10
       tz <- getCurrentTimeZone
-      void (customMain (mkVty def) events (app tz events) initialState)
+      void (customMain (mkVty Vty.defaultConfig) (Just events) (app tz events) initialState)
     _ -> do
       putStrLn $ "Invalid args: " ++ show args
       exitFailure
@@ -172,14 +174,13 @@ addToPocket url = do
     Right True ->
       exitSuccess
 
-app :: TimeZone -> Chan HocketEvent -> App HocketState HocketEvent Name
+app :: TimeZone -> BChan HocketEvent -> App HocketState HocketEvent Name
 app tz events = App {appDraw = drawGui tz
                     ,appChooseCursor = Focus.focusRingCursor (view focusRing)
                     ,appHandleEvent = \s e -> fmap syncForRender <$> eventHandler events s e
                     ,appStartEvent = \s -> do liftIO (events `trigger` fetchItemsEvt)
                                               return s
                     ,appAttrMap = const hocketAttrMap
-                    ,appLiftVtyEvent = VtyEvent
                     }
 
 hocketAttrMap :: AttrMap
@@ -308,6 +309,6 @@ browseItem shellCmd (URL url) = do
                               & stdErr .~ CreatePipe
 
 errorMessageFromException :: HttpException -> Maybe Text
-errorMessageFromException (StatusCodeException _ hs _) =
-  T.decodeUtf8 . snd <$> find (\(k,_) -> k == CI.mk "x-error") hs
-errorMessageFromException _ = Nothing
+errorMessageFromException (HttpExceptionRequest _ (StatusCodeException resp _)) =
+  T.decodeUtf8 . snd <$> find (\(k,_) -> k == CI.mk "x-error") (responseHeaders resp)
+errorMessageFromException e = Just . T.pack $ show e

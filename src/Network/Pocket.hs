@@ -15,9 +15,8 @@ module Network.Pocket (
 import           Control.Applicative ((<$>),(<*>))
 #endif
 
-import           Control.Lens (_Left, view, _2, magnify, Getter)
+import           Control.Lens (view, _2, magnify, Getter)
 import           Control.Lens.Operators
-import           Control.Lens.TH
 import           Control.Monad.IO.Class (liftIO)
 import           Control.Monad.Reader.Class
 import           Data.Aeson.Lens (key, members, _JSON, values, _Bool, _Integral)
@@ -25,12 +24,11 @@ import           Data.Maybe (fromMaybe)
 import qualified Data.Text.Lazy as TL
 import qualified Data.Text.Lazy.Encoding as TLE
 import qualified Network.HTTP.Client as HC
+import qualified Network.HTTP.Client.TLS as HCT
 import           Network.HTTP.Types.Status
 import qualified Network.Wreq as W
 
 import           Network.Pocket.Types
-
-makeLensesFor [("managerResponseTimeout", "managerResponseTimeout")] ''HC.ManagerSettings
 
 selectEndpoint :: PocketRequest a -> Hocket URL
 selectEndpoint req = magnify _2 $ view (sel req)
@@ -45,7 +43,8 @@ selectEndpoint req = magnify _2 $ view (sel req)
 pocket :: PocketRequest a -> Hocket a
 pocket req = do
   (URL ep,c) <- (,) <$> selectEndpoint req <*> asks fst
-  let opts = W.defaults & W.manager . _Left . managerResponseTimeout ?~ 10e7
+  let opts = W.defaults & W.manager .~ Left (HCT.tlsManagerSettings {
+                                                HC.managerResponseTimeout = HC.responseTimeoutMicro (10 * 1000 * 1000) } )
   resp <- liftIO . W.postWith opts ep $ toFormParams (c,req)
   return $ case req of
     Raw _ -> resp ^. W.responseBody & TL.toStrict . TLE.decodeUtf8

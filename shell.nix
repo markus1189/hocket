@@ -4,7 +4,9 @@ let
 
   inherit (nixpkgs) pkgs;
 
-  f = { mkDerivation, aeson, async, attoparsec, base, brick
+  version = "0.2.0.0";
+
+  hocket = { mkDerivation, aeson, async, attoparsec, base, brick
       , bytestring, case-insensitive, ConfigFile, containers
       , data-default, formatting, http-client, http-types, lens
       , lens-action, lens-aeson, microlens, mtl, network-uri, old-locale
@@ -14,7 +16,7 @@ let
       }:
       mkDerivation {
         pname = "hocket";
-        version = "0.2.0.0";
+        version = "${version}";
         src = ./.;
         isLibrary = true;
         isExecutable = true;
@@ -35,12 +37,13 @@ let
         license = stdenv.lib.licenses.bsd3;
       };
 
-  haskellPackages = if compiler == "default"
-                       then pkgs.haskellPackages
-                       else pkgs.haskell.packages.${compiler};
+  haskellPackages =
+    if compiler == "default"
+      then pkgs.haskellPackages
+      else pkgs.haskell.packages.${compiler};
 
-  drv = haskellPackages.callPackage f {};
+  hocketDrv = haskellPackages.callPackage hocket {};
 
 in
 
-  if pkgs.lib.inNixShell then drv.env else drv
+  if pkgs.lib.inNixShell then hocketDrv.env else [ hocketDrv ]
