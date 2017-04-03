@@ -56,6 +56,7 @@ executable hocket
   ghc-options:         -Wall -threaded
   main-is:             hocket.hs
   hs-source-dirs:      main
+  other-modules:       Events
   build-depends:       async
                      , base
                      , brick

@@ -332,7 +332,7 @@ defaultRetrieval =
 
 txtDisplay :: PocketItem -> Widget Name
 txtDisplay pit =
-  txt (T.justifyRight 12 ' ' leftEdge) <+>
+  txt (T.justifyRight 10 ' ' leftEdge) <+>
   txt
     (fromMaybe
        "<empty>"
@@ -344,9 +344,7 @@ txtDisplay pit =
     (URL url) = view resolvedUrl pit
     added = posixSecondsToUTCTime (view timeAdded pit)
     leftEdge =
-      "(" <>
-      sformat (F.dayOfMonth <> " " % F.monthNameShort <> " " % F.yy) added <>
-      ") "
+      sformat (F.year % "-" <> F.month % "-" <> F.dayOfMonth) added <> ": "
     trimmedUrl = T.pack (trimURI url)
 
 horizontalUriLimit :: Int
