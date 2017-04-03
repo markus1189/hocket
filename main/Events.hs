@@ -1,5 +1,4 @@
 module Events (HocketEvent(..)
-              ,InternalEvent(..)
               ,AsyncCommand(..)
               ,UiCommand(..)
               ,fetchItemsEvt
@@ -16,17 +15,12 @@ module Events (HocketEvent(..)
 import           Data.Set (Set)
 import           Data.Text (Text)
 import           Data.Time.Clock.POSIX (POSIXTime)
-import           Graphics.Vty (Event)
 
 import           Network.Pocket
 
-data HocketEvent = Internal InternalEvent
-                 | VtyEvent Event
+data HocketEvent = HocketAsync AsyncCommand
+                 | HocketUi UiCommand
                  deriving (Show,Eq)
-
-data InternalEvent = InternalAsync AsyncCommand
-                   | InternalUi UiCommand
-                   deriving (Show,Eq)
 
 data AsyncCommand = FetchItems
                   | FetchedItems POSIXTime [PocketItem]
@@ -42,28 +36,28 @@ data UiCommand = ShiftItem PocketItemId
                deriving (Show,Eq)
 
 fetchItemsEvt :: HocketEvent
-fetchItemsEvt = Internal (InternalAsync FetchItems)
+fetchItemsEvt = HocketAsync FetchItems
 
 fetchedItemsEvt :: POSIXTime -> [PocketItem] -> HocketEvent
-fetchedItemsEvt t itms = Internal (InternalAsync (FetchedItems t itms))
+fetchedItemsEvt t itms = HocketAsync (FetchedItems t itms)
 
 archiveItemsEvt :: HocketEvent
-archiveItemsEvt = Internal (InternalAsync ArchiveItems)
+archiveItemsEvt = HocketAsync ArchiveItems
 
 archivedItemsEvt :: [PocketItemId] -> HocketEvent
-archivedItemsEvt pids = Internal (InternalAsync (ArchivedItems pids))
+archivedItemsEvt pids = HocketAsync (ArchivedItems pids)
 
 asyncActionFailedEvt :: Maybe Text -> HocketEvent
-asyncActionFailedEvt maybeMsg = Internal (InternalAsync (AsyncActionFailed maybeMsg))
+asyncActionFailedEvt maybeMsg = HocketAsync (AsyncActionFailed maybeMsg)
 
 shiftItemEvt :: PocketItemId -> HocketEvent
-shiftItemEvt pid = Internal (InternalUi (ShiftItem pid))
+shiftItemEvt pid = HocketUi (ShiftItem pid)
 
 removeItemsEvt :: Set PocketItemId -> HocketEvent
-removeItemsEvt pids = Internal (InternalUi (RemoveItems pids))
+removeItemsEvt pids = HocketUi (RemoveItems pids)
 
 setStatusEvt :: Maybe Text -> HocketEvent
-setStatusEvt mstatus= Internal (InternalUi (SetStatus mstatus))
+setStatusEvt mstatus= HocketUi (SetStatus mstatus)
 
 browseItemEvt :: PocketItem -> HocketEvent
-browseItemEvt pit = Internal (InternalUi (BrowseItem pit))
+browseItemEvt pit = HocketUi (BrowseItem pit)
