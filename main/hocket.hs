@@ -142,6 +142,7 @@ eventHandler :: BChan HocketEvent -> HocketState -> BrickEvent Name HocketEvent 
 eventHandler es s (B.VtyEvent e) = vtyEventHandler es s e
 eventHandler es s (AppEvent (VtyEvent e)) = vtyEventHandler es s e
 eventHandler es s (AppEvent (Internal e)) = internalEventHandler es s e
+eventHandler _ s _ = continue s
 
 main :: IO ()
 main = do
