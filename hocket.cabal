@@ -22,6 +22,7 @@ library
                      , Network.Pocket.Types
                      , Network.Pocket.Ui.State
                      , Network.Pocket.Ui.Widgets
+                     , Network.Pocket.Meta
   Build-depends:       ConfigFile
                      , aeson
                      , async
@@ -44,6 +45,7 @@ library
                      , old-locale
                      , process
                      , sorted-list
+                     , split
                      , text
                      , time
                      , transformers

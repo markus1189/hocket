@@ -45,6 +45,8 @@ module Network.Pocket.Types (
   wordCount,
   itemTags,
   idEq,
+  redditCommentCount,
+  isRedditUrl,
 
   PocketItemId (..),
   ItemStatus (..),
@@ -67,7 +69,10 @@ module Network.Pocket.Types (
   tagName,
   tagId,
 
-  Has (..)
+  Has (..),
+
+  RedditCommentCount (..),
+  subredditAndArticleId
 ) where
 
 #if __GLASGOW_HASKELL__ < 710
@@ -76,7 +81,7 @@ import           Data.Traversable (traverse)
 #endif
 
 import           Control.Applicative (empty, Alternative)
-import           Control.Lens (view)
+import           Control.Lens (view, (^.))
 import           Control.Lens.TH
 import           Control.Monad (mzero)
 import           Control.Monad.Trans.Reader (ReaderT, runReaderT)
@@ -85,6 +90,8 @@ import           Data.Aeson.Types (Parser)
 import           Data.Default
 import           Data.Function (on)
 import qualified Data.HashMap.Strict as Map
+import           Data.List (isInfixOf)
+import qualified Data.List.Split as S
 import           Data.Text (Text)
 import qualified Data.Text as T
 import           Data.Time.Clock.POSIX
@@ -211,6 +218,7 @@ data PocketItem =
              , _timeUpdated :: !POSIXTime
              , _wordCount :: !Int
              , _itemTags :: [Tag]
+             , _redditCommentCount :: Maybe Integer
              } deriving (Show,Eq,Generic)
 makeLenses ''PocketItem
 
@@ -246,6 +254,7 @@ instance FromJSON PocketItem where
                      <*> (parseTime <$> o .: "time_updated")
                      <*> (read <$> (o .: "word_count"))
                      <*> ((o .:? "tags") >>= parseTags)
+                     <*> pure Nothing
   parseJSON _ = mzero
 
 instance ToJSON PocketItem
@@ -277,3 +286,27 @@ instance AsFormParams PocketCredentials where
 data PocketItemBatch = PocketItemBatch { _batchTS :: POSIXTime
                                        , _batchItems :: [PocketItem]}
 makeLenses ''PocketItemBatch
+
+subredditAndArticleId :: PocketItem -> Maybe (String, String)
+subredditAndArticleId item = if isRedditUrl rurl
+                               then (,) <$> extractSubreddit rurl <*> extractArticleId rurl
+                               else Nothing
+  where rurl = item ^. resolvedUrl
+
+newtype RedditCommentCount = RedditCommentCount  Integer deriving (Show, Eq)
+
+isRedditUrl :: URL -> Bool
+isRedditUrl (URL url) = prefix `isInfixOf` url
+  where prefix = "reddit.com/r/"
+
+extractSubreddit :: URL -> Maybe String
+extractSubreddit (URL url) = if length splits /= 9
+                                then Nothing
+                                else Just $ splits !! 4
+  where splits = S.splitOn "/" url
+
+extractArticleId :: URL -> Maybe String
+extractArticleId (URL url ) = if length splits /= 9
+                                 then Nothing
+                                 else Just $ splits !! 6
+  where splits = S.splitOn "/" url

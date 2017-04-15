@@ -44,7 +44,7 @@ pocket :: PocketRequest a -> Hocket a
 pocket req = do
   (URL ep,c) <- (,) <$> selectEndpoint req <*> asks fst
   let opts = W.defaults & W.manager .~ Left (HCT.tlsManagerSettings {
-                                                HC.managerResponseTimeout = HC.responseTimeoutMicro (10 * 1000 * 1000) } )
+                                                HC.managerResponseTimeout = HC.responseTimeoutDefault } )
   resp <- liftIO . W.postWith opts ep $ toFormParams (c,req)
   return $ case req of
     Raw _ -> resp ^. W.responseBody & TL.toStrict . TLE.decodeUtf8

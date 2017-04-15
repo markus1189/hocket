@@ -1,3 +1,4 @@
+{-# LANGUAGE TupleSections #-}
 {-# LANGUAGE TemplateHaskell #-}
 {-# LANGUAGE FlexibleContexts #-}
 {-# LANGUAGE ViewPatterns #-}
@@ -8,50 +9,51 @@ module Main
   ( main
   ) where
 
-import Brick
-import Brick.BChan (newBChan, BChan, writeBChan)
+import           Brick
+import           Brick.BChan (newBChan, BChan, writeBChan)
 import qualified Brick.Focus as Focus
-import Brick.Widgets.Border (hBorder)
+import           Brick.Widgets.Border (hBorder)
 import qualified Brick.Widgets.List as L
-import Control.Concurrent.Async (async)
-import Control.Exception.Base (try)
-import Control.Lens
-import Control.Monad (void, mfilter)
-import Control.Monad.IO.Class (liftIO)
+import           Control.Concurrent.Async (async, forConcurrently_)
+import           Control.Exception.Base (try)
+import           Control.Lens
+import           Control.Monad (void, mfilter, when)
+import           Control.Monad.IO.Class (liftIO)
 import qualified Data.CaseInsensitive as CI
-import Data.Default (def)
-import Data.Foldable (for_)
-import Data.List (isPrefixOf, partition, find)
-import Data.Maybe (fromMaybe, listToMaybe, mapMaybe)
-import Data.Monoid ((<>))
-import Data.Text (Text)
+import           Data.Default (def)
+import           Data.Foldable (for_)
+import           Data.List (isPrefixOf, partition, find)
+import           Data.Maybe (fromMaybe, listToMaybe, mapMaybe)
+import           Data.Monoid ((<>))
+import           Data.Text (Text)
 import qualified Data.Text as T
 import qualified Data.Text.Encoding as T
-import Data.Time.Clock.POSIX (posixSecondsToUTCTime, POSIXTime)
-import Data.Time.LocalTime
+import           Data.Time.Clock.POSIX (posixSecondsToUTCTime, POSIXTime)
+import           Data.Time.LocalTime
        (utcToLocalTime, getCurrentTimeZone, TimeZone, utcToLocalTime)
-import Formatting (sformat, (%))
+import           Formatting (sformat, (%), (%.))
 import qualified Formatting as F
 import qualified Formatting.Time as F
-import Graphics.Vty (Event, mkVty, Key(KChar), Event(EvKey))
+import           Graphics.Vty (Event, mkVty, Key(KChar), Event(EvKey))
 import qualified Graphics.Vty as Vty
-import Graphics.Vty.Input.Events (Key(KEnter))
-import Network.HTTP.Client
+import           Graphics.Vty.Input.Events (Key(KEnter))
+import           Network.HTTP.Client
        (HttpException(HttpExceptionRequest),
         HttpExceptionContent(StatusCodeException), responseHeaders)
-import Network.URI
-import System.Environment (getArgs)
-import System.Exit (exitSuccess, exitFailure)
-import System.Process
+import           Network.URI
+import           System.Environment (getArgs)
+import           System.Exit (exitSuccess, exitFailure)
+import           System.Process
        (shell, createProcess, createProcess, CreateProcess)
-import System.Process.Internals (StdStream(CreatePipe))
-import Text.Printf (printf)
+import           System.Process.Internals (StdStream(CreatePipe))
+import           Text.Printf (printf)
 
-import Events
-import Network.Pocket
-import Network.Pocket.Retrieve
-import Network.Pocket.Ui.State
-import Network.Pocket.Ui.Widgets
+import           Events
+import           Network.Pocket
+import           Network.Pocket.Meta (fetchRedditCommentCount)
+import           Network.Pocket.Retrieve
+import           Network.Pocket.Ui.State
+import           Network.Pocket.Ui.Widgets
 
 makeLensesFor [("std_err", "stdErr"), ("std_out", "stdOut")] ''CreateProcess
 
@@ -81,6 +83,14 @@ vtyEventHandler es s (EvKey (KChar 'd') []) = do
     es `trigger` shiftItemEvt (pit ^. itemId)
   continue s
 vtyEventHandler _ s (EvKey (KChar 'q') []) = halt s
+vtyEventHandler es s (EvKey (KChar 'r') []) = do
+  liftIO $ for_ (focusedItem s) $ \pit -> es `trigger` getRedditCommentsEvt [pit]
+  continue s
+vtyEventHandler es s (EvKey (KChar 'R') []) = do
+  let items = s ^.. hsContents . each . _2
+      redditItems = filter (isRedditUrl . view resolvedUrl) items
+  liftIO $ when (not (null redditItems)) $ es `trigger` getRedditCommentsEvt redditItems
+  continue s
 vtyEventHandler _ s (EvKey (KChar '\t') []) =
   s & focusRing %~ Focus.focusNext & continue
 vtyEventHandler _ s e =
@@ -119,12 +129,13 @@ asyncCommandEventHandler es s@(view hsAsync -> Nothing) FetchItems = do
 asyncCommandEventHandler _ s FetchItems = continue s
 asyncCommandEventHandler _ s (FetchedItems ts pis) = do
   let (newItems, toBeDeleted) = partition ((== Normal) . view status) pis
-  continue
-    (s & insertItems newItems & removeItems (toBeDeleted ^.. each . itemId) &
-     hsAsync .~
-     Nothing &
-     hsLastUpdated ?~
-     ts)
+      newS = (s & insertItems newItems & removeItems (toBeDeleted ^.. each . itemId) &
+                  hsAsync .~
+                  Nothing &
+                  hsLastUpdated ?~
+                  ts)
+  continue newS
+
 asyncCommandEventHandler es s (AsyncActionFailed err) = do
   liftIO (es `trigger` setStatusEvt (Just ("failed" <> maybe "" (": " <>) err)))
   continue (s & hsAsync .~ Nothing)
@@ -152,6 +163,17 @@ asyncCommandEventHandler es s@(view hsAsync -> Nothing) ArchiveItems =
 asyncCommandEventHandler _ s ArchiveItems = continue s
 asyncCommandEventHandler _ s (ArchivedItems pis) =
   continue (s & removeItems pis & hsAsync .~ Nothing)
+asyncCommandEventHandler es s (GetRedditCommentCount items) = do
+  liftIO $ es `trigger` setStatusEvt (Just "getting comment counts")
+  let maybeSubredditsAndIds = mapMaybe (\i -> (view itemId i,) <$> subredditAndArticleId i) items
+  asyncGet <- liftIO . async $ do
+    forConcurrently_ maybeSubredditsAndIds $ \(pid, (subreddit, articleId)) -> do
+      eitherErrCount <-(tryHttpException $ fetchRedditCommentCount subreddit articleId)
+      for_ eitherErrCount $ \count -> es `trigger` gotRedditCommentsEvt pid count
+    es `trigger` setStatusEvt Nothing
+  continue (s & hsAsync ?~ asyncGet)
+asyncCommandEventHandler _ s (GotRedditCommentCount pid (RedditCommentCount count)) = do
+  continue (s & hsContents . at pid . _Just . _2 . redditCommentCount ?~ count)
 
 uiCommandEventHandler :: BChan HocketEvent
                       -> HocketState
@@ -337,7 +359,8 @@ txtDisplay pit =
     (fromMaybe
        "<empty>"
        (listToMaybe $ filter (not . T.null) [given, resolved, T.pack url])) <+>
-  padLeft Max (hLimit horizontalUriLimit (txt trimmedUrl))
+  padLeft Max (hLimit horizontalUriLimit (txt trimmedUrl)) <+>
+  txt commentCount
   where
     resolved = view resolvedTitle pit
     given = view givenTitle pit
@@ -345,6 +368,11 @@ txtDisplay pit =
     added = posixSecondsToUTCTime (view timeAdded pit)
     leftEdge =
       sformat (F.year % "-" <> F.month % "-" <> F.dayOfMonth) added <> ": "
+    commentCount =
+      fromMaybe "     " $
+      fmap
+        (sformat ("  " % (F.left 3 ' ' %. F.int) % ""))
+        (pit ^. redditCommentCount)
     trimmedUrl = T.pack (trimURI url)
 
 horizontalUriLimit :: Int
