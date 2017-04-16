@@ -12,6 +12,7 @@ module Events (HocketEvent(..)
               ,browseItemEvt
               ,getRedditCommentsEvt
               ,gotRedditCommentsEvt
+              ,doneWithRedditCommentsEvt
               ) where
 
 import           Data.Set (Set)
@@ -31,6 +32,7 @@ data AsyncCommand = FetchItems
                   | AsyncActionFailed (Maybe Text)
                   | GetRedditCommentCount [PocketItem]
                   | GotRedditCommentCount PocketItemId RedditCommentCount
+                  | DoneWithRedditComments
                   deriving (Show,Eq)
 
 data UiCommand = ShiftItem PocketItemId
@@ -59,6 +61,9 @@ getRedditCommentsEvt pits = HocketAsync (GetRedditCommentCount pits)
 
 gotRedditCommentsEvt :: PocketItemId -> RedditCommentCount -> HocketEvent
 gotRedditCommentsEvt pid count = HocketAsync (GotRedditCommentCount pid count)
+
+doneWithRedditCommentsEvt :: HocketEvent
+doneWithRedditCommentsEvt = HocketAsync DoneWithRedditComments
 
 shiftItemEvt :: PocketItemId -> HocketEvent
 shiftItemEvt pid = HocketUi (ShiftItem pid)

@@ -163,17 +163,21 @@ asyncCommandEventHandler es s@(view hsAsync -> Nothing) ArchiveItems =
 asyncCommandEventHandler _ s ArchiveItems = continue s
 asyncCommandEventHandler _ s (ArchivedItems pis) =
   continue (s & removeItems pis & hsAsync .~ Nothing)
-asyncCommandEventHandler es s (GetRedditCommentCount items) = do
+asyncCommandEventHandler es s@(view hsAsync -> Nothing) (GetRedditCommentCount items) = do
   liftIO $ es `trigger` setStatusEvt (Just "getting comment counts")
   let maybeSubredditsAndIds = mapMaybe (\i -> (view itemId i,) <$> subredditAndArticleId i) items
   asyncGet <- liftIO . async $ do
     forConcurrently_ maybeSubredditsAndIds $ \(pid, (subreddit, articleId)) -> do
       eitherErrCount <-(tryHttpException $ fetchRedditCommentCount subreddit articleId)
       for_ eitherErrCount $ \count -> es `trigger` gotRedditCommentsEvt pid count
+      es `trigger` doneWithRedditCommentsEvt
     es `trigger` setStatusEvt Nothing
   continue (s & hsAsync ?~ asyncGet)
+asyncCommandEventHandler _ s (GetRedditCommentCount _) = continue s
 asyncCommandEventHandler _ s (GotRedditCommentCount pid (RedditCommentCount count)) = do
   continue (s & hsContents . at pid . _Just . _2 . redditCommentCount ?~ count)
+asyncCommandEventHandler _ s DoneWithRedditComments =
+  continue (s & hsAsync .~ Nothing)
 
 uiCommandEventHandler :: BChan HocketEvent
                       -> HocketState
