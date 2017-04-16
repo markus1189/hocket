@@ -13,6 +13,7 @@ module Network.Pocket.Ui.State (HocketState
                                ,Name (..)
                                ,hsAsync
                                ,hsStatus
+                               ,hsCredentials
 
                                ,initialState
                                ,insertItem
@@ -61,6 +62,7 @@ data HocketState = HocketState { _itemListVi :: ViList Name PocketItem
                                , _hsAsync :: Maybe (Async ())
                                , _hsStatus :: Maybe Text
                                , _hsContents :: Map PocketItemId (Status,PocketItem)
+                               , _hsCredentials :: PocketCredentials
                                }
 
 makeLenses ''HocketState
@@ -84,14 +86,15 @@ hsNumItems s = (length $ partitioned ^. at Unread . non (SL.toSortedList [])
                ,length $ partitioned ^. at Pending . non (SL.toSortedList []))
   where partitioned = partitionItems s
 
-initialState :: HocketState
-initialState = HocketState (ViList $ L.list ItemListName V.empty 1)
-                           (ViList $ L.list PendingListName V.empty 1)
-                           (F.focusRing [ItemListName, PendingListName])
-                           Nothing
-                           Nothing
-                           Nothing
-                           Map.empty
+initialState :: PocketCredentials -> HocketState
+initialState cred = HocketState (ViList $ L.list ItemListName V.empty 1)
+                                (ViList $ L.list PendingListName V.empty 1)
+                                (F.focusRing [ItemListName, PendingListName])
+                                Nothing
+                                Nothing
+                                Nothing
+                                Map.empty
+                                cred
 
 itemList :: Lens' HocketState (L.List Name PocketItem)
 itemList = itemListVi . _ViList

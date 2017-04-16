@@ -1,4 +1,5 @@
 {-# OPTIONS_GHC -fno-warn-orphans #-}
+{-# LANGUAGE StandaloneDeriving #-}
 {-# LANGUAGE OverloadedStrings #-}
 {-# LANGUAGE GeneralizedNewtypeDeriving #-}
 {-# LANGUAGE GADTs #-}
@@ -13,8 +14,6 @@ module Network.Pocket.Types (
   URL(..),
 
   PocketCredentials (..),
-  credConsumerKey,
-  credAccessToken,
 
   PocketAPIUrls,
   addEndpoint,
@@ -94,7 +93,9 @@ import           Data.List (isInfixOf)
 import qualified Data.List.Split as S
 import           Data.Text (Text)
 import qualified Data.Text as T
+import qualified Data.Text.Lazy as LT
 import           Data.Time.Clock.POSIX
+import           Dhall (Interpret)
 import           GHC.Generics
 import           Network.Wreq (FormValue, FormParam((:=)))
 
@@ -103,9 +104,9 @@ import           Network.Pocket.Retrieve
 s :: String -> String
 s = id
 
-newtype ConsumerKey = ConsumerKey Text deriving (Show, FormValue, FromJSON)
-newtype AccessToken = AccessToken Text deriving (Show, FormValue, FromJSON)
-newtype URL = URL String deriving (Show, Eq, FormValue, FromJSON, ToJSON)
+newtype ConsumerKey = ConsumerKey LT.Text deriving (Show, FormValue, FromJSON, Generic, Interpret)
+newtype AccessToken = AccessToken LT.Text deriving (Show, FormValue, FromJSON, Generic, Interpret)
+newtype URL = URL String deriving (Show, Eq, FormValue, FromJSON, ToJSON, Generic)
 
 data ItemStatus = Normal | IsArchived | ShouldBeDeleted deriving (Show, Eq, Enum, Bounded)
 
@@ -128,9 +129,10 @@ parseItemState "1" = pure IsArchived
 parseItemState "2" = pure ShouldBeDeleted
 parseItemState _ = empty
 
-data PocketCredentials = PocketCredentials { _credConsumerKey :: ConsumerKey
-                                           , _credAccessToken :: AccessToken
-                                           }
+data PocketCredentials = PocketCredentials { consumerKey :: ConsumerKey
+                                           , accessToken :: AccessToken
+                                           } deriving (Generic)
+instance Interpret PocketCredentials
 makeLenses ''PocketCredentials
 
 instance FromJSON PocketCredentials where

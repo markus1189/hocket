@@ -4,6 +4,7 @@
 {-# LANGUAGE ViewPatterns #-}
 {-# LANGUAGE RankNTypes #-}
 {-# LANGUAGE OverloadedStrings #-}
+{-# LANGUAGE TypeApplications #-}
 
 module Main
   ( main
@@ -31,6 +32,7 @@ import qualified Data.Text.Encoding as T
 import           Data.Time.Clock.POSIX (posixSecondsToUTCTime, POSIXTime)
 import           Data.Time.LocalTime
        (utcToLocalTime, getCurrentTimeZone, TimeZone, utcToLocalTime)
+import           Dhall (input,auto)
 import           Formatting (sformat, (%), (%.))
 import qualified Formatting as F
 import qualified Formatting.Time as F
@@ -118,7 +120,7 @@ asyncCommandEventHandler es s@(view hsAsync -> Nothing) FetchItems = do
   fetchAsync <-
     liftIO . async $ do
       es `trigger` setStatusEvt (Just "fetching")
-      eitherErrorPis <- retrieveItems (s ^. hsLastUpdated)
+      eitherErrorPis <- retrieveItems (s ^. hsCredentials) (s ^. hsLastUpdated)
       case eitherErrorPis of
         Left e ->
           es `trigger` asyncActionFailedEvt (errorMessageFromException e)
@@ -147,7 +149,7 @@ asyncCommandEventHandler es s@(view hsAsync -> Nothing) ArchiveItems =
         liftIO . async $ do
           es `trigger` setStatusEvt (Just "archiving")
           eitherErrorResults <-
-            performArchive (s ^.. pendingList . L.listElementsL . each)
+            performArchive (s ^. hsCredentials) (s ^.. pendingList . L.listElementsL . each)
           case eitherErrorResults of
             Left e ->
               es `trigger` asyncActionFailedEvt (errorMessageFromException e)
@@ -202,8 +204,9 @@ eventHandler _ s _ = continue s
 main :: IO ()
 main = do
   args <- getArgs
+  cred <- input auto "./config.dhall"
   case length args of
-    1 -> addToPocket (head args)
+    1 -> addToPocket cred (head args)
     0 -> do
       events <- newBChan 10
       tz <- getCurrentTimeZone
@@ -212,16 +215,16 @@ main = do
            (mkVty Vty.defaultConfig)
            (Just events)
            (app tz events)
-           initialState)
+           (initialState cred))
     _ -> do
       putStrLn $ "Invalid args: " ++ show args
       exitFailure
 
-addToPocket :: String -> IO ()
-addToPocket url = do
+addToPocket :: PocketCredentials -> String -> IO ()
+addToPocket cred url = do
   putStrLn url
   res <-
-    tryHttpException . runHocket (pocketCredentials, def) . pocket . AddItem $
+    tryHttpException . runHocket (cred, def) . pocket . AddItem $
     T.pack url
   case res of
     Left e -> do
@@ -328,27 +331,23 @@ whiteFg = Vty.defAttr `Vty.withForeColor` Vty.white
 hBar :: Text -> Widget Name
 hBar = withAttr "bar" . padRight Max . txt
 
-retrieveItems :: Maybe POSIXTime -> IO (Either HttpException PocketItemBatch)
-retrieveItems =
-  tryHttpException . runHocket (pocketCredentials, def) . pocket . RetrieveItems .
+retrieveItems :: PocketCredentials -> Maybe POSIXTime -> IO (Either HttpException PocketItemBatch)
+retrieveItems cred =
+  tryHttpException . runHocket (cred, def) . pocket . RetrieveItems .
   maybe retrieveAllUnread retrieveDeltaSince
   where
     retrieveAllUnread = defaultRetrieval
     retrieveDeltaSince ts =
       defaultRetrieval & retrieveSince ?~ ts & retrieveState .~ All
 
-performArchive :: [PocketItem] -> IO (Either HttpException [(PocketItem, Bool)])
-performArchive items =
-  tryHttpException . fmap (zip items) . runHocket (pocketCredentials, def) .
+performArchive :: PocketCredentials -> [PocketItem] -> IO (Either HttpException [(PocketItem, Bool)])
+performArchive cred items =
+  tryHttpException . fmap (zip items) . runHocket (cred, def) .
   pocket $
   Batch (map (Archive . view itemId) items)
 
 tryHttpException :: IO a -> IO (Either HttpException a)
 tryHttpException = try
-
-pocketCredentials :: PocketCredentials
-pocketCredentials = PocketCredentials (ConsumerKey "<consumer-key>")
-                                      (AccessToken "<access-token>")
 
 defaultRetrieval :: RetrieveConfig
 defaultRetrieval =
