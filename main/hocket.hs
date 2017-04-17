@@ -16,6 +16,7 @@ import qualified Brick.Focus as Focus
 import           Brick.Widgets.Border (hBorder)
 import qualified Brick.Widgets.List as L
 import           Control.Concurrent.Async (async, forConcurrently_)
+import           Control.Exception (SomeException)
 import           Control.Exception.Base (try)
 import           Control.Lens
 import           Control.Monad (void, mfilter, when)
@@ -188,8 +189,11 @@ uiCommandEventHandler :: BChan HocketEvent
 uiCommandEventHandler _ s (ShiftItem pid) = continue (toggleStatus pid s)
 uiCommandEventHandler _ s (RemoveItems pis) = continue (removeItems pis s)
 uiCommandEventHandler _ s (SetStatus t) = continue (s & hsStatus .~ t)
-uiCommandEventHandler _ s (BrowseItem pit) = do
-  liftIO $ browseItem "firefox '%s'" (pit ^. resolvedUrl)
+uiCommandEventHandler es s (BrowseItem pit) = do
+  res <- liftIO . try @SomeException $ browseItem "firefox '%s'" (pit ^. resolvedUrl)
+  case res of
+    Left e -> liftIO $ es `trigger` setStatusEvt (Just (T.pack $ show e))
+    Right () -> return ()
   continue s
 
 eventHandler
@@ -347,7 +351,7 @@ performArchive cred items =
   Batch (map (Archive . view itemId) items)
 
 tryHttpException :: IO a -> IO (Either HttpException a)
-tryHttpException = try
+tryHttpException = try @HttpException
 
 defaultRetrieval :: RetrieveConfig
 defaultRetrieval =
