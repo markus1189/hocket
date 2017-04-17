@@ -1,0 +1,4 @@
+{
+  consumerKey: Text,
+  accessToken: Text
+}
