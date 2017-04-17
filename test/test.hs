@@ -39,17 +39,20 @@ pocketItem1 = PocketItem "excerpt"
                          1463904791
                          42
                          []
+                         Nothing
 
 pocketItem2 :: PocketItem
 pocketItem2 = pocketItem1 {_timeUpdated = 1463906099, _givenTitle = "newer given title" }
 
+testState = initialState (PocketCredentials (ConsumerKey "") (AccessToken ""))
+
 unitTests = testGroup "HocketState"
   [ testCase "inserting items into the initial state" $
-      length (insertItem pocketItem1 initialState ^. hsContents) @?= 1
+      length (insertItem pocketItem1 testState ^. hsContents) @?= 1
   , testCase "inserting an item that is present overwrites if newer" $
-      let s = insertItems [pocketItem1,pocketItem2] initialState
+      let s = insertItems [pocketItem1,pocketItem2] testState
       in fmap (view (_2 . givenTitle)) (Map.lookup (view itemId pocketItem1) (view hsContents s)) @?= Just "newer given title"
   , testCase "inserting an item that is present overwrites if newer, insertion order does not matter" $
-      let s = insertItems [pocketItem2,pocketItem1] initialState
+      let s = insertItems [pocketItem2,pocketItem1] testState
       in fmap (view (_2 . givenTitle)) (Map.lookup (view itemId pocketItem1) (view hsContents s)) @?= Just "newer given title"
   ]
