@@ -46,6 +46,7 @@ import           Network.HTTP.Client
 import           Network.URI
 import           System.Environment (getArgs)
 import           System.Exit (exitSuccess, exitFailure)
+import           System.IO
 import           System.Process
        (shell, createProcess, createProcess, CreateProcess)
 import           System.Process.Internals (StdStream(CreatePipe))
@@ -68,10 +69,10 @@ vtyEventHandler :: BChan HocketEvent
                 -> Event
                 -> EventM Name (Next HocketState)
 vtyEventHandler es s (EvKey (KChar ' ') []) = do
-  liftIO $ for_ (focusedItem s) $ \pit -> es `trigger` browseItemEvt pit
+  liftIO . for_ (focusedItem s) $ \pit -> es `trigger` browseItemEvt pit
   continue s
 vtyEventHandler es s (EvKey KEnter []) = do
-  liftIO $ for_ (focusedItem s) $ \pit -> do
+  liftIO . for_ (focusedItem s) $ \pit -> do
     es `trigger` browseItemEvt pit
     es `trigger` shiftItemEvt (pit ^. itemId)
   continue s
@@ -82,7 +83,7 @@ vtyEventHandler es s (EvKey (KChar 'A') []) = do
   liftIO $ es `trigger` archiveItemsEvt
   continue s
 vtyEventHandler es s (EvKey (KChar 'd') []) = do
-  liftIO $ for_ (focusedItem s) $ \pit ->
+  liftIO . for_ (focusedItem s) $ \pit ->
     es `trigger` shiftItemEvt (pit ^. itemId)
   continue s
 vtyEventHandler _ s (EvKey (KChar 'q') []) = halt s
@@ -337,8 +338,11 @@ hBar = withAttr "bar" . padRight Max . txt
 
 retrieveItems :: PocketCredentials -> Maybe POSIXTime -> IO (Either HttpException PocketItemBatch)
 retrieveItems cred =
-  tryHttpException . runHocket (cred, def) . pocket . RetrieveItems .
-  maybe retrieveAllUnread retrieveDeltaSince
+  tryHttpException .
+    runHocket (cred, def) .
+    pocket .
+    RetrieveItems .
+    maybe retrieveAllUnread retrieveDeltaSince
   where
     retrieveAllUnread = defaultRetrieval
     retrieveDeltaSince ts =
