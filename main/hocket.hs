@@ -48,7 +48,7 @@ import           System.Environment (getArgs)
 import           System.Exit (exitSuccess, exitFailure)
 import           System.IO
 import           System.Process
-       (shell, createProcess, createProcess, CreateProcess)
+       (shell, createProcess, CreateProcess, waitForProcess)
 import           System.Process.Internals (StdStream(CreatePipe))
 import           Text.Printf (printf)
 
@@ -412,7 +412,8 @@ focusedItem s = do
 browseItem :: String -> URL -> IO ()
 browseItem shellCmd (URL url) = do
   let spec = shell $ printf shellCmd url
-  void . createProcess $ spec & stdOut .~ CreatePipe & stdErr .~ CreatePipe
+  (_, _, _, ph) <- createProcess $ spec & stdOut .~ CreatePipe & stdErr .~ CreatePipe
+  void . waitForProcess $ ph
 
 errorMessageFromException :: HttpException -> Maybe Text
 errorMessageFromException (HttpExceptionRequest _ (StatusCodeException resp _)) =
