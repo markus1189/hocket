@@ -46,7 +46,6 @@ import           Network.HTTP.Client
 import           Network.URI
 import           System.Environment (getArgs)
 import           System.Exit (exitSuccess, exitFailure)
-import           System.IO
 import           System.Process
        (shell, createProcess, CreateProcess, waitForProcess)
 import           System.Process.Internals (StdStream(CreatePipe))
@@ -215,8 +214,10 @@ main = do
     0 -> do
       events <- newBChan 10
       tz <- getCurrentTimeZone
+      vty <- mkVty Vty.defaultConfig
       void
         (customMain
+           vty
            (mkVty Vty.defaultConfig)
            (Just events)
            (app tz events)
