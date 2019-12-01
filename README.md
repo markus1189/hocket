@@ -19,28 +19,18 @@ with pocket, currently supported features:
 
 ## Installation ##
 
-Hocket can be installed using `cabal`.
-
-Arguments to the executable:
-
-- `gui` - starts the gui
-- `add <url>` - adds `<url>` to your pocket reading list and quits
+Hocket can be installed using `nix`.
 
 ## Authentication ##
 
-Hocket requires a `hocket.cfg` file to authenticate you. Example:
+Hocket requires a `config.dhall` file to authenticate you. Example:
 
 ```
-[Credentials]
-consumer_key = "12345-678912345678912345678912"
-access_token = "abcdefgh-1234-abcd-1234-abcdef"
-
-[Launch]
-launch_cmd = firefox '%s'
+{
+  consumerKey = "xxxxx-xxxxxxxxxxxxxxxxxxxxxxxx",
+  accessToken = "xxxxxxxx-xxxx-xxxx-xxxx-xxxxxx"
+}
 ```
-
-Where `launch_cmd` is used to open a browser for the current pocket
-item.
 
 ## How to get a consumer key and access token ##
 
@@ -68,9 +58,3 @@ https://getpocket.com/auth/authorize?request_token=YOUR_REQUEST_TOKEN&redirect_u
 
 No ;). As said above it is fairly minimalistic to fit my workflow,
 nevertheless contributions are welcome!
-
-## Screenshot ##
-
-(text blur was added post screenshot)
-
-![Screenshot](/pics/hocket.png?raw=true "Hocket screenshot")
