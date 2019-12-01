@@ -2,7 +2,7 @@
 -- documentation, see http://haskell.org/cabal/users-guide/
 
 name:                hocket
-version:             0.1.0.0
+version:             0.2.0.0
 -- synopsis:
 -- description:
 license:             BSD3
@@ -15,50 +15,83 @@ build-type:          Simple
 cabal-version:       >=1.8
 
 library
-  ghc-options:         -Wall -Werror
+  ghc-options:         -Wall
   hs-source-dirs:      src
   exposed-modules:     Network.Pocket
                      , Network.Pocket.Retrieve
                      , Network.Pocket.Types
-                     , Printing
-  Build-depends:       ConfigFile >= 1.1.2 && < 1.2
-                     , aeson >= 0.7 && < 1.0
+                     , Network.Pocket.Ui.State
+                     , Network.Pocket.Ui.Widgets
+                     , Network.Pocket.Meta
+  Build-depends:       ConfigFile
+                     , aeson
+                     , async
                      , attoparsec
-                     , base >= 4 && < 5
+                     , base
+                     , brick
                      , bytestring
-                     , data-default >= 0.5 && < 0.6
-                     , http-client >= 0.3 && < 0.5
-                     , http-types >= 0.8 && < 0.9
-                     , lens >= 4.4 && < 5
-                     , lens-action >= 0.1 && < 0.3
-                     , lens-aeson >= 1.0 && < 1.1
-                     , mtl >= 2.0 && < 2.3
-                     , tables >= 0.4 && < 0.5
-                     , text >= 1.1 && < 1.3
-                     , time >= 1.4 && < 1.6
-                     , transformers >= 0.3 && < 0.5
-                     , unordered-containers >= 0.2 && < 0.3
-                     , wreq >= 0.4 && < 0.5
+                     , containers
+                     , data-default
+                     , dhall
+                     , formatting
+                     , http-client
+                     , http-client-tls
+                     , http-types
+                     , lens
+                     , lens-action
+                     , lens-aeson
+                     , microlens
+                     , mtl
+                     , network-uri
+                     , old-locale
+                     , process
+                     , sorted-list
+                     , split
+                     , text
+                     , time
+                     , transformers
+                     , unordered-containers
+                     , vector
+                     , vty
+                     , wreq
 
 executable hocket
-  ghc-options:         -Wall -threaded -Werror
+  ghc-options:         -Wall -threaded
   main-is:             hocket.hs
   hs-source-dirs:      main
-  build-depends:       ConfigFile >= 1.1.2 && < 1.2
-                     , async >= 2.0 && < 2.1
-                     , base >= 4 && < 5
-                     , bytestring
-                     , data-default >= 0.5 && < 0.6
+  other-modules:       Events
+  build-depends:       async
+                     , base
+                     , brick
+                     , case-insensitive
+                     , containers
+                     , data-default
+                     , dhall
+                     , formatting
                      , hocket
-                     , http-client >= 0.3 && < 0.5
-                     , lens >= 4.4 && < 5
-                     , lens-action >= 0.1 && < 0.3
-                     , mtl >= 2.0 && < 2.3
-                     , old-locale >= 1.0 && < 1.1
-                     , process >= 1.2 && < 1.4
-                     , tables >= 0.4 && < 0.5
-                     , text >= 1.1 && < 1.3
-                     , time >= 1.4 && < 1.6
-                     , transformers >= 0.3 && < 0.5
-                     , vty >= 4.7 && < 5.5
-                     , vty-ui >= 1.7 && < 2.0
+                     , http-client
+                     , lens
+                     , lens-action
+                     , lens-aeson
+                     , microlens
+                     , network-uri
+                     , process
+                     , text
+                     , time
+                     , transformers
+                     , vty
+
+
+test-suite test
+  default-language:    Haskell2010
+  type:                exitcode-stdio-1.0
+  hs-source-dirs:      test
+  main-is:             test.hs
+  build-depends:       base
+                     , containers
+                     , hocket == 0.2.0.0
+                     , lens
+                     , tasty
+                     , tasty-hspec
+                     , tasty-hunit
+                     , tasty-quickcheck

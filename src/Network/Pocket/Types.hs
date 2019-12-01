@@ -1,5 +1,5 @@
 {-# OPTIONS_GHC -fno-warn-orphans #-}
-
+{-# LANGUAGE StandaloneDeriving #-}
 {-# LANGUAGE OverloadedStrings #-}
 {-# LANGUAGE GeneralizedNewtypeDeriving #-}
 {-# LANGUAGE GADTs #-}
@@ -14,8 +14,6 @@ module Network.Pocket.Types (
   URL(..),
 
   PocketCredentials (..),
-  credConsumerKey,
-  credAccessToken,
 
   PocketAPIUrls,
   addEndpoint,
@@ -46,6 +44,8 @@ module Network.Pocket.Types (
   wordCount,
   itemTags,
   idEq,
+  redditCommentCount,
+  isRedditUrl,
 
   PocketItemId (..),
   ItemStatus (..),
@@ -66,7 +66,12 @@ module Network.Pocket.Types (
 
   Tag (Tag),
   tagName,
-  tagId
+  tagId,
+
+  Has (..),
+
+  RedditCommentCount (..),
+  subredditAndArticleId
 ) where
 
 #if __GLASGOW_HASKELL__ < 710
@@ -75,7 +80,7 @@ import           Data.Traversable (traverse)
 #endif
 
 import           Control.Applicative (empty, Alternative)
-import           Control.Lens (view)
+import           Control.Lens (view, (^.))
 import           Control.Lens.TH
 import           Control.Monad (mzero)
 import           Control.Monad.Trans.Reader (ReaderT, runReaderT)
@@ -84,11 +89,13 @@ import           Data.Aeson.Types (Parser)
 import           Data.Default
 import           Data.Function (on)
 import qualified Data.HashMap.Strict as Map
-import           Data.Table hiding (empty)
+import           Data.List (isInfixOf)
+import qualified Data.List.Split as S
 import           Data.Text (Text)
 import qualified Data.Text as T
-import           Data.Time.Clock
+import qualified Data.Text.Lazy as LT
 import           Data.Time.Clock.POSIX
+import           Dhall (Interpret)
 import           GHC.Generics
 import           Network.Wreq (FormValue, FormParam((:=)))
 
@@ -97,9 +104,9 @@ import           Network.Pocket.Retrieve
 s :: String -> String
 s = id
 
-newtype ConsumerKey = ConsumerKey Text deriving (Show, FormValue)
-newtype AccessToken = AccessToken Text deriving (Show, FormValue)
-newtype URL = URL String deriving (Show, Eq, FormValue, FromJSON, ToJSON)
+newtype ConsumerKey = ConsumerKey LT.Text deriving (Show, FormValue, FromJSON, Generic, Interpret)
+newtype AccessToken = AccessToken LT.Text deriving (Show, FormValue, FromJSON, Generic, Interpret)
+newtype URL = URL String deriving (Show, Eq, FormValue, FromJSON, ToJSON, Generic)
 
 data ItemStatus = Normal | IsArchived | ShouldBeDeleted deriving (Show, Eq, Enum, Bounded)
 
@@ -122,10 +129,16 @@ parseItemState "1" = pure IsArchived
 parseItemState "2" = pure ShouldBeDeleted
 parseItemState _ = empty
 
-data PocketCredentials = PocketCredentials { _credConsumerKey :: ConsumerKey
-                                           , _credAccessToken :: AccessToken
-                                           }
+data PocketCredentials = PocketCredentials { consumerKey :: ConsumerKey
+                                           , accessToken :: AccessToken
+                                           } deriving (Generic)
+instance Interpret PocketCredentials
 makeLenses ''PocketCredentials
+
+instance FromJSON PocketCredentials where
+  parseJSON (Object o) = PocketCredentials <$> o .: "consumer-key"
+                                           <*> o .: "access-token"
+  parseJSON _ = mempty
 
 data PocketAPIUrls = PocketAPIUrls { _addEndpoint :: URL
                                    , _retrieveEndpoint :: URL
@@ -207,23 +220,9 @@ data PocketItem =
              , _timeUpdated :: !POSIXTime
              , _wordCount :: !Int
              , _itemTags :: [Tag]
+             , _redditCommentCount :: Maybe Integer
              } deriving (Show,Eq,Generic)
 makeLenses ''PocketItem
-
-instance Tabular PocketItem where
-  type PKT PocketItem = PocketItemId
-  data Key k PocketItem b where
-    PocketItemTId :: Key Primary PocketItem PocketItemId
-  data Tab PocketItem i = PIT (i Primary PocketItemId)
-
-  fetch PocketItemTId = view itemId
-
-  primary = PocketItemTId
-  primarily PocketItemTId r = r
-
-  mkTab f               = PIT <$> f PocketItemTId
-  forTab (PIT x) f = PIT <$> f PocketItemTId x
-  ixTab (PIT x) PocketItemTId  = x
 
 idEq :: PocketItem -> PocketItem -> Bool
 idEq = (==) `on` view itemId
@@ -257,12 +256,10 @@ instance FromJSON PocketItem where
                      <*> (parseTime <$> o .: "time_updated")
                      <*> (read <$> (o .: "word_count"))
                      <*> ((o .:? "tags") >>= parseTags)
+                     <*> pure Nothing
   parseJSON _ = mzero
 
 instance ToJSON PocketItem
-
-instance ToJSON NominalDiffTime where
-  toJSON = toJSON . (floor :: NominalDiffTime -> Integer)
 
 data PocketRequest a where
   AddItem :: Text -> PocketRequest Bool
@@ -291,3 +288,27 @@ instance AsFormParams PocketCredentials where
 data PocketItemBatch = PocketItemBatch { _batchTS :: POSIXTime
                                        , _batchItems :: [PocketItem]}
 makeLenses ''PocketItemBatch
+
+subredditAndArticleId :: PocketItem -> Maybe (String, String)
+subredditAndArticleId item = if isRedditUrl rurl
+                               then (,) <$> extractSubreddit rurl <*> extractArticleId rurl
+                               else Nothing
+  where rurl = item ^. resolvedUrl
+
+newtype RedditCommentCount = RedditCommentCount  Integer deriving (Show, Eq)
+
+isRedditUrl :: URL -> Bool
+isRedditUrl (URL url) = prefix `isInfixOf` url
+  where prefix = "reddit.com/r/"
+
+extractSubreddit :: URL -> Maybe String
+extractSubreddit (URL url) = if length splits /= 9
+                                then Nothing
+                                else Just $ splits !! 4
+  where splits = S.splitOn "/" url
+
+extractArticleId :: URL -> Maybe String
+extractArticleId (URL url ) = if length splits /= 9
+                                 then Nothing
+                                 else Just $ splits !! 6
+  where splits = S.splitOn "/" url

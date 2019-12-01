@@ -1,497 +1,423 @@
-{-# LANGUAGE CPP #-}
-{-# LANGUAGE OverloadedStrings #-}
-{-# LANGUAGE ViewPatterns #-}
-{-# LANGUAGE TemplateHaskell #-}
 {-# LANGUAGE TupleSections #-}
-#if __GLASGOW_HASKELL__ >= 710
-import           Control.Monad.Except (runExceptT)
-import           Data.Foldable (traverse_, for_, foldr', find)
-import           Data.Time.Format (defaultTimeLocale)
-import           Data.Traversable (for)
-#else
-import           Control.Applicative ((<*>), pure,(<$>))
-import           Control.Monad.Except (runExceptT)
-import           Data.Foldable (traverse_, for_, Foldable, foldr', find)
-import           Data.Traversable (Traversable, for)
-import           System.Locale (defaultTimeLocale)
-#endif
+{-# LANGUAGE TemplateHaskell #-}
+{-# LANGUAGE FlexibleContexts #-}
+{-# LANGUAGE ViewPatterns #-}
+{-# LANGUAGE RankNTypes #-}
+{-# LANGUAGE OverloadedStrings #-}
+{-# LANGUAGE TypeApplications #-}
 
-import           Control.Concurrent (forkIO, MVar, takeMVar, readMVar, putMVar, newMVar, swapMVar, modifyMVar_)
-import           Control.Concurrent.Async (async, Async, poll, cancel)
-import           Control.Exception (try)
-import           Control.Lens (_Right, non, preview, view, folded, toListOf)
-import           Control.Lens.Action (perform, act, (^!))
-import           Control.Lens.Operators
-import           Control.Lens.TH
-import           Control.Monad (join, void, when)
+module Main
+  ( main
+  ) where
+
+import           Brick
+import           Brick.BChan (newBChan, BChan, writeBChan)
+import qualified Brick.Focus as Focus
+import           Brick.Widgets.Border (hBorder)
+import qualified Brick.Widgets.List as L
+import           Control.Concurrent.Async (async, forConcurrently_)
+import           Control.Exception (SomeException)
+import           Control.Exception.Base (try)
+import           Control.Lens
+import           Control.Monad (void, mfilter, when)
 import           Control.Monad.IO.Class (liftIO)
-import           Data.ConfigFile
-import           Data.Default
-import qualified Data.Function as F
-import           Data.List (deleteFirstsBy, partition)
-import           Data.Maybe (isNothing, catMaybes)
+import qualified Data.CaseInsensitive as CI
+import           Data.Default (def)
+import           Data.Foldable (for_)
+import           Data.List (isPrefixOf, partition, find)
+import           Data.Maybe (fromMaybe, listToMaybe, mapMaybe)
 import           Data.Monoid ((<>))
-import           Data.Table (Table)
-import qualified Data.Table as TB
 import           Data.Text (Text)
 import qualified Data.Text as T
-import           Data.Time.Clock.POSIX (POSIXTime, posixSecondsToUTCTime)
-import           Data.Time.Format (formatTime)
-import           Data.Time.LocalTime (LocalTime(..), utcToLocalTime, getCurrentTimeZone)
-import           Graphics.Vty
-import           Graphics.Vty.Widgets.All hiding (Table)
-import           Network.HTTP.Client (HttpException)
+import qualified Data.Text.Encoding as T
+import           Data.Time.Clock.POSIX (posixSecondsToUTCTime, POSIXTime)
+import           Data.Time.LocalTime
+       (utcToLocalTime, getCurrentTimeZone, TimeZone, utcToLocalTime)
+import           Dhall (input,auto)
+import           Formatting (sformat, (%), (%.))
+import qualified Formatting as F
+import qualified Formatting.Time as F
+import           Graphics.Vty (Event, mkVty, Key(KChar), Event(EvKey))
+import qualified Graphics.Vty as Vty
+import           Graphics.Vty.Input.Events (Key(KEnter))
+import           Network.HTTP.Client
+       (HttpException(HttpExceptionRequest),
+        HttpExceptionContent(StatusCodeException), responseHeaders)
+import           Network.URI
 import           System.Environment (getArgs)
-import           System.Exit (exitSuccess, exitWith, ExitCode(ExitFailure))
+import           System.Exit (exitSuccess, exitFailure)
 import           System.Process
+       (shell, createProcess, CreateProcess, waitForProcess)
+import           System.Process.Internals (StdStream(CreatePipe))
 import           Text.Printf (printf)
-import qualified Text.Trans.Tokenize as TT
 
-import           GUI
+import           Events
 import           Network.Pocket
-import           Network.Pocket.Retrieve ( RetrieveConfig
-                                         , retrieveCount
-                                         , RetrieveCount(Count, NoLimit)
-                                         , retrieveSort
-                                         , RetrieveSort(NewestFirst)
-                                         , retrieveSince
-                                         , RetrieveState(All)
-                                         , retrieveState
-                                         , RetrieveDetailType(Complete)
-                                         , retrieveDetailType
-                                         )
-import           Printing
+import           Network.Pocket.Meta (fetchRedditCommentCount)
+import           Network.Pocket.Retrieve
+import           Network.Pocket.Ui.State
+import           Network.Pocket.Ui.Widgets
 
 makeLensesFor [("std_err", "stdErr"), ("std_out", "stdOut")] ''CreateProcess
 
-newtype ShellCommand = Cmd String
+trigger :: BChan HocketEvent -> HocketEvent -> IO ()
+trigger = writeBChan
 
-data HocketData = HocketData { _dataTime :: Maybe POSIXTime
-                             , _dataItems :: Table PocketItem
-                             }
-makeLenses ''HocketData
+vtyEventHandler :: BChan HocketEvent
+                -> HocketState
+                -> Event
+                -> EventM Name (Next HocketState)
+vtyEventHandler es s (EvKey (KChar ' ') []) = do
+  liftIO . for_ (focusedItem s) $ \pit -> es `trigger` browseItemEvt pit
+  continue s
+vtyEventHandler es s (EvKey KEnter []) = do
+  liftIO . for_ (focusedItem s) $ \pit -> do
+    es `trigger` browseItemEvt pit
+    es `trigger` shiftItemEvt (pit ^. itemId)
+  continue s
+vtyEventHandler es s (EvKey (KChar 'u') []) = do
+  liftIO $ es `trigger` fetchItemsEvt
+  continue s
+vtyEventHandler es s (EvKey (KChar 'A') []) = do
+  liftIO $ es `trigger` archiveItemsEvt
+  continue s
+vtyEventHandler es s (EvKey (KChar 'd') []) = do
+  liftIO . for_ (focusedItem s) $ \pit ->
+    es `trigger` shiftItemEvt (pit ^. itemId)
+  continue s
+vtyEventHandler _ s (EvKey (KChar 'q') []) = halt s
+vtyEventHandler es s (EvKey (KChar 'r') []) = do
+  liftIO $ for_ (focusedItem s) $ \pit -> es `trigger` getRedditCommentsEvt [pit]
+  continue s
+vtyEventHandler es s (EvKey (KChar 'R') []) = do
+  let items = s ^.. hsContents . each . _2
+      redditItems = filter (isRedditUrl . view resolvedUrl) items
+  liftIO $ when (not (null redditItems)) $ es `trigger` getRedditCommentsEvt redditItems
+  continue s
+vtyEventHandler _ s (EvKey (KChar '\t') []) =
+  s & focusRing %~ Focus.focusNext & continue
+vtyEventHandler _ s e =
+  continue =<<
+  case focused s of
+    Just ItemListName -> handleEventLensed s itemListVi handleViListEvent e
+    Just PendingListName ->
+      handleEventLensed s pendingListVi handleViListEvent e
+    _ -> return s
 
-consumeBatch :: HocketData -> PocketItemBatch -> HocketData
-consumeBatch bt1@(HocketData maybeTs1 tb1) (PocketItemBatch ts2 tb2) =
-  case maybeTs1 of
-    Nothing -> HocketData (Just ts2) (tb1 `TB.union` view TB.table tb2)
-    Just ts1 -> if ts1 >= ts2
-                then bt1
-                else HocketData (Just ts2) (withoutArchived `TB.union` TB.fromList unreadItems)
-  where (unreadItems, archivedOrDeleted) = partition ((== Normal) . view status) tb2
-        withoutArchived = tb1 `TB.difference` TB.fromList archivedOrDeleted
+internalEventHandler
+  :: BChan HocketEvent
+  -> HocketState
+  -> HocketEvent
+  -> EventM Name (Next HocketState)
+internalEventHandler es s (HocketAsync e) = asyncCommandEventHandler es s e
+internalEventHandler es s (HocketUi e) = uiCommandEventHandler es s e
 
-data HocketGUI = HocketGUI { _unreadLst :: Widget (List PocketItem FormattedText)
-                           , _toArchiveLst :: Widget (List PocketItem FormattedText)
-                           , _helpBar :: Widget FormattedText
-                           , _statusBar :: Widget FormattedText
-                           , _timeStamp :: Widget FormattedText
-                           , _guiCreds :: PocketCredentials
-                           , _launchCommand :: ShellCommand
-                           , _mainFocusGroup :: Widget FocusGroup
-                           , _titleText :: Widget FormattedText
-                           , _asyncAction :: MVar (Async ())
-                           , _hocketData :: MVar HocketData
-                           }
-makeLenses ''HocketGUI
+asyncCommandEventHandler
+  :: BChan HocketEvent
+  -> HocketState
+  -> AsyncCommand
+  -> EventM Name (Next HocketState)
+asyncCommandEventHandler es s@(view hsAsync -> Nothing) FetchItems = do
+  fetchAsync <-
+    liftIO . async $ do
+      es `trigger` setStatusEvt (Just "fetching")
+      eitherErrorPis <- retrieveItems (s ^. hsCredentials) (s ^. hsLastUpdated)
+      case eitherErrorPis of
+        Left e ->
+          es `trigger` asyncActionFailedEvt (errorMessageFromException e)
+        Right (PocketItemBatch ts pis) -> do
+          es `trigger` setStatusEvt Nothing
+          es `trigger` fetchedItemsEvt ts pis
+  continue (s & hsAsync ?~ fetchAsync)
+asyncCommandEventHandler _ s FetchItems = continue s
+asyncCommandEventHandler _ s (FetchedItems ts pis) = do
+  let (newItems, toBeDeleted) = partition ((== Normal) . view status) pis
+      newS = (s & insertItems newItems & removeItems (toBeDeleted ^.. each . itemId) &
+                  hsAsync .~
+                  Nothing &
+                  hsLastUpdated ?~
+                  ts)
+  continue newS
 
-modifyData :: HocketGUI -> (HocketData -> HocketData) -> IO ()
-modifyData (view hocketData -> m) f = modifyMVar_ m (return . f)
+asyncCommandEventHandler es s (AsyncActionFailed err) = do
+  liftIO (es `trigger` setStatusEvt (Just ("failed" <> maybe "" (": " <>) err)))
+  continue (s & hsAsync .~ Nothing)
+asyncCommandEventHandler es s@(view hsAsync -> Nothing) ArchiveItems =
+  case hsNumItems s of
+    (_, 0) -> continue s
+    (_, _) -> do
+      archiveAsync <-
+        liftIO . async $ do
+          es `trigger` setStatusEvt (Just "archiving")
+          eitherErrorResults <-
+            performArchive (s ^. hsCredentials) (s ^.. pendingList . L.listElementsL . each)
+          case eitherErrorResults of
+            Left e ->
+              es `trigger` asyncActionFailedEvt (errorMessageFromException e)
+            Right results -> do
+              es `trigger`
+                archivedItemsEvt
+                  (mapMaybe
+                     (\(pit, successful) ->
+                        mfilter (const successful) (Just (view itemId pit)))
+                     results)
+              es `trigger` setStatusEvt Nothing
+      continue (s & hsAsync ?~ archiveAsync)
+asyncCommandEventHandler _ s ArchiveItems = continue s
+asyncCommandEventHandler _ s (ArchivedItems pis) =
+  continue (s & removeItems pis & hsAsync .~ Nothing)
+asyncCommandEventHandler es s@(view hsAsync -> Nothing) (GetRedditCommentCount items) = do
+  liftIO $ es `trigger` setStatusEvt (Just "getting comment counts")
+  let maybeSubredditsAndIds = mapMaybe (\i -> (view itemId i,) <$> subredditAndArticleId i) items
+  asyncGet <- liftIO . async $ do
+    forConcurrently_ maybeSubredditsAndIds $ \(pid, (subreddit, articleId)) -> do
+      eitherErrCount <-(tryHttpException $ fetchRedditCommentCount subreddit articleId)
+      for_ eitherErrCount $ \count -> es `trigger` gotRedditCommentsEvt pid count
+      es `trigger` doneWithRedditCommentsEvt
+    es `trigger` setStatusEvt Nothing
+  continue (s & hsAsync ?~ asyncGet)
+asyncCommandEventHandler _ s (GetRedditCommentCount _) = continue s
+asyncCommandEventHandler _ s (GotRedditCommentCount pid (RedditCommentCount count)) = do
+  continue (s & hsContents . at pid . _Just . _2 . redditCommentCount ?~ count)
+asyncCommandEventHandler _ s DoneWithRedditComments =
+  continue (s & hsAsync .~ Nothing)
+
+uiCommandEventHandler :: BChan HocketEvent
+                      -> HocketState
+                      -> UiCommand
+                      -> EventM Name (Next HocketState)
+uiCommandEventHandler _ s (ShiftItem pid) = continue (toggleStatus pid s)
+uiCommandEventHandler _ s (RemoveItems pis) = continue (removeItems pis s)
+uiCommandEventHandler _ s (SetStatus t) = continue (s & hsStatus .~ t)
+uiCommandEventHandler es s (BrowseItem pit) = do
+  res <- liftIO . try @SomeException $ browseItem "firefox '%s'" (pit ^. resolvedUrl)
+  case res of
+    Left e -> liftIO $ es `trigger` setStatusEvt (Just (T.pack $ show e))
+    Right () -> return ()
+  continue s
+
+eventHandler
+  :: BChan HocketEvent
+  -> HocketState
+  -> BrickEvent Name HocketEvent
+  -> EventM Name (Next HocketState)
+eventHandler es s (VtyEvent e) = vtyEventHandler es s e
+eventHandler es s (AppEvent e) = internalEventHandler es s e
+eventHandler _ s _ = continue s
 
 main :: IO ()
 main = do
-  Just (creds,cmd) <- readFromConfig "hocket.cfg"
-  args <- (fmap . fmap ) T.pack getArgs
-  when (null args) $ do
-    putStrLn "Invalid args, has to be one of [get <n>, add <url>..., gui]"
-    exitWith (ExitFailure 1)
-  let (dispatch,rest) = (head args, tail args)
-  runHocket (creds,def) $ case dispatch of
-    "get" -> do
-      let c = read . T.unpack . head $ rest
-          retCfg = defaultRetrieval & retrieveCount .~ Count c
-      liftIO . newestFirst =<< view batchItems <$> pocket (RetrieveItems retCfg)
-    "add" -> traverse_ (pocket . AddItem) rest
-    "gui" -> liftIO . vty cmd creds $ []
-    _ -> fail "Invalid args."
+  args <- getArgs
+  cred <- input auto "./config.dhall"
+  case length args of
+    1 -> addToPocket cred (head args)
+    0 -> do
+      events <- newBChan 10
+      tz <- getCurrentTimeZone
+      vty <- mkVty Vty.defaultConfig
+      void
+        (customMain
+           vty
+           (mkVty Vty.defaultConfig)
+           (Just events)
+           (app tz events)
+           (initialState cred))
+    _ -> do
+      putStrLn $ "Invalid args: " ++ show args
+      exitFailure
 
-readFromConfig :: FilePath -> IO (Maybe (PocketCredentials, ShellCommand))
-readFromConfig path = do
-#if __GLASGOW_HASKELL__ >= 710
-  eitherErrorTuple <- runExceptT $ do
-#else
-  eitherErrorTuple <- runExceptT $ do
-#endif
-    cp <- join $ liftIO $ readfile emptyCP path
-    consumerKey <- get cp "Credentials" "consumer_key"
-    accessToken <- get cp "Credentials" "access_token"
-    cmd <- get cp "Launch" "launch_cmd"
-    return ( PocketCredentials (ConsumerKey consumerKey)
-                               (AccessToken accessToken)
-           , Cmd cmd
-           )
-  return . preview _Right $ eitherErrorTuple
-
-browseItem :: ShellCommand -> URL -> IO ()
-browseItem (Cmd shellCmd) (URL url) = do
-  let spec = shell $ printf shellCmd url
-  void . createProcess $ spec & stdOut .~ CreatePipe
-                              & stdErr .~ CreatePipe
-
--- used to right align urls in gui using vty-ui formatter 'alignRightAfter' (defined here)
-magicMarker :: Text
-magicMarker = "<!>"
-
-tryStripPrefix :: Text -> Text -> Text
-tryStripPrefix p t = view (non t) $ T.stripPrefix p t
-
-shortenUrl :: URL -> Text
-shortenUrl (URL (T.pack -> t)) = T.take 60 . cleanUrl $ t
-  where cleanUrl :: Text -> Text
-        cleanUrl = tryStripPrefix "www." . tryStripPrefix "http://" . tryStripPrefix "https://"
-
-displayText :: PocketItem -> Text
-displayText i = T.concat [formatTags (view itemTags i)
-                         ,bestTitle i
-                         ," "
-                         ,magicMarker
-                         ,shortenUrl (view resolvedUrl i)]
-
-formatTags :: [Tag] -> Text
-formatTags tags = if null tags
-  then ""
-  else "" <> (T.intercalate "," $ toListOf (folded . tagName) tags) <> " | "
-
-alignRightAfter :: Text -> Formatter
-alignRightAfter marker = Formatter $ \(w, _) ts -> do
-  let currentText = TT.serialize ts
-      parts = T.splitOn marker currentText
-      neededSpaces = 0 `max` (w - fromIntegral (T.length currentText - T.length marker))
-      sp = T.replicate (fromIntegral neededSpaces) " "
-      newText = flip TT.tokenize defAttr $ T.intercalate sp parts
-  return newText
-
-sortedAddLstItem :: Widget (List PocketItem FormattedText) -> PocketItem -> IO ()
-sortedAddLstItem = addToListSortedBy lt (textWidget (alignRightAfter magicMarker) . displayText)
-  where
-    lt :: PocketItem -> PocketItem -> Ordering
-    lt = flip compare `F.on` view timeAdded
-
-bestTitle :: PocketItem -> Text
-bestTitle itm =
-  view (if view givenTitle itm /= "" then givenTitle else resolvedTitle) itm
-
-abortAsync :: HocketGUI -> IO ()
-abortAsync gui@(view asyncAction -> m) = do
-  v <- readMVar m
-  stat <- poll v
-  case stat of
-    Nothing -> cancel v >> updateStatusBar gui "Aborted"
-    Just _ -> return ()
-
-tryAsync :: HocketGUI -> IO () -> IO ()
-tryAsync (view asyncAction -> m) a = do
-  finished <- poll =<< readMVar m
-  case finished of
-    Nothing -> return ()
-    Just _ -> takeMVar m >> (putMVar m =<< async a)
-
-insertPocketItems :: Traversable f =>
-                     Widget (List PocketItem FormattedText)
-                     -> f PocketItem -> IO ()
-insertPocketItems lst = traverse_ (sortedAddLstItem lst)
-
-extractAndClear :: Widget (List a b) -> IO [a]
-extractAndClear lst = do
-  itms <- listItems lst
-  clearList lst
-  return itms
-
-updateStatusBar :: HocketGUI -> T.Text -> IO ()
-updateStatusBar gui txt = schedule $ setText (view statusBar gui) txt
-
-posixToLocalTime :: POSIXTime -> IO LocalTime
-posixToLocalTime p = utcToLocalTime
-                 <$> getCurrentTimeZone
-                 <*> pure (posixSecondsToUTCTime p)
-
-formatPosix :: POSIXTime -> IO String
-formatPosix = fmap (formatTime defaultTimeLocale "%T") . posixToLocalTime
-
-lastRetrieval :: HocketGUI -> IO (Maybe POSIXTime)
-lastRetrieval = perform (hocketData . act readMVar . dataTime)
-
-updateTimeStamp :: HocketGUI -> IO ()
-updateTimeStamp gui = do
-  currentTS <- lastRetrieval gui
-  case currentTS of
-    Nothing -> return ()
-    Just ts -> schedule $ setText (view timeStamp gui) =<< (T.pack <$> formatPosix ts)
-
-defaultRetrieval :: RetrieveConfig
-defaultRetrieval = def & retrieveSort ?~ NewestFirst
-                       & retrieveCount .~ NoLimit
-                       & retrieveDetailType ?~ Complete
-
-retrievalConfig :: HocketGUI -> IO RetrieveConfig
-retrievalConfig gui = do
-  isFirstRetrieval <- isNothing <$> lastRetrieval gui
-  return (if isFirstRetrieval
-             then defaultRetrieval
-             else defaultRetrieval & retrieveState .~ All)
-
-retrieveNewItems :: HocketGUI -> IO ()
-retrieveNewItems gui = tryAsync gui $ do
-  lastRetrieved <- lastRetrieval gui
-  retCfg <- retrievalConfig gui <&> retrieveSince .~ lastRetrieved
-  updateStatusBar gui "Updating"
-  oldPIs <- (++) <$> listItems (view unreadLst gui)
-                 <*> listItems (view toArchiveLst gui)
-  eitherErrorPIs <- tryHttpException
-                    . runHocket (view guiCreds gui, def) $ pocket $ RetrieveItems retCfg
-  case eitherErrorPIs of
-    Right batch -> do
-      modifyData gui (`consumeBatch` batch)
-      updateTimeStamp gui
-      let (unreadPis, archivedOrDeleted) =
-            partition ((== Normal) . view status) $ view batchItems batch
-      schedule $ do
-        traverse_ (removeItemFromLstBy idEq (view unreadLst gui)) archivedOrDeleted
-        traverse_ (removeItemFromLstBy idEq (view toArchiveLst gui)) archivedOrDeleted
-        traverse_ (sortedAddLstItem (view unreadLst gui)) $ unreadPis \\\ oldPIs
-      updateStatusBar gui ""
-    Left _ -> updateStatusBar gui "Updating failed"
-  where (\\\) = deleteFirstsBy idEq
-
-removeItemFromLstBy :: (a -> a -> Bool) -> Widget (List a b) -> a -> IO ()
-removeItemFromLstBy eq w e = do
-  maybePos <- Main.listFindFirstBy eq w e
-  traverse_ (removeFromList w) maybePos
-
-listFindFirstBy :: (a -> a -> Bool) -> Widget (List a b) -> a -> IO (Maybe Int)
-listFindFirstBy eq w e = do size <- getListSize w
-                            itms <- catMaybes <$> for [0..size-1] (\i -> fmap (i,) <$> getListItem w i)
-                            return $ fst <$> find (eq e . fst . snd) itms
-
-removeItemFromLst :: Eq a => Widget (List a b) -> a -> IO ()
-removeItemFromLst = removeItemFromLstBy (==)
-
-executeRenameSelected :: HocketGUI -> Widget (List PocketItem b) -> Text -> IO ()
-executeRenameSelected gui w newTxt = withSelection w $ \_ sel -> tryAsync gui $ do
-    updateStatusBar gui "Renaming"
-    res <- tryHttpException $ runHocket (view guiCreds gui, def) $
-      pocket $ RenameItem (view itemId sel) newTxt
-    case res of
-      Left _ -> sigFail
-      Right b -> if b then do
-                      removeItemFromLst w sel
-                      modifyData gui (dataItems %~ TB.delete sel)
-                      sigSucc
-                 else sigFail
-  where sigFail = updateStatusBar gui "Renaming failed"
-        sigSucc = updateStatusBar gui ""
-
-executeArchiveAction :: HocketGUI -> IO ()
-executeArchiveAction gui = tryAsync gui $ do
-    updateStatusBar gui "Archiving"
-    let archiveLst = view toArchiveLst gui
-    itms <- listItems archiveLst
-    res <- performArchive gui archiveLst itms
-    updateStatusBar gui . maybe "" (const "Archieving failed") $ res
-
-performArchive :: HocketGUI
-               -> Widget (List PocketItem b)
-               -> [PocketItem]
-               -> IO (Maybe HttpException)
-performArchive gui archiveLst itms = do
-  res <- tryHttpException $ runHocket (view guiCreds gui, def) $ do
-    bs <- pocket $ Batch (map (Archive . view itemId) itms)
-    return [i | (i,success) <- zip itms bs, success]
+addToPocket :: PocketCredentials -> String -> IO ()
+addToPocket cred url = do
+  putStrLn url
+  res <-
+    tryHttpException . runHocket (cred, def) . pocket . AddItem $
+    T.pack url
   case res of
-    Left e -> return $ Just e
-    Right archivedItms -> do
-      modifyData gui (dataItems %~ deleteAll archivedItms)
-      schedule . traverse_ (removeItemFromLst archiveLst) $ archivedItms
-      return Nothing
+    Left e -> do
+      putStrLn $ "Error during request: " ++ show e
+      exitFailure
+    Right False -> do
+      putStrLn "Could not add item."
+      exitFailure
+    Right True -> exitSuccess
 
-deleteAll :: Foldable f => f t -> TB.Table t -> TB.Table t
-deleteAll ts table = foldr' TB.delete table ts
+app :: TimeZone -> BChan HocketEvent -> App HocketState HocketEvent Name
+app tz events =
+  App
+  { appDraw = drawGui tz
+  , appChooseCursor = Focus.focusRingCursor (view focusRing)
+  , appHandleEvent = \s e -> fmap syncForRender <$> eventHandler events s e
+  , appStartEvent =
+      \s -> do
+        liftIO (events `trigger` fetchItemsEvt)
+        return s
+  , appAttrMap = const hocketAttrMap
+  }
 
-createGUI :: ShellCommand -> PocketCredentials -> IO (HocketGUI, Collection)
-createGUI shCmd cred = do
-  gui <- HocketGUI <$> newList' boldBlackOnOrange (defAttr `withForeColor` white)
-                   <*> newList' boldBlackOnOrange (defAttr `withForeColor` white)
-                   <*> (plainTextWithAttrs [("q",defAttr `withForeColor` orange)
-                                           ,(":Quit | ",defAttr)
-                                           ,("Q",defAttr `withForeColor` orange)
-                                           ,(":Force Quit | ",defAttr)
-                                           ,("d",defAttr `withForeColor` orange)
-                                           ,(":Shift item | ",defAttr)
-                                           ,("D",defAttr `withForeColor` orange)
-                                           ,(":Shift all | ",defAttr)
-                                           ,("u",defAttr `withForeColor` orange)
-                                           ,(":Update | ",defAttr)
-                                           ,("U",defAttr `withForeColor` orange)
-                                           ,(":Clear & update | ",defAttr)
-                                           ,("A",defAttr `withForeColor` orange)
-                                           ,(":Archive pending | ",defAttr)
-                                           ,("C",defAttr `withForeColor` orange)
-                                           ,(":Cancel | ",defAttr)
-                                           ,("SPC",defAttr `withForeColor` orange)
-                                           ,(":Launch | ",defAttr)
-                                           ,("Enter",defAttr `withForeColor` orange)
-                                           ,(":Launch & Shift",defAttr)
-                                           ])
-                   <*> plainText ""
-                   <*> plainText "<never>"
-                   <*> pure cred
-                   <*> pure shCmd
-                   <*> newFocusGroup
-                   <*> plainText "Hocket"
-                   <*> (newMVar =<< async (return ()))
-                   <*> newMVar (HocketData Nothing TB.empty)
+hocketAttrMap :: AttrMap
+hocketAttrMap =
+  attrMap
+    Vty.defAttr
+    [ ("list" <> "selected" <> "focused", boldBlackOnOrange)
+    , ("list" <> "unselectedItem", whiteFg)
+    , ( "bar"
+      , Vty.defAttr `Vty.withBackColor` Vty.black `Vty.withForeColor` Vty.white)
+    ]
 
-  bottomBar <- pure (view helpBar gui) <++>
-               hFill ' ' 1 <++>
-               pure (view statusBar gui) <++>
-               plainText " " <++>
-               pure (view timeStamp gui)
-  topBar <- pure (view titleText gui) <++> hFill ' ' 1
+drawGui :: TimeZone -> HocketState -> [Widget Name]
+drawGui tz s = [w]
+  where
+    w =
+      vBox
+        [ hBar
+            ("Hocket: (" <>
+             uncurry (sformat (F.int % "|" % F.int)) (hsNumItems s) <>
+             ")")
+        , L.renderList
+            listDrawElement
+            (isFocused s ItemListName)
+            (s ^. itemList)
+        , hBorder
+        , vLimit 10 $
+          L.renderList
+            listDrawElement
+            (isFocused s PendingListName)
+            (s ^. pendingList)
+        , hBar " " <+>
+          withAttr
+            "bar"
+            (padLeft
+               Max
+               (txt
+                  (maybe
+                     "<never>"
+                     (sformat F.hms . utcToLocalTime tz . posixSecondsToUTCTime)
+                     (s ^. hsLastUpdated))))
+        , txt (fromMaybe " " (s ^. hsStatus))
+        ]
 
-  setNormalAttribute bottomBar $ Attr KeepCurrent KeepCurrent (SetTo black)
-  setNormalAttribute topBar $ Attr KeepCurrent KeepCurrent (SetTo black)
-  setNormalAttribute (view statusBar gui) $ Attr (SetTo bold) KeepCurrent KeepCurrent
+focused :: HocketState -> Maybe Name
+focused = Focus.focusGetCurrent . view focusRing
 
-  for_ [helpBar, statusBar] $ \selector ->
-    setNormalAttribute (view selector gui) $ Attr KeepCurrent (SetTo white) KeepCurrent
+focusedList :: HocketState -> Maybe (L.List Name PocketItem)
+focusedList s =
+  case focused s of
+    Just n
+      | n == ItemListName -> s ^? itemList
+    Just n
+      | n == PendingListName -> s ^? pendingList
+    _ -> Nothing
 
-  ui <- centered =<< pure topBar
-                <--> pure (view unreadLst gui)
-                <--> hBorder
-                <--> vFixed 10 (view toArchiveLst gui)
-                <--> pure bottomBar
+isFocused :: HocketState -> Name -> Bool
+isFocused s name = maybe False (== name) (focused s)
 
-  let fg = view mainFocusGroup gui
-  void $ addToFocusGroup fg (view unreadLst gui)
-  void $ addToFocusGroup fg (view toArchiveLst gui)
+listDrawElement :: Bool -> PocketItem -> Widget Name
+listDrawElement sel e =
+  (if sel
+     then withAttr ("list" <> "selectedItem")
+     else withAttr ("list" <> "unselectedItem"))
+    (padRight Max (txtDisplay e))
 
-  c <- newCollection
+orange :: Vty.Color
+orange = Vty.rgbColor 215 135 (0 :: Int)
 
-  edlg <- newEditDialog
-  displayMainGui <- addToCollection c ui fg
-  displayEditDialog <- addToCollection c
-    (edlg ^. editDlgDialog & dialogWidget)
-    (edlg ^. editDlgFocusGroup)
+boldBlackOnOrange :: Vty.Attr
+boldBlackOnOrange =
+  Vty.defAttr `Vty.withForeColor` black `Vty.withBackColor` orange `Vty.withStyle`
+  Vty.bold
 
-  setUpEditHandler edlg (view unreadLst gui) displayEditDialog
+black :: Vty.Color
+black = Vty.rgbColor zero zero zero
+  where
+    zero = 0 :: Int
 
-  view editDlgDialog edlg `onDialogCancel` \_ -> do
-    edlg ^! editDlgFocusGroup . act focusNext
-    displayMainGui
-  view editDlgDialog edlg `onDialogAccept` \_ -> do
-    edlgSrc <- edlg ^! editVar . act readMVar
-    if isNothing edlgSrc
-      then updateStatusBar gui "Renaming failed"
-      else do
-        newName <- getEditText (view editDlgWidget edlg)
-        Just src <- edlg ^! editVar . act readMVar
-        executeRenameSelected gui src newName
-    edlg ^! editDlgFocusGroup . act focusPrevious
-    displayMainGui
+whiteFg :: Vty.Attr
+whiteFg = Vty.defAttr `Vty.withForeColor` Vty.white
 
-  fg `onKeyPressed` \_ k _ -> case k of
-    (KChar 'q') -> do
-      size <- gui ^. toArchiveLst & getListSize
-      when (size == 0) exitSuccess
-      return True
-    (KChar 'Q') -> exitSuccess
-    (KChar 'u') -> retrieveNewItems gui >> return True
-    (KChar 'U') -> do
-      clearList (view unreadLst gui)
-      clearList (view toArchiveLst gui)
-      modifyData gui (dataTime .~ Nothing)
-      retrieveNewItems gui >> return True
-    (KChar 'A') -> executeArchiveAction gui >> return True
-    _ -> return False
+hBar :: Text -> Widget Name
+hBar = withAttr "bar" . padRight Max . txt
 
-  return (gui,c)
+retrieveItems :: PocketCredentials -> Maybe POSIXTime -> IO (Either HttpException PocketItemBatch)
+retrieveItems cred =
+  tryHttpException .
+    runHocket (cred, def) .
+    pocket .
+    RetrieveItems .
+    maybe retrieveAllUnread retrieveDeltaSince
+  where
+    retrieveAllUnread = defaultRetrieval
+    retrieveDeltaSince ts =
+      defaultRetrieval & retrieveSince ?~ ts & retrieveState .~ All
 
-vty :: ShellCommand -> PocketCredentials -> [PocketItem] -> IO ()
-vty cmd cred pis = do
-  (gui,c) <- createGUI cmd cred
-  insertPocketItems (view unreadLst gui) pis
-
-  for_ [view unreadLst gui, view toArchiveLst gui] $ \x -> do
-    x `onItemActivated` lstItemActivatedHandler gui x
-    x `onKeyPressed` lstKeyPressedHandler gui
-
-  view unreadLst gui `onKeyPressed` \this key _ -> case key of
-    (KChar 'd') -> shiftSelected this (view toArchiveLst gui) >> return True
-    (KChar 'D') -> do
-      insertPocketItems (view toArchiveLst gui) =<< extractAndClear this
-      focusNext (view mainFocusGroup gui)
-      return True
-    _ -> return False
-
-  view toArchiveLst gui `onKeyPressed` \this key _ -> case key of
-    (KChar 'd') -> shiftSelected this (view unreadLst gui) >> return True
-    (KChar 'D') -> do
-      traverse_ (sortedAddLstItem (view unreadLst gui)) =<< extractAndClear this
-      focusNext (view mainFocusGroup gui)
-      return True
-
-    _ -> return False
-
-  retrieveNewItems gui
-  runUi c defaultContext
-
-lstKeyPressedHandler :: HocketGUI
-                     -> Widget (List PocketItem FormattedText)
-                     -> Key
-                     -> t
-                     -> IO Bool
-lstKeyPressedHandler gui this key _ = case key of
-  (KChar 'C') -> abortAsync gui >> return True
-  (KChar ' ') -> do
-    void . forkIO $ do
-      maybeSel <- getSelected this
-      traverse_ (browseItem (view launchCommand gui) . view givenUrl . fst . snd) maybeSel
-    return True
-  _ -> return False
-
-lstItemActivatedHandler :: HocketGUI
-                        -> Widget (List PocketItem FormattedText)
-                        -> ActivateItemEvent PocketItem t
-                        -> IO ()
-lstItemActivatedHandler gui src (ActivateItemEvent _ v _) = do
-  shiftSelected src (view toArchiveLst gui)
-  browseItem (view launchCommand gui) . view givenUrl $ v
-
-shiftSelected :: Widget (List PocketItem FormattedText)
-              -> Widget (List PocketItem FormattedText)
-              -> IO ()
-shiftSelected this target = withSelection this $ \pos val -> do
-  void $ removeFromList this pos
-  sortedAddLstItem target val
-
-withSelection :: Widget (List a b) -> (Int -> a -> IO c) -> IO ()
-withSelection w k = do
-  getSelected w >>= traverse_ (\(i, (x, _)) -> k i x)
-  return ()
+performArchive :: PocketCredentials -> [PocketItem] -> IO (Either HttpException [(PocketItem, Bool)])
+performArchive cred items =
+  tryHttpException . fmap (zip items) . runHocket (cred, def) .
+  pocket $
+  Batch (map (Archive . view itemId) items)
 
 tryHttpException :: IO a -> IO (Either HttpException a)
-tryHttpException = try
+tryHttpException = try @HttpException
 
-setUpEditHandler :: EditDialog FormattedText
-                 -> Widget (List PocketItem FormattedText)
-                 -> IO a
-                 -> IO ()
-setUpEditHandler e l switch = l `onKeyPressed` \_ k _  -> case k of
-  (KChar 'e') -> do
-    withSelection l $ \_ sel -> do
-      let edit = e ^. editDlgWidget
-      setEditText edit (bestTitle sel)
-      void $ e ^! editVar . act (\x -> swapMVar x (Just l))
-      switch
-    return True
-  _ -> return False
+defaultRetrieval :: RetrieveConfig
+defaultRetrieval =
+  def & retrieveSort ?~ NewestFirst & retrieveCount .~ NoLimit &
+  retrieveDetailType ?~
+  Complete
+
+txtDisplay :: PocketItem -> Widget Name
+txtDisplay pit =
+  txt (T.justifyRight 10 ' ' leftEdge) <+>
+  txt
+    (fromMaybe
+       "<empty>"
+       (listToMaybe $ filter (not . T.null) [given, resolved, T.pack url])) <+>
+  padLeft Max (hLimit horizontalUriLimit (txt trimmedUrl)) <+>
+  txt commentCount
+  where
+    resolved = view resolvedTitle pit
+    given = view givenTitle pit
+    (URL url) = view resolvedUrl pit
+    added = posixSecondsToUTCTime (view timeAdded pit)
+    leftEdge =
+      sformat (F.year % "-" <> F.month % "-" <> F.dayOfMonth) added <> ": "
+    commentCount =
+      fromMaybe "     " $
+      fmap
+        (sformat ("  " % (F.left 3 ' ' %. F.int) % ""))
+        (pit ^. redditCommentCount)
+    trimmedUrl = T.pack (trimURI url)
+
+horizontalUriLimit :: Int
+horizontalUriLimit = 60
+
+trimURI :: String -> String
+trimURI uri =
+  fromMaybe uri $ do
+    parsed <- parseURI uri
+    auth <- uriAuthority parsed
+    return
+      (strip
+         "reddit.com/"
+         (strip "www." (uriRegName auth) <> uriPath parsed <> uriQuery parsed))
+  where
+    strip prefix s =
+      if prefix `isPrefixOf` s
+        then drop (length prefix) s
+        else s
+
+focusedItem :: HocketState -> Maybe PocketItem
+focusedItem s = do
+  list <- focusedList s
+  snd <$> L.listSelectedElement list
+
+browseItem :: String -> URL -> IO ()
+browseItem shellCmd (URL url) = do
+  let spec = shell $ printf shellCmd url
+  (_, _, _, ph) <- createProcess $ spec & stdOut .~ CreatePipe & stdErr .~ CreatePipe
+  void . waitForProcess $ ph
+
+errorMessageFromException :: HttpException -> Maybe Text
+errorMessageFromException (HttpExceptionRequest _ (StatusCodeException resp _)) =
+  T.decodeUtf8 . snd <$>
+  find (\(k, _) -> k == CI.mk "x-error") (responseHeaders resp)
+errorMessageFromException e = Just . T.pack $ show e
