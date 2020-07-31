@@ -1,2 +1,4 @@
-{ nixpkgs ? import <nixpkgs> {}, compiler ? "ghc865" }:
-nixpkgs.pkgs.haskell.packages.${compiler}.callPackage ./hocket.nix { }
+{ nixpkgs ? import <nixpkgs> { }, compiler ? "ghc883" }:
+
+let drv = nixpkgs.haskell.packages.${compiler}.callCabal2nix "hocket" ./. { };
+in drv

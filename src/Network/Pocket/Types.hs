@@ -95,7 +95,7 @@ import           Data.Text (Text)
 import qualified Data.Text as T
 import qualified Data.Text.Lazy as LT
 import           Data.Time.Clock.POSIX
-import           Dhall (Interpret)
+import           Dhall (FromDhall)
 import           GHC.Generics
 import           Network.Wreq (FormValue, FormParam((:=)))
 
@@ -104,8 +104,8 @@ import           Network.Pocket.Retrieve
 s :: String -> String
 s = id
 
-newtype ConsumerKey = ConsumerKey LT.Text deriving (Show, FormValue, FromJSON, Generic, Interpret)
-newtype AccessToken = AccessToken LT.Text deriving (Show, FormValue, FromJSON, Generic, Interpret)
+newtype ConsumerKey = ConsumerKey LT.Text deriving (Show, FormValue, FromJSON, Generic, FromDhall)
+newtype AccessToken = AccessToken LT.Text deriving (Show, FormValue, FromJSON, Generic, FromDhall)
 newtype URL = URL String deriving (Show, Eq, FormValue, FromJSON, ToJSON, Generic)
 
 data ItemStatus = Normal | IsArchived | ShouldBeDeleted deriving (Show, Eq, Enum, Bounded)
@@ -132,7 +132,7 @@ parseItemState _ = empty
 data PocketCredentials = PocketCredentials { consumerKey :: ConsumerKey
                                            , accessToken :: AccessToken
                                            } deriving (Generic)
-instance Interpret PocketCredentials
+instance FromDhall PocketCredentials
 makeLenses ''PocketCredentials
 
 instance FromJSON PocketCredentials where
