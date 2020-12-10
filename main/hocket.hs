@@ -19,14 +19,13 @@ import           Control.Concurrent.Async (async, forConcurrently_)
 import           Control.Exception (SomeException)
 import           Control.Exception.Base (try)
 import           Control.Lens
-import           Control.Monad (void, mfilter, when)
+import           Control.Monad (void, mfilter, unless)
 import           Control.Monad.IO.Class (liftIO)
 import qualified Data.CaseInsensitive as CI
 import           Data.Default (def)
 import           Data.Foldable (for_)
 import           Data.List (isPrefixOf, partition, find)
-import           Data.Maybe (fromMaybe, listToMaybe, mapMaybe)
-import           Data.Monoid ((<>))
+import           Data.Maybe (fromMaybe, mapMaybe)
 import           Data.Text (Text)
 import qualified Data.Text as T
 import qualified Data.Text.Encoding as T
