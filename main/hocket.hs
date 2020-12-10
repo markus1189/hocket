@@ -92,7 +92,7 @@ vtyEventHandler es s (EvKey (KChar 'r') []) = do
 vtyEventHandler es s (EvKey (KChar 'R') []) = do
   let items = s ^.. hsContents . each . _2
       redditItems = filter (isRedditUrl . view resolvedUrl) items
-  liftIO $ when (not (null redditItems)) $ es `trigger` getRedditCommentsEvt redditItems
+  liftIO $ unless (null redditItems) $ es `trigger` getRedditCommentsEvt redditItems
   continue s
 vtyEventHandler _ s (EvKey (KChar '\t') []) =
   s & focusRing %~ Focus.focusNext & continue
@@ -171,7 +171,7 @@ asyncCommandEventHandler es s@(view hsAsync -> Nothing) (GetRedditCommentCount i
   let maybeSubredditsAndIds = mapMaybe (\i -> (view itemId i,) <$> subredditAndArticleId i) items
   asyncGet <- liftIO . async $ do
     forConcurrently_ maybeSubredditsAndIds $ \(pid, (subreddit, articleId)) -> do
-      eitherErrCount <-(tryHttpException $ fetchRedditCommentCount subreddit articleId)
+      eitherErrCount <- tryHttpException $ fetchRedditCommentCount subreddit articleId
       for_ eitherErrCount $ \count -> es `trigger` gotRedditCommentsEvt pid count
       es `trigger` doneWithRedditCommentsEvt
     es `trigger` setStatusEvt Nothing
@@ -309,7 +309,7 @@ focusedList s =
     _ -> Nothing
 
 isFocused :: HocketState -> Name -> Bool
-isFocused s name = maybe False (== name) (focused s)
+isFocused s name = Just name == focused s
 
 listDrawElement :: Bool -> PocketItem -> Widget Name
 listDrawElement sel e =
@@ -370,7 +370,7 @@ txtDisplay pit =
   txt
     (fromMaybe
        "<empty>"
-       (listToMaybe $ filter (not . T.null) [given, resolved, T.pack url])) <+>
+       (find (not . T.null) [given, resolved, T.pack url])) <+>
   padLeft Max (hLimit horizontalUriLimit (txt trimmedUrl)) <+>
   txt commentCount
   where

@@ -1,4 +1,5 @@
-{ nixpkgs ? import <nixpkgs> { }, compiler ? "ghc883" }:
+{ pkgs ? import <nixpkgs> { } }:
+with pkgs;
 
-let drv = nixpkgs.haskell.packages.${compiler}.callCabal2nix "hocket" ./. { };
-in drv
+haskell.lib.justStaticExecutables
+(haskellPackages.callCabal2nix "hocket" ./. { })

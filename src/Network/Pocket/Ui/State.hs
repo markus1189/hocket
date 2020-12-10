@@ -39,7 +39,6 @@ import           Data.Function (on)
 import           Data.Functor (($>))
 import           Data.Map (Map)
 import qualified Data.Map as Map
-import           Data.Monoid ((<>))
 import           Data.Ord (comparing,Down(..))
 import           Data.SortedList (SortedList)
 import qualified Data.SortedList as SL
