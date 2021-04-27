@@ -90,7 +90,7 @@ vtyEventHandler es s (EvKey (KChar 'r') []) = do
   continue s
 vtyEventHandler es s (EvKey (KChar 'R') []) = do
   let items = s ^.. hsContents . each . _2
-      redditItems = filter (isRedditUrl . view resolvedUrl) items
+      redditItems = filter (isRedditUrl . resolvedOrGivenUrl) items
   liftIO $ unless (null redditItems) $ es `trigger` getRedditCommentsEvt redditItems
   continue s
 vtyEventHandler _ s (EvKey (KChar '\t') []) =
@@ -189,7 +189,7 @@ uiCommandEventHandler _ s (ShiftItem pid) = continue (toggleStatus pid s)
 uiCommandEventHandler _ s (RemoveItems pis) = continue (removeItems pis s)
 uiCommandEventHandler _ s (SetStatus t) = continue (s & hsStatus .~ t)
 uiCommandEventHandler es s (BrowseItem pit) = do
-  res <- liftIO . try @SomeException $ browseItem "firefox '%s'" (pit ^. resolvedUrl)
+  res <- liftIO . try @SomeException $ browseItem "firefox '%s'" (resolvedOrGivenUrl pit)
   case res of
     Left e -> liftIO $ es `trigger` setStatusEvt (Just (T.pack $ show e))
     Right () -> return ()
@@ -375,7 +375,7 @@ txtDisplay pit =
   where
     resolved = view resolvedTitle pit
     given = view givenTitle pit
-    (URL url) = view resolvedUrl pit
+    (URL url) = resolvedOrGivenUrl pit
     added = posixSecondsToUTCTime (view timeAdded pit)
     leftEdge =
       sformat (F.year % "-" <> F.month % "-" <> F.dayOfMonth) added <> ": "

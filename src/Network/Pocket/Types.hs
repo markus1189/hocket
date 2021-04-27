@@ -46,6 +46,7 @@ module Network.Pocket.Types (
   idEq,
   redditCommentCount,
   isRedditUrl,
+  resolvedOrGivenUrl,
 
   PocketItemId (..),
   ItemStatus (..),
@@ -312,3 +313,8 @@ extractArticleId (URL url ) = if length splits /= 9
                                  then Nothing
                                  else Just $ splits !! 6
   where splits = S.splitOn "/" url
+
+resolvedOrGivenUrl :: PocketItem -> URL
+resolvedOrGivenUrl pit = if null resolved then pit ^. givenUrl else URL resolved
+  where
+    (URL resolved) = pit ^. resolvedUrl
