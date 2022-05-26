@@ -90,6 +90,7 @@ import           Data.Aeson.Types (Parser)
 import           Data.Default
 import           Data.Function (on)
 import qualified Data.HashMap.Strict as Map
+import qualified Data.Aeson.KeyMap as KeyMap
 import           Data.List (isInfixOf)
 import qualified Data.List.Split as S
 import           Data.Text (Text)
@@ -198,7 +199,7 @@ instance FromJSON Tag where
   parseJSON _ = mzero
 
 parseTags :: Maybe Object -> Parser [Tag]
-parseTags = maybe (return []) (traverse parseJSON . Map.elems)
+parseTags = maybe (return []) (traverse parseJSON . KeyMap.elems)
 
 data PocketItem =
   PocketItem { _excerpt :: Text
