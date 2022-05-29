@@ -17,4 +17,15 @@ jobs:
       with:
         name: markus1189
         signingKey: '${{ secrets.CACHIX_SIGNING_KEY }}'
-    - run: nix flake update && nix build && git add . && git commit -m "Flake update" && git push
+    - name: configure git
+      run: |
+        git config user.name "GitHub Actions Bot"
+        git config user.email "<>"
+    - name: perform flake update
+      run: |
+        nix flake update
+        nix build
+    - run: |
+        git add .
+        git commit -m "Flake Update"
+        git push origin
