@@ -27,5 +27,4 @@ jobs:
         nix build
     - run: |
         git add .
-        git commit -m "Flake Update"
-        git push origin
+        git commit -m "Flake Update" && git push origin || echo "nothing to do"
