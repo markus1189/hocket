@@ -8,10 +8,12 @@
       let
         pkgs = nixpkgs.legacyPackages.${system};
 
-        hocketDrv = pkgs.haskell.lib.justStaticExecutables
-          (pkgs.haskellPackages.callCabal2nix "hocket" ./. { });
+        hsPkgs = pkgs.haskellPackages;
 
-        devEnv = pkgs.haskellPackages.developPackage {
+        hocketDrv = pkgs.haskell.lib.justStaticExecutables
+          (hsPkgs.callCabal2nix "hocket" ./. { });
+
+        devEnv = hsPkgs.developPackage {
           returnShellEnv = true;
           root = ./.;
           modifier = with pkgs.haskell.lib;
@@ -25,6 +27,9 @@
         packages.hocket = hocketDrv;
         defaultPackage = packages.hocket;
 
-        devShell = devEnv;
+        devShell = pkgs.mkShell {
+          inputsFrom = [ devEnv ];
+          buildInputs = with hsPkgs; [ haskell-language-server ];
+        };
       });
 }
