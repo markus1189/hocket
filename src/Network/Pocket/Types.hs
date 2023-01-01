@@ -75,11 +75,6 @@ module Network.Pocket.Types (
   subredditAndArticleId
 ) where
 
-#if __GLASGOW_HASKELL__ < 710
-import           Control.Applicative ((<$>),(<*>),pure)
-import           Data.Traversable (traverse)
-#endif
-
 import           Control.Applicative (empty, Alternative)
 import           Control.Lens (view, (^.))
 import           Control.Lens.TH
@@ -89,7 +84,6 @@ import           Data.Aeson
 import           Data.Aeson.Types (Parser)
 import           Data.Default
 import           Data.Function (on)
-import qualified Data.HashMap.Strict as Map
 import qualified Data.Aeson.KeyMap as KeyMap
 import           Data.List (isInfixOf)
 import qualified Data.List.Split as S

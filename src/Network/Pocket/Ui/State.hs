@@ -4,8 +4,6 @@
 module Network.Pocket.Ui.State (HocketState
                                ,pendingList
                                ,itemList
-                               ,itemListVi
-                               ,pendingListVi
                                ,focusRing
                                ,hsNumItems
                                ,hsLastUpdated
@@ -49,13 +47,14 @@ import           Data.Vector.Lens (toVectorOf)
 
 import           Network.Pocket.Ui.Widgets
 import           Network.Pocket.Types
+import Brick.Widgets.List (List)
 
 data Status = Pending | Unread deriving (Show,Eq,Ord)
 
 data Name = ItemListName | PendingListName deriving (Show,Eq,Ord)
 
-data HocketState = HocketState { _itemListVi :: ViList Name PocketItem
-                               , _pendingListVi :: ViList Name PocketItem
+data HocketState = HocketState { _itemList :: List Name PocketItem
+                               , _pendingList :: List Name PocketItem
                                , _focusRing :: F.FocusRing Name
                                , _hsLastUpdated :: Maybe POSIXTime
                                , _hsAsync :: Maybe (Async ())
@@ -86,20 +85,13 @@ hsNumItems s = (length $ partitioned ^. at Unread . non (SL.toSortedList [])
   where partitioned = partitionItems s
 
 initialState :: PocketCredentials -> HocketState
-initialState cred = HocketState (ViList $ L.list ItemListName V.empty 1)
-                                (ViList $ L.list PendingListName V.empty 1)
+initialState = HocketState (L.list ItemListName V.empty 1)
+                                (L.list PendingListName V.empty 1)
                                 (F.focusRing [ItemListName, PendingListName])
                                 Nothing
                                 Nothing
                                 Nothing
                                 Map.empty
-                                cred
-
-itemList :: Lens' HocketState (L.List Name PocketItem)
-itemList = itemListVi . _ViList
-
-pendingList :: Lens' HocketState (L.List Name PocketItem)
-pendingList = pendingListVi . _ViList
 
 insertItem :: PocketItem -> HocketState -> HocketState
 insertItem pit@(view itemId -> pid) s =

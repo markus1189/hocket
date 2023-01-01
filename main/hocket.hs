@@ -18,14 +18,29 @@ import qualified Brick.Widgets.List as L
 import           Control.Concurrent.Async (async, forConcurrently_)
 import           Control.Exception (SomeException)
 import           Control.Exception.Base (try)
-import           Control.Lens
+import Control.Lens
+    ( At(at),
+      Each(each),
+      (&),
+      (^..),
+      (^?),
+      (^.),
+      view,
+      _Just,
+      (%~),
+      (.=),
+      (.~),
+      (?~),
+      assign,
+      makeLensesFor,
+      Field2(_2) )
 import           Control.Monad (void, mfilter, unless)
 import           Control.Monad.IO.Class (liftIO)
 import qualified Data.CaseInsensitive as CI
 import           Data.Default (def)
 import           Data.Foldable (for_)
 import           Data.List (isPrefixOf, partition, find)
-import           Data.Maybe (fromMaybe, mapMaybe)
+import           Data.Maybe (fromMaybe, mapMaybe, isJust)
 import           Data.Text (Text)
 import qualified Data.Text as T
 import qualified Data.Text.Encoding as T
@@ -55,7 +70,9 @@ import           Network.Pocket
 import           Network.Pocket.Meta (fetchRedditCommentCount)
 import           Network.Pocket.Retrieve
 import           Network.Pocket.Ui.State
-import           Network.Pocket.Ui.Widgets
+import Brick.Widgets.List (handleListEventVi, handleListEvent)
+import Control.Lens.Operators ( (<&>), (?=), (%=) )
+import qualified Control.Monad.State as State
 
 makeLensesFor [("std_err", "stdErr"), ("std_out", "stdOut")] ''CreateProcess
 
@@ -63,87 +80,98 @@ trigger :: BChan HocketEvent -> HocketEvent -> IO ()
 trigger = writeBChan
 
 vtyEventHandler :: BChan HocketEvent
-                -> HocketState
                 -> Event
-                -> EventM Name (Next HocketState)
-vtyEventHandler es s (EvKey (KChar ' ') []) = do
+                -> EventM Name HocketState ()
+vtyEventHandler es (EvKey (KChar ' ') []) = do
+  s <- State.get
   liftIO . for_ (focusedItem s) $ \pit -> es `trigger` browseItemEvt pit
-  continue s
-vtyEventHandler es s (EvKey KEnter []) = do
+  id .= s
+vtyEventHandler es (EvKey KEnter []) = do
+  s <- State.get
   liftIO . for_ (focusedItem s) $ \pit -> do
     es `trigger` browseItemEvt pit
     es `trigger` shiftItemEvt (pit ^. itemId)
-  continue s
-vtyEventHandler es s (EvKey (KChar 'u') []) = do
+  assign id s
+vtyEventHandler es (EvKey (KChar 'u') []) = do
   liftIO $ es `trigger` fetchItemsEvt
-  continue s
-vtyEventHandler es s (EvKey (KChar 'A') []) = do
+  pure ()
+vtyEventHandler es (EvKey (KChar 'A') []) = do
   liftIO $ es `trigger` archiveItemsEvt
-  continue s
-vtyEventHandler es s (EvKey (KChar 'd') []) = do
+  pure ()
+vtyEventHandler es (EvKey (KChar 'd') []) = do
+  s <- State.get
   liftIO . for_ (focusedItem s) $ \pit ->
     es `trigger` shiftItemEvt (pit ^. itemId)
-  continue s
-vtyEventHandler _ s (EvKey (KChar 'q') []) = halt s
-vtyEventHandler es s (EvKey (KChar 'r') []) = do
+  assign id s
+vtyEventHandler _ (EvKey (KChar 'q') []) = halt
+vtyEventHandler es (EvKey (KChar 'r') []) = do
+  s <- State.get
   liftIO $ for_ (focusedItem s) $ \pit -> es `trigger` getRedditCommentsEvt [pit]
-  continue s
-vtyEventHandler es s (EvKey (KChar 'R') []) = do
+  assign id s
+vtyEventHandler es (EvKey (KChar 'R') []) = do
+  s <- State.get
   let items = s ^.. hsContents . each . _2
       redditItems = filter (isRedditUrl . resolvedOrGivenUrl) items
   liftIO $ unless (null redditItems) $ es `trigger` getRedditCommentsEvt redditItems
-  continue s
-vtyEventHandler _ s (EvKey (KChar '\t') []) =
-  s & focusRing %~ Focus.focusNext & continue
-vtyEventHandler _ s e =
-  continue =<<
+  assign id s
+vtyEventHandler _ (EvKey (KChar '\t') []) = do
+  s <- State.get
+  assign id $ s & focusRing %~ Focus.focusNext
+vtyEventHandler _ e = do
+  s <- State.get
   case focused s of
-    Just ItemListName -> handleEventLensed s itemListVi handleViListEvent e
+    Just ItemListName -> zoom itemList (handleListEventVi handleListEvent e)
     Just PendingListName ->
-      handleEventLensed s pendingListVi handleViListEvent e
-    _ -> return s
+      zoom pendingList (handleListEventVi handleListEvent e)
+    _ -> pure ()
 
 internalEventHandler
   :: BChan HocketEvent
-  -> HocketState
   -> HocketEvent
-  -> EventM Name (Next HocketState)
-internalEventHandler es s (HocketAsync e) = asyncCommandEventHandler es s e
-internalEventHandler es s (HocketUi e) = uiCommandEventHandler es s e
+  -> EventM Name HocketState ()
+internalEventHandler es (HocketAsync e) = asyncCommandEventHandler es e
+internalEventHandler es (HocketUi e) = uiCommandEventHandler es e
+
+unlessAsyncRunning :: State.MonadState HocketState m => m () -> m ()
+unlessAsyncRunning act = do
+  asyncRunning <- State.get <&> view hsAsync <&> isJust
+  unless asyncRunning act
 
 asyncCommandEventHandler
   :: BChan HocketEvent
-  -> HocketState
   -> AsyncCommand
-  -> EventM Name (Next HocketState)
-asyncCommandEventHandler es s@(view hsAsync -> Nothing) FetchItems = do
-  fetchAsync <-
-    liftIO . async $ do
-      es `trigger` setStatusEvt (Just "fetching")
-      eitherErrorPis <- retrieveItems (s ^. hsCredentials) (s ^. hsLastUpdated)
-      case eitherErrorPis of
-        Left e ->
-          es `trigger` asyncActionFailedEvt (errorMessageFromException e)
-        Right (PocketItemBatch ts pis) -> do
-          es `trigger` setStatusEvt Nothing
-          es `trigger` fetchedItemsEvt ts pis
-  continue (s & hsAsync ?~ fetchAsync)
-asyncCommandEventHandler _ s FetchItems = continue s
-asyncCommandEventHandler _ s (FetchedItems ts pis) = do
+  -> EventM Name HocketState ()
+asyncCommandEventHandler es FetchItems = do
+  s <- State.get
+  unlessAsyncRunning $ do
+    fetchAsync <-
+      liftIO . async $ do
+        es `trigger` setStatusEvt (Just "fetching")
+        eitherErrorPis <- retrieveItems (s ^. hsCredentials) (s ^. hsLastUpdated)
+        case eitherErrorPis of
+          Left e ->
+            es `trigger` asyncActionFailedEvt (errorMessageFromException e)
+          Right (PocketItemBatch ts pis) -> do
+            es `trigger` setStatusEvt Nothing
+            es `trigger` fetchedItemsEvt ts pis
+    hsAsync ?= fetchAsync
+asyncCommandEventHandler _ (FetchedItems ts pis) = do
+  s <- State.get
   let (newItems, toBeDeleted) = partition ((== Normal) . view status) pis
-      newS = (s & insertItems newItems & removeItems (toBeDeleted ^.. each . itemId) &
+      newS = s & insertItems newItems & removeItems (toBeDeleted ^.. each . itemId) &
                   hsAsync .~
                   Nothing &
                   hsLastUpdated ?~
-                  ts)
-  continue newS
+                  ts
+  assign id newS
 
-asyncCommandEventHandler es s (AsyncActionFailed err) = do
+asyncCommandEventHandler es (AsyncActionFailed err) = do
   liftIO (es `trigger` setStatusEvt (Just ("failed" <> maybe "" (": " <>) err)))
-  continue (s & hsAsync .~ Nothing)
-asyncCommandEventHandler es s@(view hsAsync -> Nothing) ArchiveItems =
+  hsAsync .= Nothing
+asyncCommandEventHandler es ArchiveItems = do
+  s <- State.get
   case hsNumItems s of
-    (_, 0) -> continue s
+    (_, 0) -> pure ()
     (_, _) -> do
       archiveAsync <-
         liftIO . async $ do
@@ -161,11 +189,11 @@ asyncCommandEventHandler es s@(view hsAsync -> Nothing) ArchiveItems =
                         mfilter (const successful) (Just (view itemId pit)))
                      results)
               es `trigger` setStatusEvt Nothing
-      continue (s & hsAsync ?~ archiveAsync)
-asyncCommandEventHandler _ s ArchiveItems = continue s
-asyncCommandEventHandler _ s (ArchivedItems pis) =
-  continue (s & removeItems pis & hsAsync .~ Nothing)
-asyncCommandEventHandler es s@(view hsAsync -> Nothing) (GetRedditCommentCount items) = do
+      hsAsync ?= archiveAsync
+asyncCommandEventHandler _ (ArchivedItems pis) = do
+  id %= removeItems pis
+  hsAsync .= Nothing
+asyncCommandEventHandler es (GetRedditCommentCount items) = unlessAsyncRunning $ do
   liftIO $ es `trigger` setStatusEvt (Just "getting comment counts")
   let maybeSubredditsAndIds = mapMaybe (\i -> (view itemId i,) <$> subredditAndArticleId i) items
   asyncGet <- liftIO . async $ do
@@ -174,35 +202,31 @@ asyncCommandEventHandler es s@(view hsAsync -> Nothing) (GetRedditCommentCount i
       for_ eitherErrCount $ \count -> es `trigger` gotRedditCommentsEvt pid count
       es `trigger` doneWithRedditCommentsEvt
     es `trigger` setStatusEvt Nothing
-  continue (s & hsAsync ?~ asyncGet)
-asyncCommandEventHandler _ s (GetRedditCommentCount _) = continue s
-asyncCommandEventHandler _ s (GotRedditCommentCount pid (RedditCommentCount count)) = do
-  continue (s & hsContents . at pid . _Just . _2 . redditCommentCount ?~ count)
-asyncCommandEventHandler _ s DoneWithRedditComments =
-  continue (s & hsAsync .~ Nothing)
+  hsAsync ?= asyncGet
+asyncCommandEventHandler _ (GotRedditCommentCount pid (RedditCommentCount count)) = do
+  hsContents . at pid . _Just . _2 . redditCommentCount ?= count
+asyncCommandEventHandler _ DoneWithRedditComments =
+  hsAsync .= Nothing
 
 uiCommandEventHandler :: BChan HocketEvent
-                      -> HocketState
                       -> UiCommand
-                      -> EventM Name (Next HocketState)
-uiCommandEventHandler _ s (ShiftItem pid) = continue (toggleStatus pid s)
-uiCommandEventHandler _ s (RemoveItems pis) = continue (removeItems pis s)
-uiCommandEventHandler _ s (SetStatus t) = continue (s & hsStatus .~ t)
-uiCommandEventHandler es s (BrowseItem pit) = do
+                      -> EventM Name HocketState ()
+uiCommandEventHandler _ (ShiftItem pid) = id %= toggleStatus pid
+uiCommandEventHandler _ (RemoveItems pis) = id %= removeItems pis
+uiCommandEventHandler _ (SetStatus t) = hsStatus .= t
+uiCommandEventHandler es (BrowseItem pit) = do
   res <- liftIO . try @SomeException $ browseItem "firefox '%s'" (resolvedOrGivenUrl pit)
   case res of
     Left e -> liftIO $ es `trigger` setStatusEvt (Just (T.pack $ show e))
-    Right () -> return ()
-  continue s
+    Right () -> pure ()
 
-eventHandler
+myEventHandler
   :: BChan HocketEvent
-  -> HocketState
   -> BrickEvent Name HocketEvent
-  -> EventM Name (Next HocketState)
-eventHandler es s (VtyEvent e) = vtyEventHandler es s e
-eventHandler es s (AppEvent e) = internalEventHandler es s e
-eventHandler _ s _ = continue s
+  -> EventM Name HocketState ()
+myEventHandler es (VtyEvent e) = vtyEventHandler es e
+myEventHandler es (AppEvent e) = internalEventHandler es e
+myEventHandler _ _ = pure ()
 
 main :: IO ()
 main = do
@@ -245,11 +269,10 @@ app tz events =
   App
   { appDraw = drawGui tz
   , appChooseCursor = Focus.focusRingCursor (view focusRing)
-  , appHandleEvent = \s e -> fmap syncForRender <$> eventHandler events s e
-  , appStartEvent =
-      \s -> do
-        liftIO (events `trigger` fetchItemsEvt)
-        return s
+  , appHandleEvent = \e -> do
+      myEventHandler events e
+      id %= syncForRender
+  , appStartEvent = liftIO (events `trigger` fetchItemsEvt)
   , appAttrMap = const hocketAttrMap
   }
 
@@ -257,9 +280,9 @@ hocketAttrMap :: AttrMap
 hocketAttrMap =
   attrMap
     Vty.defAttr
-    [ ("list" <> "selected" <> "focused", boldBlackOnOrange)
-    , ("list" <> "unselectedItem", whiteFg)
-    , ( "bar"
+    [ (attrName "list" <> attrName "selected" <> attrName "focused", boldBlackOnOrange)
+    , (attrName "list" <> attrName "unselectedItem", whiteFg)
+    , ( attrName "bar"
       , Vty.defAttr `Vty.withBackColor` Vty.black `Vty.withForeColor` Vty.white)
     ]
 
@@ -284,7 +307,7 @@ drawGui tz s = [w]
             (s ^. pendingList)
         , hBar " " <+>
           withAttr
-            "bar"
+            (attrName "bar")
             (padLeft
                Max
                (txt
@@ -313,8 +336,8 @@ isFocused s name = Just name == focused s
 listDrawElement :: Bool -> PocketItem -> Widget Name
 listDrawElement sel e =
   (if sel
-     then withAttr ("list" <> "selectedItem")
-     else withAttr ("list" <> "unselectedItem"))
+     then withAttr (attrName "list" <> attrName "selectedItem")
+     else withAttr (attrName "list" <> attrName "unselectedItem"))
     (padRight Max (txtDisplay e))
 
 orange :: Vty.Color
@@ -334,7 +357,7 @@ whiteFg :: Vty.Attr
 whiteFg = Vty.defAttr `Vty.withForeColor` Vty.white
 
 hBar :: Text -> Widget Name
-hBar = withAttr "bar" . padRight Max . txt
+hBar = withAttr (attrName "bar") . padRight Max . txt
 
 retrieveItems :: PocketCredentials -> Maybe POSIXTime -> IO (Either HttpException PocketItemBatch)
 retrieveItems cred =
@@ -380,10 +403,7 @@ txtDisplay pit =
     leftEdge =
       sformat (F.year % "-" <> F.month % "-" <> F.dayOfMonth) added <> ": "
     commentCount =
-      fromMaybe "     " $
-      fmap
-        (sformat ("  " % (F.left 3 ' ' %. F.int) % ""))
-        (pit ^. redditCommentCount)
+      maybe "     " (sformat ("  " % (F.left 3 ' ' %. F.int) % "")) (pit ^. redditCommentCount)
     trimmedUrl = T.pack (trimURI url)
 
 horizontalUriLimit :: Int
