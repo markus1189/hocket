@@ -21,6 +21,12 @@
             dontHaddock (disableOptimization (disableLibraryProfiling drv));
         };
       in rec {
+        apps.hocket = {
+          type = "app";
+          program = "${pkgs.haskell.lib.justStaticExecutables hocketDrv}/bin/hocket";
+        };
+        defaultApp = apps.hocket;
+
         packages.hocket = hocketDrv;
         defaultPackage = packages.hocket;
 
