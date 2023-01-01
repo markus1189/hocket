@@ -1,3 +1,13 @@
 cradle:
-  direct:
-    arguments: [-Wall]
+  cabal:
+    - path: "src"
+      component: "lib:hocket"
+
+    - path: "main/hocket.hs"
+      component: "hocket:exe:hocket"
+
+    - path: "main/Events.hs"
+      component: "hocket:exe:hocket"
+
+    - path: "test"
+      component: "hocket:test:test"
