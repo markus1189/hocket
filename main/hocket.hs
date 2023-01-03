@@ -18,22 +18,8 @@ import qualified Brick.Widgets.List as L
 import           Control.Concurrent.Async (async, forConcurrently_)
 import           Control.Exception (SomeException)
 import           Control.Exception.Base (try)
-import Control.Lens
-    ( At(at),
-      Each(each),
-      (&),
-      (^..),
-      (^?),
-      (^.),
-      view,
-      _Just,
-      (%~),
-      (.=),
-      (.~),
-      (?~),
-      assign,
-      makeLensesFor,
-      Field2(_2) )
+import           Control.Lens ( At(at), Each(each), view, _Just, makeLensesFor, Field2(_2) )
+import           Control.Lens.Operators
 import           Control.Monad (void, mfilter, unless)
 import           Control.Monad.IO.Class (liftIO)
 import qualified Data.CaseInsensitive as CI
@@ -65,14 +51,14 @@ import           System.Process
 import           System.Process.Internals (StdStream(CreatePipe))
 import           Text.Printf (printf)
 
+import           Brick.Widgets.List (handleListEventVi, handleListEvent)
+import           Control.Lens.Combinators (use)
+import           Control.Monad.State (MonadState)
 import           Events
 import           Network.Pocket
 import           Network.Pocket.Meta (fetchRedditCommentCount)
 import           Network.Pocket.Retrieve
 import           Network.Pocket.Ui.State
-import Brick.Widgets.List (handleListEventVi, handleListEvent)
-import Control.Lens.Operators ( (<&>), (?=), (%=) )
-import qualified Control.Monad.State as State
 
 makeLensesFor [("std_err", "stdErr"), ("std_out", "stdOut")] ''CreateProcess
 
@@ -83,15 +69,13 @@ vtyEventHandler :: BChan HocketEvent
                 -> Event
                 -> EventM Name HocketState ()
 vtyEventHandler es (EvKey (KChar ' ') []) = do
-  s <- State.get
+  s <- use id
   liftIO . for_ (focusedItem s) $ \pit -> es `trigger` browseItemEvt pit
-  id .= s
 vtyEventHandler es (EvKey KEnter []) = do
-  s <- State.get
+  s <- use id
   liftIO . for_ (focusedItem s) $ \pit -> do
     es `trigger` browseItemEvt pit
     es `trigger` shiftItemEvt (pit ^. itemId)
-  assign id s
 vtyEventHandler es (EvKey (KChar 'u') []) = do
   liftIO $ es `trigger` fetchItemsEvt
   pure ()
@@ -99,26 +83,21 @@ vtyEventHandler es (EvKey (KChar 'A') []) = do
   liftIO $ es `trigger` archiveItemsEvt
   pure ()
 vtyEventHandler es (EvKey (KChar 'd') []) = do
-  s <- State.get
+  s <- use id
   liftIO . for_ (focusedItem s) $ \pit ->
     es `trigger` shiftItemEvt (pit ^. itemId)
-  assign id s
 vtyEventHandler _ (EvKey (KChar 'q') []) = halt
 vtyEventHandler es (EvKey (KChar 'r') []) = do
-  s <- State.get
+  s <- use id
   liftIO $ for_ (focusedItem s) $ \pit -> es `trigger` getRedditCommentsEvt [pit]
-  assign id s
 vtyEventHandler es (EvKey (KChar 'R') []) = do
-  s <- State.get
+  s <- use id
   let items = s ^.. hsContents . each . _2
       redditItems = filter (isRedditUrl . resolvedOrGivenUrl) items
   liftIO $ unless (null redditItems) $ es `trigger` getRedditCommentsEvt redditItems
-  assign id s
-vtyEventHandler _ (EvKey (KChar '\t') []) = do
-  s <- State.get
-  assign id $ s & focusRing %~ Focus.focusNext
+vtyEventHandler _ (EvKey (KChar '\t') []) = focusRing %= Focus.focusNext
 vtyEventHandler _ e = do
-  s <- State.get
+  s <- use id
   case focused s of
     Just ItemListName -> zoom itemList (handleListEventVi handleListEvent e)
     Just PendingListName ->
@@ -132,9 +111,9 @@ internalEventHandler
 internalEventHandler es (HocketAsync e) = asyncCommandEventHandler es e
 internalEventHandler es (HocketUi e) = uiCommandEventHandler es e
 
-unlessAsyncRunning :: State.MonadState HocketState m => m () -> m ()
+unlessAsyncRunning :: MonadState HocketState m => m () -> m ()
 unlessAsyncRunning act = do
-  asyncRunning <- State.get <&> view hsAsync <&> isJust
+  asyncRunning <- use id <&> view hsAsync <&> isJust
   unless asyncRunning act
 
 asyncCommandEventHandler
@@ -142,7 +121,7 @@ asyncCommandEventHandler
   -> AsyncCommand
   -> EventM Name HocketState ()
 asyncCommandEventHandler es FetchItems = do
-  s <- State.get
+  s <- use id
   unlessAsyncRunning $ do
     fetchAsync <-
       liftIO . async $ do
@@ -156,20 +135,17 @@ asyncCommandEventHandler es FetchItems = do
             es `trigger` fetchedItemsEvt ts pis
     hsAsync ?= fetchAsync
 asyncCommandEventHandler _ (FetchedItems ts pis) = do
-  s <- State.get
   let (newItems, toBeDeleted) = partition ((== Normal) . view status) pis
-      newS = s & insertItems newItems & removeItems (toBeDeleted ^.. each . itemId) &
-                  hsAsync .~
-                  Nothing &
-                  hsLastUpdated ?~
-                  ts
-  assign id newS
+  id %= insertItems newItems
+  id %= removeItems (toBeDeleted ^.. each . itemId)
+  hsAsync .= Nothing
+  hsLastUpdated ?= ts
 
 asyncCommandEventHandler es (AsyncActionFailed err) = do
   liftIO (es `trigger` setStatusEvt (Just ("failed" <> maybe "" (": " <>) err)))
   hsAsync .= Nothing
 asyncCommandEventHandler es ArchiveItems = do
-  s <- State.get
+  s <- use id
   case hsNumItems s of
     (_, 0) -> pure ()
     (_, _) -> do
@@ -324,10 +300,8 @@ focused = Focus.focusGetCurrent . view focusRing
 focusedList :: HocketState -> Maybe (L.List Name PocketItem)
 focusedList s =
   case focused s of
-    Just n
-      | n == ItemListName -> s ^? itemList
-    Just n
-      | n == PendingListName -> s ^? pendingList
+    Just ItemListName -> s ^? itemList
+    Just PendingListName -> s ^? pendingList
     _ -> Nothing
 
 isFocused :: HocketState -> Name -> Bool
