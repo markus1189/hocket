@@ -405,7 +405,7 @@ focusedItem s = do
 
 browseItem :: String -> URL -> IO ()
 browseItem shellCmd (URL url) = do
-  let spec = shell $ printf shellCmd url
+  let spec = shell $ T.unpack $ T.replace "m.aliexpress.us" "aliexpress.us" $ T.pack $ printf shellCmd url
   (_, _, _, ph) <- createProcess $ spec & stdOut .~ CreatePipe & stdErr .~ CreatePipe
   void . waitForProcess $ ph
 
