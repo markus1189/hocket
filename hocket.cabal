@@ -80,6 +80,7 @@ executable hocket
                      , text
                      , time
                      , transformers
+                     , vty-unix
                      , vty
 
 

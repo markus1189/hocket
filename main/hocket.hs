@@ -1,73 +1,84 @@
-{-# LANGUAGE TupleSections #-}
-{-# LANGUAGE TemplateHaskell #-}
 {-# LANGUAGE FlexibleContexts #-}
-{-# LANGUAGE ViewPatterns #-}
-{-# LANGUAGE RankNTypes #-}
 {-# LANGUAGE OverloadedStrings #-}
+{-# LANGUAGE RankNTypes #-}
+{-# LANGUAGE TemplateHaskell #-}
+{-# LANGUAGE TupleSections #-}
 {-# LANGUAGE TypeApplications #-}
+{-# LANGUAGE ViewPatterns #-}
 
 module Main
-  ( main
-  ) where
+  ( main,
+  )
+where
 
-import           Brick
-import           Brick.BChan (newBChan, BChan, writeBChan)
+import Brick
+import Brick.BChan (BChan, newBChan, writeBChan)
 import qualified Brick.Focus as Focus
-import           Brick.Widgets.Border (hBorder)
+import Brick.Widgets.Border (hBorder)
+import Brick.Widgets.List (handleListEvent, handleListEventVi)
 import qualified Brick.Widgets.List as L
-import           Control.Concurrent.Async (async, forConcurrently_)
-import           Control.Exception (SomeException)
-import           Control.Exception.Base (try)
-import           Control.Lens ( At(at), Each(each), view, _Just, makeLensesFor, Field2(_2) )
-import           Control.Lens.Operators
-import           Control.Monad (void, mfilter, unless)
-import           Control.Monad.IO.Class (liftIO)
+import Control.Concurrent.Async (async, forConcurrently_)
+import Control.Exception (SomeException)
+import Control.Exception.Base (try)
+import Control.Lens (At (at), Each (each), Field2 (_2), makeLensesFor, view, _Just)
+import Control.Lens.Combinators (use)
+import Control.Lens.Operators
+import Control.Monad (mfilter, unless, void)
+import Control.Monad.IO.Class (liftIO)
+import Control.Monad.State (MonadState)
 import qualified Data.CaseInsensitive as CI
-import           Data.Default (def)
-import           Data.Foldable (for_)
-import           Data.List (isPrefixOf, partition, find)
-import           Data.Maybe (fromMaybe, mapMaybe, isJust)
-import           Data.Text (Text)
+import Data.Default (def)
+import Data.Foldable (for_)
+import Data.List (find, isPrefixOf, partition)
+import Data.Maybe (fromMaybe, isJust, mapMaybe)
+import Data.Text (Text)
 import qualified Data.Text as T
 import qualified Data.Text.Encoding as T
-import           Data.Time.Clock.POSIX (posixSecondsToUTCTime, POSIXTime)
-import           Data.Time.LocalTime
-       (utcToLocalTime, getCurrentTimeZone, TimeZone, utcToLocalTime)
-import           Dhall (input,auto)
-import           Formatting (sformat, (%), (%.))
+import Data.Time.Clock.POSIX (POSIXTime, posixSecondsToUTCTime)
+import Data.Time.LocalTime
+  ( TimeZone,
+    getCurrentTimeZone,
+    utcToLocalTime,
+  )
+import Dhall (auto, input)
+import Events
+import Formatting (sformat, (%), (%.))
 import qualified Formatting as F
 import qualified Formatting.Time as F
-import           Graphics.Vty (Event, mkVty, Key(KChar), Event(EvKey))
+import Graphics.Vty (Event (EvKey), Key (KChar))
 import qualified Graphics.Vty as Vty
-import           Graphics.Vty.Input.Events (Key(KEnter))
-import           Network.HTTP.Client
-       (HttpException(HttpExceptionRequest),
-        HttpExceptionContent(StatusCodeException), responseHeaders)
-import           Network.URI
-import           System.Environment (getArgs)
-import           System.Exit (exitSuccess, exitFailure)
-import           System.Process
-       (shell, createProcess, CreateProcess, waitForProcess)
-import           System.Process.Internals (StdStream(CreatePipe))
-import           Text.Printf (printf)
-
-import           Brick.Widgets.List (handleListEventVi, handleListEvent)
-import           Control.Lens.Combinators (use)
-import           Control.Monad.State (MonadState)
-import           Events
-import           Network.Pocket
-import           Network.Pocket.Meta (fetchRedditCommentCount)
-import           Network.Pocket.Retrieve
-import           Network.Pocket.Ui.State
+import Graphics.Vty.Input.Events (Key (KEnter))
+import Graphics.Vty.Platform.Unix (mkVty)
+import Network.HTTP.Client
+  ( HttpException (HttpExceptionRequest),
+    HttpExceptionContent (StatusCodeException),
+    responseHeaders,
+  )
+import Network.Pocket
+import Network.Pocket.Meta (fetchRedditCommentCount)
+import Network.Pocket.Retrieve
+import Network.Pocket.Ui.State
+import Network.URI
+import System.Environment (getArgs)
+import System.Exit (exitFailure, exitSuccess)
+import System.Process
+  ( CreateProcess,
+    createProcess,
+    shell,
+    waitForProcess,
+  )
+import System.Process.Internals (StdStream (CreatePipe))
+import Text.Printf (printf)
 
 makeLensesFor [("std_err", "stdErr"), ("std_out", "stdOut")] ''CreateProcess
 
 trigger :: BChan HocketEvent -> HocketEvent -> IO ()
 trigger = writeBChan
 
-vtyEventHandler :: BChan HocketEvent
-                -> Event
-                -> EventM Name HocketState ()
+vtyEventHandler ::
+  BChan HocketEvent ->
+  Event ->
+  EventM Name HocketState ()
 vtyEventHandler es (EvKey (KChar ' ') []) = do
   s <- use id
   liftIO . for_ (focusedItem s) $ \pit -> es `trigger` browseItemEvt pit
@@ -104,22 +115,22 @@ vtyEventHandler _ e = do
       zoom pendingList (handleListEventVi handleListEvent e)
     _ -> pure ()
 
-internalEventHandler
-  :: BChan HocketEvent
-  -> HocketEvent
-  -> EventM Name HocketState ()
+internalEventHandler ::
+  BChan HocketEvent ->
+  HocketEvent ->
+  EventM Name HocketState ()
 internalEventHandler es (HocketAsync e) = asyncCommandEventHandler es e
 internalEventHandler es (HocketUi e) = uiCommandEventHandler es e
 
-unlessAsyncRunning :: MonadState HocketState m => m () -> m ()
+unlessAsyncRunning :: (MonadState HocketState m) => m () -> m ()
 unlessAsyncRunning act = do
-  asyncRunning <- use id <&> view hsAsync <&> isJust
+  asyncRunning <- use id <&> isJust . view hsAsync
   unless asyncRunning act
 
-asyncCommandEventHandler
-  :: BChan HocketEvent
-  -> AsyncCommand
-  -> EventM Name HocketState ()
+asyncCommandEventHandler ::
+  BChan HocketEvent ->
+  AsyncCommand ->
+  EventM Name HocketState ()
 asyncCommandEventHandler es FetchItems = do
   s <- use id
   unlessAsyncRunning $ do
@@ -140,7 +151,6 @@ asyncCommandEventHandler _ (FetchedItems ts pis) = do
   id %= removeItems (toBeDeleted ^.. each . itemId)
   hsAsync .= Nothing
   hsLastUpdated ?= ts
-
 asyncCommandEventHandler es (AsyncActionFailed err) = do
   liftIO (es `trigger` setStatusEvt (Just ("failed" <> maybe "" (": " <>) err)))
   hsAsync .= Nothing
@@ -158,12 +168,14 @@ asyncCommandEventHandler es ArchiveItems = do
             Left e ->
               es `trigger` asyncActionFailedEvt (errorMessageFromException e)
             Right results -> do
-              es `trigger`
-                archivedItemsEvt
-                  (mapMaybe
-                     (\(pit, successful) ->
-                        mfilter (const successful) (Just (view itemId pit)))
-                     results)
+              es
+                `trigger` archivedItemsEvt
+                  ( mapMaybe
+                      ( \(pit, successful) ->
+                          mfilter (const successful) (Just (view itemId pit))
+                      )
+                      results
+                  )
               es `trigger` setStatusEvt Nothing
       hsAsync ?= archiveAsync
 asyncCommandEventHandler _ (ArchivedItems pis) = do
@@ -184,9 +196,10 @@ asyncCommandEventHandler _ (GotRedditCommentCount pid (RedditCommentCount count)
 asyncCommandEventHandler _ DoneWithRedditComments =
   hsAsync .= Nothing
 
-uiCommandEventHandler :: BChan HocketEvent
-                      -> UiCommand
-                      -> EventM Name HocketState ()
+uiCommandEventHandler ::
+  BChan HocketEvent ->
+  UiCommand ->
+  EventM Name HocketState ()
 uiCommandEventHandler _ (ShiftItem pid) = id %= toggleStatus pid
 uiCommandEventHandler _ (RemoveItems pis) = id %= removeItems pis
 uiCommandEventHandler _ (SetStatus t) = hsStatus .= t
@@ -196,10 +209,10 @@ uiCommandEventHandler es (BrowseItem pit) = do
     Left e -> liftIO $ es `trigger` setStatusEvt (Just (T.pack $ show e))
     Right () -> pure ()
 
-myEventHandler
-  :: BChan HocketEvent
-  -> BrickEvent Name HocketEvent
-  -> EventM Name HocketState ()
+myEventHandler ::
+  BChan HocketEvent ->
+  BrickEvent Name HocketEvent ->
+  EventM Name HocketState ()
 myEventHandler es (VtyEvent e) = vtyEventHandler es e
 myEventHandler es (AppEvent e) = internalEventHandler es e
 myEventHandler _ _ = pure ()
@@ -215,12 +228,13 @@ main = do
       tz <- getCurrentTimeZone
       vty <- mkVty Vty.defaultConfig
       void
-        (customMain
-           vty
-           (mkVty Vty.defaultConfig)
-           (Just events)
-           (app tz events)
-           (initialState cred))
+        ( customMain
+            vty
+            (mkVty Vty.defaultConfig)
+            (Just events)
+            (app tz events)
+            (initialState cred)
+        )
     _ -> do
       putStrLn $ "Invalid args: " ++ show args
       exitFailure
@@ -230,7 +244,7 @@ addToPocket cred url = do
   putStrLn url
   res <-
     tryHttpException . runHocket (cred, def) . pocket . AddItem $
-    T.pack url
+      T.pack url
   case res of
     Left e -> do
       putStrLn $ "Error during request: " ++ show e
@@ -243,23 +257,24 @@ addToPocket cred url = do
 app :: TimeZone -> BChan HocketEvent -> App HocketState HocketEvent Name
 app tz events =
   App
-  { appDraw = drawGui tz
-  , appChooseCursor = Focus.focusRingCursor (view focusRing)
-  , appHandleEvent = \e -> do
-      myEventHandler events e
-      id %= syncForRender
-  , appStartEvent = liftIO (events `trigger` fetchItemsEvt)
-  , appAttrMap = const hocketAttrMap
-  }
+    { appDraw = drawGui tz,
+      appChooseCursor = Focus.focusRingCursor (view focusRing),
+      appHandleEvent = \e -> do
+        myEventHandler events e
+        id %= syncForRender,
+      appStartEvent = liftIO (events `trigger` fetchItemsEvt),
+      appAttrMap = const hocketAttrMap
+    }
 
 hocketAttrMap :: AttrMap
 hocketAttrMap =
   attrMap
     Vty.defAttr
-    [ (attrName "list" <> attrName "selected" <> attrName "focused", boldBlackOnOrange)
-    , (attrName "list" <> attrName "unselectedItem", whiteFg)
-    , ( attrName "bar"
-      , Vty.defAttr `Vty.withBackColor` Vty.black `Vty.withForeColor` Vty.white)
+    [ (attrName "list" <> attrName "selected" <> attrName "focused", boldBlackOnOrange),
+      (attrName "list" <> attrName "unselectedItem", whiteFg),
+      ( attrName "bar",
+        Vty.defAttr `Vty.withBackColor` Vty.black `Vty.withForeColor` Vty.white
+      )
     ]
 
 drawGui :: TimeZone -> HocketState -> [Widget Name]
@@ -268,30 +283,34 @@ drawGui tz s = [w]
     w =
       vBox
         [ hBar
-            ("Hocket: (" <>
-             uncurry (sformat (F.int % "|" % F.int)) (hsNumItems s) <>
-             ")")
-        , L.renderList
-            listDrawElement
-            (isFocused s ItemListName)
-            (s ^. itemList)
-        , hBorder
-        , vLimit 10 $
+            ( "Hocket: ("
+                <> uncurry (sformat (F.int % "|" % F.int)) (hsNumItems s)
+                <> ")"
+            ),
           L.renderList
             listDrawElement
-            (isFocused s PendingListName)
-            (s ^. pendingList)
-        , hBar " " <+>
-          withAttr
-            (attrName "bar")
-            (padLeft
-               Max
-               (txt
-                  (maybe
-                     "<never>"
-                     (sformat F.hms . utcToLocalTime tz . posixSecondsToUTCTime)
-                     (s ^. hsLastUpdated))))
-        , txt (fromMaybe " " (s ^. hsStatus))
+            (isFocused s ItemListName)
+            (s ^. itemList),
+          hBorder,
+          vLimit 10 $
+            L.renderList
+              listDrawElement
+              (isFocused s PendingListName)
+              (s ^. pendingList),
+          hBar " "
+            <+> withAttr
+              (attrName "bar")
+              ( padLeft
+                  Max
+                  ( txt
+                      ( maybe
+                          "<never>"
+                          (sformat F.hms . utcToLocalTime tz . posixSecondsToUTCTime)
+                          (s ^. hsLastUpdated)
+                      )
+                  )
+              ),
+          txt (fromMaybe " " (s ^. hsStatus))
         ]
 
 focused :: HocketState -> Maybe Name
@@ -309,9 +328,10 @@ isFocused s name = Just name == focused s
 
 listDrawElement :: Bool -> PocketItem -> Widget Name
 listDrawElement sel e =
-  (if sel
-     then withAttr (attrName "list" <> attrName "selectedItem")
-     else withAttr (attrName "list" <> attrName "unselectedItem"))
+  ( if sel
+      then withAttr (attrName "list" <> attrName "selectedItem")
+      else withAttr (attrName "list" <> attrName "unselectedItem")
+  )
     (padRight Max (txtDisplay e))
 
 orange :: Vty.Color
@@ -319,8 +339,10 @@ orange = Vty.rgbColor 215 135 (0 :: Int)
 
 boldBlackOnOrange :: Vty.Attr
 boldBlackOnOrange =
-  Vty.defAttr `Vty.withForeColor` black `Vty.withBackColor` orange `Vty.withStyle`
-  Vty.bold
+  Vty.defAttr
+    `Vty.withForeColor` black
+    `Vty.withBackColor` orange
+    `Vty.withStyle` Vty.bold
 
 black :: Vty.Color
 black = Vty.rgbColor zero zero zero
@@ -335,11 +357,11 @@ hBar = withAttr (attrName "bar") . padRight Max . txt
 
 retrieveItems :: PocketCredentials -> Maybe POSIXTime -> IO (Either HttpException PocketItemBatch)
 retrieveItems cred =
-  tryHttpException .
-    runHocket (cred, def) .
-    pocket .
-    RetrieveItems .
-    maybe retrieveAllUnread retrieveDeltaSince
+  tryHttpException
+    . runHocket (cred, def)
+    . pocket
+    . RetrieveItems
+    . maybe retrieveAllUnread retrieveDeltaSince
   where
     retrieveAllUnread = defaultRetrieval
     retrieveDeltaSince ts =
@@ -347,28 +369,33 @@ retrieveItems cred =
 
 performArchive :: PocketCredentials -> [PocketItem] -> IO (Either HttpException [(PocketItem, Bool)])
 performArchive cred items =
-  tryHttpException . fmap (zip items) . runHocket (cred, def) .
-  pocket $
-  Batch (map (Archive . view itemId) items)
+  tryHttpException
+    . fmap (zip items)
+    . runHocket (cred, def)
+    . pocket
+    $ Batch (map (Archive . view itemId) items)
 
 tryHttpException :: IO a -> IO (Either HttpException a)
 tryHttpException = try @HttpException
 
 defaultRetrieval :: RetrieveConfig
 defaultRetrieval =
-  def & retrieveSort ?~ NewestFirst & retrieveCount .~ NoLimit &
-  retrieveDetailType ?~
-  Complete
+  def
+    & retrieveSort ?~ NewestFirst
+    & retrieveCount .~ NoLimit
+    & retrieveDetailType
+      ?~ Complete
 
 txtDisplay :: PocketItem -> Widget Name
 txtDisplay pit =
-  txt (T.justifyRight 10 ' ' leftEdge) <+>
-  txt
-    (fromMaybe
-       "<empty>"
-       (find (not . T.null) [given, resolved, T.pack url])) <+>
-  padLeft Max (hLimit horizontalUriLimit (txt trimmedUrl)) <+>
-  txt commentCount
+  txt (T.justifyRight 10 ' ' leftEdge)
+    <+> txt
+      ( fromMaybe
+          "<empty>"
+          (find (not . T.null) [given, resolved, T.pack url])
+      )
+    <+> padLeft Max (hLimit horizontalUriLimit (txt trimmedUrl))
+    <+> txt commentCount
   where
     resolved = view resolvedTitle pit
     given = view givenTitle pit
@@ -389,9 +416,10 @@ trimURI uri =
     parsed <- parseURI uri
     auth <- uriAuthority parsed
     return
-      (strip
-         "reddit.com/"
-         (strip "www." (uriRegName auth) <> uriPath parsed <> uriQuery parsed))
+      ( strip
+          "reddit.com/"
+          (strip "www." (uriRegName auth) <> uriPath parsed <> uriQuery parsed)
+      )
   where
     strip prefix s =
       if prefix `isPrefixOf` s
@@ -411,6 +439,6 @@ browseItem shellCmd (URL url) = do
 
 errorMessageFromException :: HttpException -> Maybe Text
 errorMessageFromException (HttpExceptionRequest _ (StatusCodeException resp _)) =
-  T.decodeUtf8 . snd <$>
-  find (\(k, _) -> k == CI.mk "x-error") (responseHeaders resp)
+  T.decodeUtf8 . snd
+    <$> find (\(k, _) -> k == CI.mk "x-error") (responseHeaders resp)
 errorMessageFromException e = Just . T.pack $ show e
