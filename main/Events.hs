@@ -10,9 +10,6 @@ module Events (HocketEvent(..)
               ,removeItemsEvt
               ,setStatusEvt
               ,browseItemEvt
-              ,getRedditCommentsEvt
-              ,gotRedditCommentsEvt
-              ,doneWithRedditCommentsEvt
               ) where
 
 import           Data.Set (Set)
@@ -21,24 +18,21 @@ import           Data.Time.Clock.POSIX (POSIXTime)
 
 import           Network.Pocket
 
-data HocketEvent = HocketAsync AsyncCommand
-                 | HocketUi UiCommand
+data HocketEvent = HocketAsync !AsyncCommand
+                 | HocketUi !UiCommand
                  deriving (Show,Eq)
 
 data AsyncCommand = FetchItems
-                  | FetchedItems POSIXTime [PocketItem]
+                  | FetchedItems !POSIXTime ![PocketItem]
                   | ArchiveItems
-                  | ArchivedItems [PocketItemId]
-                  | AsyncActionFailed (Maybe Text)
-                  | GetRedditCommentCount [PocketItem]
-                  | GotRedditCommentCount PocketItemId RedditCommentCount
-                  | DoneWithRedditComments
+                  | ArchivedItems ![PocketItemId]
+                  | AsyncActionFailed !(Maybe Text)
                   deriving (Show,Eq)
 
-data UiCommand = ShiftItem PocketItemId
-               | RemoveItems (Set PocketItemId)
-               | SetStatus (Maybe Text)
-               | BrowseItem PocketItem
+data UiCommand = ShiftItem !PocketItemId
+               | RemoveItems !(Set PocketItemId)
+               | SetStatus !(Maybe Text)
+               | BrowseItem !PocketItem
                deriving (Show,Eq)
 
 fetchItemsEvt :: HocketEvent
@@ -55,15 +49,6 @@ archivedItemsEvt pids = HocketAsync (ArchivedItems pids)
 
 asyncActionFailedEvt :: Maybe Text -> HocketEvent
 asyncActionFailedEvt maybeMsg = HocketAsync (AsyncActionFailed maybeMsg)
-
-getRedditCommentsEvt :: [PocketItem] -> HocketEvent
-getRedditCommentsEvt pits = HocketAsync (GetRedditCommentCount pits)
-
-gotRedditCommentsEvt :: PocketItemId -> RedditCommentCount -> HocketEvent
-gotRedditCommentsEvt pid count = HocketAsync (GotRedditCommentCount pid count)
-
-doneWithRedditCommentsEvt :: HocketEvent
-doneWithRedditCommentsEvt = HocketAsync DoneWithRedditComments
 
 shiftItemEvt :: PocketItemId -> HocketEvent
 shiftItemEvt pid = HocketUi (ShiftItem pid)

@@ -17,10 +17,11 @@ import qualified Brick.Focus as Focus
 import Brick.Widgets.Border (hBorder)
 import Brick.Widgets.List (handleListEvent, handleListEventVi)
 import qualified Brick.Widgets.List as L
-import Control.Concurrent.Async (async, forConcurrently_)
+import Control.Applicative ((<|>))
+import Control.Concurrent.Async (async)
 import Control.Exception (SomeException)
 import Control.Exception.Base (try)
-import Control.Lens (At (at), Each (each), Field2 (_2), makeLensesFor, view, _Just)
+import Control.Lens (Each (each), makeLensesFor, view)
 import Control.Lens.Combinators (use)
 import Control.Lens.Operators
 import Control.Monad (mfilter, unless, void)
@@ -53,9 +54,9 @@ import Network.HTTP.Client
   ( HttpException (HttpExceptionRequest),
     HttpExceptionContent (StatusCodeException),
     responseHeaders,
+    responseStatus,
   )
 import Network.Pocket
-import Network.Pocket.Meta (fetchRedditCommentCount)
 import Network.Pocket.Retrieve
 import Network.Pocket.Ui.State
 import Network.URI
@@ -98,14 +99,6 @@ vtyEventHandler es (EvKey (KChar 'd') []) = do
   liftIO . for_ (focusedItem s) $ \pit ->
     es `trigger` shiftItemEvt (pit ^. itemId)
 vtyEventHandler _ (EvKey (KChar 'q') []) = halt
-vtyEventHandler es (EvKey (KChar 'r') []) = do
-  s <- use id
-  liftIO $ for_ (focusedItem s) $ \pit -> es `trigger` getRedditCommentsEvt [pit]
-vtyEventHandler es (EvKey (KChar 'R') []) = do
-  s <- use id
-  let items = s ^.. hsContents . each . _2
-      redditItems = filter (isRedditUrl . resolvedOrGivenUrl) items
-  liftIO $ unless (null redditItems) $ es `trigger` getRedditCommentsEvt redditItems
 vtyEventHandler _ (EvKey (KChar '\t') []) = focusRing %= Focus.focusNext
 vtyEventHandler _ e = do
   s <- use id
@@ -152,8 +145,8 @@ asyncCommandEventHandler _ (FetchedItems ts pis) = do
   hsAsync .= Nothing
   hsLastUpdated ?= ts
 asyncCommandEventHandler es (AsyncActionFailed err) = do
-  liftIO (es `trigger` setStatusEvt (Just ("failed" <> maybe "" (": " <>) err)))
   hsAsync .= Nothing
+  liftIO (es `trigger` setStatusEvt (Just ("failed" <> maybe "<no err>" (": " <>) err)))
 asyncCommandEventHandler es ArchiveItems = do
   s <- use id
   case hsNumItems s of
@@ -180,20 +173,6 @@ asyncCommandEventHandler es ArchiveItems = do
       hsAsync ?= archiveAsync
 asyncCommandEventHandler _ (ArchivedItems pis) = do
   id %= removeItems pis
-  hsAsync .= Nothing
-asyncCommandEventHandler es (GetRedditCommentCount items) = unlessAsyncRunning $ do
-  liftIO $ es `trigger` setStatusEvt (Just "getting comment counts")
-  let maybeSubredditsAndIds = mapMaybe (\i -> (view itemId i,) <$> subredditAndArticleId i) items
-  asyncGet <- liftIO . async $ do
-    forConcurrently_ maybeSubredditsAndIds $ \(pid, (subreddit, articleId)) -> do
-      eitherErrCount <- tryHttpException $ fetchRedditCommentCount subreddit articleId
-      for_ eitherErrCount $ \count -> es `trigger` gotRedditCommentsEvt pid count
-      es `trigger` doneWithRedditCommentsEvt
-    es `trigger` setStatusEvt Nothing
-  hsAsync ?= asyncGet
-asyncCommandEventHandler _ (GotRedditCommentCount pid (RedditCommentCount count)) = do
-  hsContents . at pid . _Just . _2 . redditCommentCount ?= count
-asyncCommandEventHandler _ DoneWithRedditComments =
   hsAsync .= Nothing
 
 uiCommandEventHandler ::
@@ -438,7 +417,9 @@ browseItem shellCmd (URL url) = do
   void . waitForProcess $ ph
 
 errorMessageFromException :: HttpException -> Maybe Text
-errorMessageFromException (HttpExceptionRequest _ (StatusCodeException resp _)) =
-  T.decodeUtf8 . snd
-    <$> find (\(k, _) -> k == CI.mk "x-error") (responseHeaders resp)
+errorMessageFromException (HttpExceptionRequest _ (StatusCodeException resp _)) = msg
+  where
+    msg = xError <|> code
+    xError = T.decodeUtf8 . snd <$> find (\(k, _) -> k == CI.mk "x-error") (responseHeaders resp)
+    code = Just . T.pack $ "Got status: " <> (show . responseStatus $ resp)
 errorMessageFromException e = Just . T.pack $ show e
