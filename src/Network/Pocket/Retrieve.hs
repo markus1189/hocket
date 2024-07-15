@@ -1,5 +1,6 @@
 {-# LANGUAGE TemplateHaskell #-}
 {-# LANGUAGE OverloadedStrings #-}
+{-# LANGUAGE TypeApplications #-}
 
 module Network.Pocket.Retrieve ( AsFormParams (..)
 
@@ -116,7 +117,7 @@ instance AsFormParams RetrieveConfig where
                                     , "detailType" := view retrieveDetailType rc
                                     , "search" := view retrieveSearch rc
                                     , "domain" := view retrieveDomain rc
-                                    , "since" := (rc ^. retrieveSince <&> show)
+                                    , "since" := (rc ^. retrieveSince <&> (show . round @_ @Int))
                                     ] ++ toFormParams (view retrieveCount rc)
 
 nonEmpty :: FormParam -> Bool

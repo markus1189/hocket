@@ -129,7 +129,8 @@ asyncCommandEventHandler es FetchItems = do
   unlessAsyncRunning $ do
     fetchAsync <-
       liftIO . async $ do
-        es `trigger` setStatusEvt (Just "fetching")
+        let suffix = maybe "" (\since -> " since: " <> show (round @_ @Int since)) $ s ^. hsLastUpdated
+        es `trigger` setStatusEvt (Just ("fetching" <> T.pack suffix))
         eitherErrorPis <- retrieveItems (s ^. hsCredentials) (s ^. hsLastUpdated)
         case eitherErrorPis of
           Left e ->
@@ -362,8 +363,7 @@ defaultRetrieval =
   def
     & retrieveSort ?~ NewestFirst
     & retrieveCount .~ NoLimit
-    & retrieveDetailType
-      ?~ Complete
+    & retrieveDetailType ?~ Complete
 
 txtDisplay :: PocketItem -> Widget Name
 txtDisplay pit =
