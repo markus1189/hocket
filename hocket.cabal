@@ -74,6 +74,7 @@ executable hocket
                      , lens-action
                      , lens-aeson
                      , microlens
+                     , monad-loops
                      , mtl
                      , network-uri
                      , process

@@ -15,6 +15,7 @@ module Network.Pocket.Retrieve ( AsFormParams (..)
                                , retrieveDomain
                                , retrieveSince
                                , retrieveCount
+                               , retrieveTotal
 
                                , RetrieveState (..)
                                , RetrieveFavorite (..)
@@ -40,41 +41,41 @@ class AsFormParams a where
 s :: String -> String
 s = id
 
-data RetrieveState = Unread | Archived | All
+data RetrieveState = Unread | Archived | All deriving Show
 instance FormValue RetrieveState where
   renderFormValue Unread = renderFormValue . s $  "unread"
   renderFormValue Archived = renderFormValue . s $ "archive"
   renderFormValue All = renderFormValue . s $ "all"
 
-data RetrieveFavorite = OnlyFavorites | OnlyNonFavorites
+data RetrieveFavorite = OnlyFavorites | OnlyNonFavorites deriving Show
 instance FormValue RetrieveFavorite where
   renderFormValue OnlyNonFavorites = renderFormValue (0 :: Integer)
   renderFormValue OnlyFavorites = renderFormValue (1 :: Integer)
 
-data RetrieveTag = ExactTag Text | Untagged
+data RetrieveTag = ExactTag Text | Untagged deriving Show
 instance FormValue RetrieveTag where
   renderFormValue (ExactTag t) = renderFormValue t
   renderFormValue Untagged = renderFormValue . s $ "_untagged_"
 
-data RetrieveContentType = Article | Video | Image
+data RetrieveContentType = Article | Video | Image deriving Show
 instance FormValue RetrieveContentType where
   renderFormValue Article = renderFormValue . s $ "article"
   renderFormValue Video = renderFormValue . s $ "video"
   renderFormValue Image = renderFormValue . s $ "image"
 
-data RetrieveSort = NewestFirst | OldestFirst | TitleAlpha | SiteAlpha
+data RetrieveSort = NewestFirst | OldestFirst | TitleAlpha | SiteAlpha deriving Show
 instance FormValue RetrieveSort where
   renderFormValue NewestFirst = renderFormValue . s $ "newest"
   renderFormValue OldestFirst = renderFormValue . s $ "oldest"
   renderFormValue TitleAlpha = renderFormValue . s $ "title"
   renderFormValue SiteAlpha = renderFormValue . s $ "site"
 
-data RetrieveDetailType = Simple | Complete
+data RetrieveDetailType = Simple | Complete deriving Show
 instance FormValue RetrieveDetailType where
   renderFormValue Simple = renderFormValue . s $ "simple"
   renderFormValue Complete = renderFormValue . s $ "complete"
 
-data RetrieveCount = Count Int | CountOffset Int Int | NoLimit
+data RetrieveCount = Count Int | CountOffset Int Int | NoLimit deriving Show
 instance AsFormParams RetrieveCount where
   toFormParams (Count i) = ["count" := show i]
   toFormParams (CountOffset c o) = ["count" := show c, "offset" := show o]
@@ -91,7 +92,8 @@ data RetrieveConfig =
                  , _retrieveDomain :: Maybe Text
                  , _retrieveSince :: Maybe POSIXTime
                  , _retrieveCount :: RetrieveCount
-                 }
+                 , _retrieveTotal :: Bool
+                 } deriving Show
 makeLenses ''RetrieveConfig
 
 
@@ -106,6 +108,7 @@ instance Default RetrieveConfig where
                        , _retrieveDomain = Nothing
                        , _retrieveSince = Nothing
                        , _retrieveCount = NoLimit
+                       , _retrieveTotal = False
                        }
 
 instance AsFormParams RetrieveConfig where
@@ -118,6 +121,7 @@ instance AsFormParams RetrieveConfig where
                                     , "search" := view retrieveSearch rc
                                     , "domain" := view retrieveDomain rc
                                     , "since" := (rc ^. retrieveSince <&> (show . round @_ @Int))
+                                    , "total" := if view retrieveTotal rc then (1:: Int) else 0
                                     ] ++ toFormParams (view retrieveCount rc)
 
 nonEmpty :: FormParam -> Bool

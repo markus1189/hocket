@@ -64,6 +64,7 @@ module Network.Pocket.Types (
   PocketItemBatch(PocketItemBatch),
   batchItems,
   batchTS,
+  batchTotal,
 
   Tag (Tag),
   tagName,
@@ -96,6 +97,7 @@ import           GHC.Generics
 import           Network.Wreq (FormValue, FormParam((:=)))
 
 import           Network.Pocket.Retrieve
+import Numeric.Natural (Natural)
 
 s :: String -> String
 s = id
@@ -282,7 +284,9 @@ instance AsFormParams PocketCredentials where
                                           ]
 
 data PocketItemBatch = PocketItemBatch { _batchTS :: POSIXTime
-                                       , _batchItems :: [PocketItem]}
+                                       , _batchItems :: [PocketItem]
+                                       , _batchTotal :: Natural
+                                       } deriving (Show)
 makeLenses ''PocketItemBatch
 
 subredditAndArticleId :: PocketItem -> Maybe (String, String)

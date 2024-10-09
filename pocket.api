@@ -1,7 +1,7 @@
 # -*- restclient -*-
 
-:consumer-key := (nth 1 (s-split "\"" (nth 1 (s-lines (f-read "hocket.cfg")))))
-:access-token := (nth 1 (s-split "\"" (nth 2 (s-lines (f-read "hocket.cfg")))))
+:consumer-key := (nth 1 (s-split "\"" (nth 1 (s-lines (f-read "config.dhall")))))
+:access-token := (nth 1 (s-split "\"" (nth 2 (s-lines (f-read "config.dhall")))))
 
 # list items
 GET https://getpocket.com/v3/get

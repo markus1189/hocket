@@ -22,10 +22,11 @@ import Control.Concurrent.Async (async)
 import Control.Exception (SomeException)
 import Control.Exception.Base (try)
 import Control.Lens (Each (each), makeLensesFor, view)
-import Control.Lens.Combinators (use)
+import Control.Lens.Combinators (to, use)
 import Control.Lens.Operators
 import Control.Monad (mfilter, unless, void)
 import Control.Monad.IO.Class (liftIO)
+import Control.Monad.Loops (unfoldrM)
 import Control.Monad.State (MonadState)
 import qualified Data.CaseInsensitive as CI
 import Data.Default (def)
@@ -135,9 +136,10 @@ asyncCommandEventHandler es FetchItems = do
         case eitherErrorPis of
           Left e ->
             es `trigger` asyncActionFailedEvt (errorMessageFromException e)
-          Right (PocketItemBatch ts pis) -> do
+          Right batches -> do
             es `trigger` setStatusEvt Nothing
-            es `trigger` fetchedItemsEvt ts pis
+            for_ batches $ \(PocketItemBatch ts pis _) -> do
+              es `trigger` fetchedItemsEvt ts pis
     hsAsync ?= fetchAsync
 asyncCommandEventHandler _ (FetchedItems ts pis) = do
   let (newItems, toBeDeleted) = partition ((== Normal) . view status) pis
@@ -335,17 +337,28 @@ whiteFg = Vty.defAttr `Vty.withForeColor` Vty.white
 hBar :: Text -> Widget Name
 hBar = withAttr (attrName "bar") . padRight Max . txt
 
-retrieveItems :: PocketCredentials -> Maybe POSIXTime -> IO (Either HttpException PocketItemBatch)
-retrieveItems cred =
-  tryHttpException
-    . runHocket (cred, def)
-    . pocket
-    . RetrieveItems
-    . maybe retrieveAllUnread retrieveDeltaSince
+retrieveItems :: PocketCredentials -> Maybe POSIXTime -> IO (Either HttpException [PocketItemBatch])
+retrieveItems cred since = tryHttpException . runHocket (cred, def) $ x
   where
+    x =
+      unfoldrM
+        ( \(offset, count) -> do
+            r <- retrievePage offset
+            let fetchedCount = r ^. batchItems . to length
+            if fetchedCount == 0
+              then pure Nothing
+              else pure $ Just (r, (offset + pageSize, count + fetchedCount))
+        )
+        (0, 0)
+    retrievePage offset =
+      pocket
+        . RetrieveItems
+        . (retrieveCount .~ CountOffset pageSize offset)
+        $ maybe retrieveAllUnread retrieveDeltaSince since
     retrieveAllUnread = defaultRetrieval
     retrieveDeltaSince ts =
       defaultRetrieval & retrieveSince ?~ ts & retrieveState .~ All
+    pageSize = 30
 
 performArchive :: PocketCredentials -> [PocketItem] -> IO (Either HttpException [(PocketItem, Bool)])
 performArchive cred items =
@@ -364,6 +377,7 @@ defaultRetrieval =
     & retrieveSort ?~ NewestFirst
     & retrieveCount .~ NoLimit
     & retrieveDetailType ?~ Complete
+    & retrieveTotal .~ True
 
 txtDisplay :: PocketItem -> Widget Name
 txtDisplay pit =
