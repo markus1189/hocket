@@ -5,6 +5,7 @@
 {-# LANGUAGE TupleSections #-}
 {-# LANGUAGE TypeApplications #-}
 {-# LANGUAGE ViewPatterns #-}
+{-# OPTIONS_GHC -Wno-deferred-out-of-scope-variables #-}
 
 module Main
   ( main,
@@ -12,6 +13,26 @@ module Main
 where
 
 import Brick
+  ( App (..),
+    AttrMap,
+    BrickEvent (AppEvent, VtyEvent),
+    EventM,
+    Padding (Max),
+    Widget,
+    attrMap,
+    attrName,
+    customMain,
+    hLimit,
+    halt,
+    padLeft,
+    padRight,
+    txt,
+    vBox,
+    vLimit,
+    withAttr,
+    zoom,
+    (<+>),
+  )
 import Brick.BChan (BChan, newBChan, writeBChan)
 import qualified Brick.Focus as Focus
 import Brick.Widgets.Border (hBorder)
@@ -22,16 +43,25 @@ import Control.Concurrent.Async (async)
 import Control.Exception (SomeException)
 import Control.Exception.Base (try)
 import Control.Lens (Each (each), makeLensesFor, view)
-import Control.Lens.Combinators (to, use)
+import Control.Lens.Combinators (use)
 import Control.Lens.Operators
+  ( (%=),
+    (&),
+    (.=),
+    (.~),
+    (<&>),
+    (?=),
+    (^.),
+    (^..),
+    (^?),
+  )
 import Control.Monad (mfilter, unless, void)
 import Control.Monad.IO.Class (liftIO)
-import Control.Monad.Loops (unfoldrM)
 import Control.Monad.State (MonadState)
+import Control.Monad.Loops (unfoldrM)
 import qualified Data.CaseInsensitive as CI
-import Data.Default (def)
 import Data.Foldable (for_)
-import Data.List (find, isPrefixOf, partition)
+import Data.List (find, isPrefixOf)
 import Data.Maybe (fromMaybe, isJust, mapMaybe)
 import Data.Text (Text)
 import qualified Data.Text as T
@@ -44,7 +74,19 @@ import Data.Time.LocalTime
   )
 import Dhall (auto, input)
 import Events
-import Formatting (sformat, (%), (%.))
+  ( AsyncCommand (..),
+    HocketEvent (..),
+    UiCommand (..),
+    archiveItemsEvt,
+    archivedItemsEvt,
+    asyncActionFailedEvt,
+    browseItemEvt,
+    fetchItemsEvt,
+    fetchedItemsEvt,
+    setStatusEvt,
+    shiftItemEvt,
+  )
+import Formatting (sformat, (%))
 import qualified Formatting as F
 import qualified Formatting.Time as F
 import Graphics.Vty (Event (EvKey), Key (KChar))
@@ -57,12 +99,42 @@ import Network.HTTP.Client
     responseHeaders,
     responseStatus,
   )
-import Network.Pocket
-import Network.Pocket.Retrieve
-import Network.Pocket.Ui.State
+import Network.Bookmark.Types
+  ( BookmarkCredentials,
+    BookmarkItem,
+    BookmarkItemBatch (..),
+    URL (..),
+    RaindropCollectionId (RaindropCollectionId),
+    BookmarkRequest (ArchiveBookmark, RetrieveBookmarks),
+    raindropToken,
+    biId,
+    biLink,
+    biTitle,
+    biCreated,
+  )
+import Network.Bookmark.Ui.State
+  ( HocketState,
+    Name (..),
+    focusRing,
+    hsAsync,
+    hsCredentials,
+    hsLastUpdated,
+    hsNumItems,
+    hsStatus,
+    initialState,
+    insertItems,
+    itemList,
+    pendingList,
+    removeItems,
+    syncForRender,
+    toggleStatus,
+  )
+import Network.Raindrop (raindrop)
 import Network.URI
-import System.Environment (getArgs)
-import System.Exit (exitFailure, exitSuccess)
+  ( URI (uriAuthority, uriPath, uriQuery),
+    URIAuth (uriRegName),
+    parseURI,
+  )
 import System.Process
   ( CreateProcess,
     createProcess,
@@ -83,12 +155,12 @@ vtyEventHandler ::
   EventM Name HocketState ()
 vtyEventHandler es (EvKey (KChar ' ') []) = do
   s <- use id
-  liftIO . for_ (focusedItem s) $ \pit -> es `trigger` browseItemEvt pit
+  liftIO . for_ (focusedItem s) $ \bit -> es `trigger` browseItemEvt bit
 vtyEventHandler es (EvKey KEnter []) = do
   s <- use id
-  liftIO . for_ (focusedItem s) $ \pit -> do
-    es `trigger` browseItemEvt pit
-    es `trigger` shiftItemEvt (pit ^. itemId)
+  liftIO . for_ (focusedItem s) $ \bit -> do
+    es `trigger` browseItemEvt bit
+    es `trigger` shiftItemEvt (view biId bit)
 vtyEventHandler es (EvKey (KChar 'u') []) = do
   liftIO $ es `trigger` fetchItemsEvt
   pure ()
@@ -97,8 +169,8 @@ vtyEventHandler es (EvKey (KChar 'A') []) = do
   pure ()
 vtyEventHandler es (EvKey (KChar 'd') []) = do
   s <- use id
-  liftIO . for_ (focusedItem s) $ \pit ->
-    es `trigger` shiftItemEvt (pit ^. itemId)
+  liftIO . for_ (focusedItem s) $ \bit ->
+    es `trigger` shiftItemEvt (view biId bit)
 vtyEventHandler _ (EvKey (KChar 'q') []) = halt
 vtyEventHandler _ (EvKey (KChar '\t') []) = focusRing %= Focus.focusNext
 vtyEventHandler _ e = do
@@ -132,19 +204,17 @@ asyncCommandEventHandler es FetchItems = do
       liftIO . async $ do
         let suffix = maybe "" (\since -> " since: " <> show (round @_ @Int since)) $ s ^. hsLastUpdated
         es `trigger` setStatusEvt (Just ("fetching" <> T.pack suffix))
-        eitherErrorPis <- retrieveItems (s ^. hsCredentials) (s ^. hsLastUpdated)
-        case eitherErrorPis of
+        eitherErrorBis <- retrieveItems (s ^. hsCredentials) (s ^. hsLastUpdated)
+        case eitherErrorBis of
           Left e ->
             es `trigger` asyncActionFailedEvt (errorMessageFromException e)
           Right batches -> do
             es `trigger` setStatusEvt Nothing
-            for_ batches $ \(PocketItemBatch ts pis _) -> do
-              es `trigger` fetchedItemsEvt ts pis
+            for_ batches $ \(BookmarkItemBatch ts bis _) -> do
+              es `trigger` fetchedItemsEvt ts bis
     hsAsync ?= fetchAsync
-asyncCommandEventHandler _ (FetchedItems ts pis) = do
-  let (newItems, toBeDeleted) = partition ((== Normal) . view status) pis
-  id %= insertItems newItems
-  id %= removeItems (toBeDeleted ^.. each . itemId)
+asyncCommandEventHandler _ (FetchedItems ts bis) = do
+  id %= insertItems bis
   hsAsync .= Nothing
   hsLastUpdated ?= ts
 asyncCommandEventHandler es (AsyncActionFailed err) = do
@@ -167,26 +237,26 @@ asyncCommandEventHandler es ArchiveItems = do
               es
                 `trigger` archivedItemsEvt
                   ( mapMaybe
-                      ( \(pit, successful) ->
-                          mfilter (const successful) (Just (view itemId pit))
+                      ( \(bit, successful) ->
+                          mfilter (const successful) (Just (view biId bit))
                       )
                       results
                   )
               es `trigger` setStatusEvt Nothing
       hsAsync ?= archiveAsync
-asyncCommandEventHandler _ (ArchivedItems pis) = do
-  id %= removeItems pis
+asyncCommandEventHandler _ (ArchivedItems bis) = do
+  id %= removeItems bis
   hsAsync .= Nothing
 
 uiCommandEventHandler ::
   BChan HocketEvent ->
   UiCommand ->
   EventM Name HocketState ()
-uiCommandEventHandler _ (ShiftItem pid) = id %= toggleStatus pid
-uiCommandEventHandler _ (RemoveItems pis) = id %= removeItems pis
+uiCommandEventHandler _ (ShiftItem bid) = id %= toggleStatus bid
+uiCommandEventHandler _ (RemoveItems bis) = id %= removeItems bis
 uiCommandEventHandler _ (SetStatus t) = hsStatus .= t
-uiCommandEventHandler es (BrowseItem pit) = do
-  res <- liftIO . try @SomeException $ browseItem "firefox '%s'" (resolvedOrGivenUrl pit)
+uiCommandEventHandler es (BrowseItem bit) = do
+  res <- liftIO . try @SomeException $ browseItem "firefox '%s'" (URL . T.unpack $ view biLink bit)
   case res of
     Left e -> liftIO $ es `trigger` setStatusEvt (Just (T.pack $ show e))
     Right () -> pure ()
@@ -201,40 +271,18 @@ myEventHandler _ _ = pure ()
 
 main :: IO ()
 main = do
-  args <- getArgs
   cred <- input auto "./config.dhall"
-  case length args of
-    1 -> addToPocket cred (head args)
-    0 -> do
-      events <- newBChan 10
-      tz <- getCurrentTimeZone
-      vty <- mkVty Vty.defaultConfig
-      void
-        ( customMain
-            vty
-            (mkVty Vty.defaultConfig)
-            (Just events)
-            (app tz events)
-            (initialState cred)
-        )
-    _ -> do
-      putStrLn $ "Invalid args: " ++ show args
-      exitFailure
-
-addToPocket :: PocketCredentials -> String -> IO ()
-addToPocket cred url = do
-  putStrLn url
-  res <-
-    tryHttpException . runHocket (cred, def) . pocket . AddItem $
-      T.pack url
-  case res of
-    Left e -> do
-      putStrLn $ "Error during request: " ++ show e
-      exitFailure
-    Right False -> do
-      putStrLn "Could not add item."
-      exitFailure
-    Right True -> exitSuccess
+  events <- newBChan 10
+  tz <- getCurrentTimeZone
+  vty <- mkVty Vty.defaultConfig
+  void
+    ( customMain
+        vty
+        (mkVty Vty.defaultConfig)
+        (Just events)
+        (app tz events)
+        (initialState cred)
+    )
 
 app :: TimeZone -> BChan HocketEvent -> App HocketState HocketEvent Name
 app tz events =
@@ -298,7 +346,7 @@ drawGui tz s = [w]
 focused :: HocketState -> Maybe Name
 focused = Focus.focusGetCurrent . view focusRing
 
-focusedList :: HocketState -> Maybe (L.List Name PocketItem)
+focusedList :: HocketState -> Maybe (L.List Name BookmarkItem)
 focusedList s =
   case focused s of
     Just ItemListName -> s ^? itemList
@@ -308,7 +356,7 @@ focusedList s =
 isFocused :: HocketState -> Name -> Bool
 isFocused s name = Just name == focused s
 
-listDrawElement :: Bool -> PocketItem -> Widget Name
+listDrawElement :: Bool -> BookmarkItem -> Widget Name
 listDrawElement sel e =
   ( if sel
       then withAttr (attrName "list" <> attrName "selectedItem")
@@ -337,67 +385,43 @@ whiteFg = Vty.defAttr `Vty.withForeColor` Vty.white
 hBar :: Text -> Widget Name
 hBar = withAttr (attrName "bar") . padRight Max . txt
 
-retrieveItems :: PocketCredentials -> Maybe POSIXTime -> IO (Either HttpException [PocketItemBatch])
-retrieveItems cred since = tryHttpException . runHocket (cred, def) $ x
-  where
-    x =
-      unfoldrM
-        ( \(offset, count) -> do
-            r <- retrievePage offset
-            let fetchedCount = r ^. batchItems . to length
-            if fetchedCount == 0
-              then pure Nothing
-              else pure $ Just (r, (offset + pageSize, count + fetchedCount))
-        )
-        (0, 0)
-    retrievePage offset =
-      pocket
-        . RetrieveItems
-        . (retrieveCount .~ CountOffset pageSize offset)
-        $ maybe retrieveAllUnread retrieveDeltaSince since
-    retrieveAllUnread = defaultRetrieval
-    retrieveDeltaSince ts =
-      defaultRetrieval & retrieveSince ?~ ts & retrieveState .~ All
-    pageSize = 30
+retrieveItems :: BookmarkCredentials -> Maybe POSIXTime -> IO (Either HttpException [BookmarkItemBatch])
+retrieveItems cred _ = do
+  let rt = view raindropToken cred
+  tryHttpException $ unfoldrM (\currentPage -> do
+                                  (_, items) <- raindrop rt (RetrieveBookmarks currentPage (RaindropCollectionId "-1"))
+                                  pure $ if length items == 0
+                                    then Nothing
+                                    else Just (BookmarkItemBatch 0 items (fromIntegral $ length items), currentPage +1)
+                              ) 0
+  -- tryHttpException $ do
+  --   (count, items) <- raindrop rt (RetrieveBookmarks 0 (RaindropCollectionId "-1"))
+  --   pure [BookmarkItemBatch currentTime items (fromIntegral $ length items)]
 
-performArchive :: PocketCredentials -> [PocketItem] -> IO (Either HttpException [(PocketItem, Bool)])
-performArchive cred items =
-  tryHttpException
-    . fmap (zip items)
-    . runHocket (cred, def)
-    . pocket
-    $ Batch (map (Archive . view itemId) items)
+performArchive :: BookmarkCredentials -> [BookmarkItem] -> IO (Either HttpException [(BookmarkItem, Bool)])
+performArchive cred items = do
+  let rt = view raindropToken cred
+  tryHttpException $ do
+    results <- traverse (raindrop rt . ArchiveBookmark . view biId) items
+    pure (zip items results)
 
 tryHttpException :: IO a -> IO (Either HttpException a)
 tryHttpException = try @HttpException
 
-defaultRetrieval :: RetrieveConfig
-defaultRetrieval =
-  def
-    & retrieveSort ?~ NewestFirst
-    & retrieveCount .~ NoLimit
-    & retrieveDetailType ?~ Complete
-    & retrieveTotal .~ True
-
-txtDisplay :: PocketItem -> Widget Name
-txtDisplay pit =
+txtDisplay :: BookmarkItem -> Widget Name
+txtDisplay bit =
   txt (T.justifyRight 10 ' ' leftEdge)
     <+> txt
       ( fromMaybe
           "<empty>"
-          (find (not . T.null) [given, resolved, T.pack url])
+          (find (not . T.null) [view biTitle bit, T.pack url])
       )
     <+> padLeft Max (hLimit horizontalUriLimit (txt trimmedUrl))
-    <+> txt commentCount
   where
-    resolved = view resolvedTitle pit
-    given = view givenTitle pit
-    (URL url) = resolvedOrGivenUrl pit
-    added = posixSecondsToUTCTime (view timeAdded pit)
+    url = T.unpack (view biLink bit)
+    added = view biCreated bit
     leftEdge =
       sformat (F.year % "-" <> F.month % "-" <> F.dayOfMonth) added <> ": "
-    commentCount =
-      maybe "     " (sformat ("  " % (F.left 3 ' ' %. F.int) % "")) (pit ^. redditCommentCount)
     trimmedUrl = T.pack (trimURI url)
 
 horizontalUriLimit :: Int
@@ -419,7 +443,7 @@ trimURI uri =
         then drop (length prefix) s
         else s
 
-focusedItem :: HocketState -> Maybe PocketItem
+focusedItem :: HocketState -> Maybe BookmarkItem
 focusedItem s = do
   list <- focusedList s
   snd <$> L.listSelectedElement list

@@ -16,48 +16,48 @@ import           Data.Set (Set)
 import           Data.Text (Text)
 import           Data.Time.Clock.POSIX (POSIXTime)
 
-import           Network.Pocket
+import           Network.Bookmark.Types
 
 data HocketEvent = HocketAsync !AsyncCommand
                  | HocketUi !UiCommand
                  deriving (Show,Eq)
 
 data AsyncCommand = FetchItems
-                  | FetchedItems !POSIXTime ![PocketItem]
+                  | FetchedItems !POSIXTime ![BookmarkItem]
                   | ArchiveItems
-                  | ArchivedItems ![PocketItemId]
+                  | ArchivedItems ![BookmarkItemId]
                   | AsyncActionFailed !(Maybe Text)
                   deriving (Show,Eq)
 
-data UiCommand = ShiftItem !PocketItemId
-               | RemoveItems !(Set PocketItemId)
+data UiCommand = ShiftItem !BookmarkItemId
+               | RemoveItems !(Set BookmarkItemId)
                | SetStatus !(Maybe Text)
-               | BrowseItem !PocketItem
+               | BrowseItem !BookmarkItem
                deriving (Show,Eq)
 
 fetchItemsEvt :: HocketEvent
 fetchItemsEvt = HocketAsync FetchItems
 
-fetchedItemsEvt :: POSIXTime -> [PocketItem] -> HocketEvent
+fetchedItemsEvt :: POSIXTime -> [BookmarkItem] -> HocketEvent
 fetchedItemsEvt t itms = HocketAsync (FetchedItems t itms)
 
 archiveItemsEvt :: HocketEvent
 archiveItemsEvt = HocketAsync ArchiveItems
 
-archivedItemsEvt :: [PocketItemId] -> HocketEvent
-archivedItemsEvt pids = HocketAsync (ArchivedItems pids)
+archivedItemsEvt :: [BookmarkItemId] -> HocketEvent
+archivedItemsEvt bids = HocketAsync (ArchivedItems bids)
 
 asyncActionFailedEvt :: Maybe Text -> HocketEvent
 asyncActionFailedEvt maybeMsg = HocketAsync (AsyncActionFailed maybeMsg)
 
-shiftItemEvt :: PocketItemId -> HocketEvent
-shiftItemEvt pid = HocketUi (ShiftItem pid)
+shiftItemEvt :: BookmarkItemId -> HocketEvent
+shiftItemEvt bid = HocketUi (ShiftItem bid)
 
-removeItemsEvt :: Set PocketItemId -> HocketEvent
-removeItemsEvt pids = HocketUi (RemoveItems pids)
+removeItemsEvt :: Set BookmarkItemId -> HocketEvent
+removeItemsEvt bids = HocketUi (RemoveItems bids)
 
 setStatusEvt :: Maybe Text -> HocketEvent
 setStatusEvt mstatus= HocketUi (SetStatus mstatus)
 
-browseItemEvt :: PocketItem -> HocketEvent
-browseItemEvt pit = HocketUi (BrowseItem pit)
+browseItemEvt :: BookmarkItem -> HocketEvent
+browseItemEvt bit = HocketUi (BrowseItem bit)

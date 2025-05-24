@@ -1,7 +1,7 @@
 {-# LANGUAGE ViewPatterns #-}
 {-# LANGUAGE OverloadedStrings #-}
 {-# LANGUAGE TemplateHaskell #-}
-module Network.Pocket.Ui.State (HocketState
+module Network.Bookmark.Ui.State (HocketState
                                ,pendingList
                                ,itemList
                                ,focusRing
@@ -12,7 +12,6 @@ module Network.Pocket.Ui.State (HocketState
                                ,hsAsync
                                ,hsStatus
                                ,hsCredentials
-                               ,hsRaindropToken
 
                                ,initialState
                                ,insertItem
@@ -46,35 +45,33 @@ import           Data.Time.Clock.POSIX (POSIXTime)
 import qualified Data.Vector as V
 import           Data.Vector.Lens (toVectorOf)
 
-import           Network.Pocket.Ui.Widgets
-import           Network.Pocket.Types
+import           Network.Bookmark.Ui.Widgets
+import           Network.Bookmark.Types
 import Brick.Widgets.List (List)
-import Network.Raindrop.Types (RaindropToken)
 
 data Status = Pending | Unread deriving (Show,Eq,Ord)
 
 data Name = ItemListName | PendingListName deriving (Show,Eq,Ord)
 
-data HocketState = HocketState { _itemList :: List Name PocketItem
-                               , _pendingList :: List Name PocketItem
+data HocketState = HocketState { _itemList :: List Name BookmarkItem
+                               , _pendingList :: List Name BookmarkItem
                                , _focusRing :: F.FocusRing Name
                                , _hsLastUpdated :: Maybe POSIXTime
                                , _hsAsync :: Maybe (Async ())
                                , _hsStatus :: Maybe Text
-                               , _hsContents :: Map PocketItemId (Status,PocketItem)
-                               , _hsCredentials :: PocketCredentials
-                               , _hsRaindropToken :: RaindropToken
+                               , _hsContents :: Map BookmarkItemId (Status,BookmarkItem)
+                               , _hsCredentials :: BookmarkCredentials
                                }
 
 makeLenses ''HocketState
 
-newtype SortByUpdated = SBU PocketItem
+newtype SortByUpdated = SBU BookmarkItem
 
 instance Eq SortByUpdated where
-  SBU pi1 == SBU pi2 = ((==) `on` view timeAdded) pi1 pi2
+  SBU bi1 == SBU bi2 = ((==) `on` _biCreated) bi1 bi2
 
 instance Ord SortByUpdated where
-  compare (SBU pi1) (SBU pi2) = (compare `on` view timeAdded) pi1 pi2
+  compare (SBU bi1) (SBU bi2) = (compare `on` _biCreated) bi1 bi2
 
 partitionItems :: HocketState -> Map Status (SortedList SortByUpdated)
 partitionItems = Map.fromListWith (<>)
@@ -87,32 +84,33 @@ hsNumItems s = (length $ partitioned ^. at Unread . non (SL.toSortedList [])
                ,length $ partitioned ^. at Pending . non (SL.toSortedList []))
   where partitioned = partitionItems s
 
-initialState :: PocketCredentials -> RaindropToken -> HocketState
-initialState = HocketState (L.list ItemListName V.empty 1)
+initialState :: BookmarkCredentials -> HocketState
+initialState cred = HocketState (L.list ItemListName V.empty 1)
                                 (L.list PendingListName V.empty 1)
                                 (F.focusRing [ItemListName, PendingListName])
                                 Nothing
                                 Nothing
                                 Nothing
                                 Map.empty
+                                cred
 
-insertItem :: PocketItem -> HocketState -> HocketState
-insertItem pit@(view itemId -> pid) s =
-  s & hsContents %~ Map.insertWith newer pid (Unread,pit)
-  where newer :: (a,PocketItem) -> (a,PocketItem) -> (a,PocketItem)
-        newer pi1 pi2 = maximumBy (comparing (view timeUpdated . snd)) [pi1,pi2]
+insertItem :: BookmarkItem -> HocketState -> HocketState
+insertItem bit s =
+  s & hsContents %~ Map.insertWith newer (_biId bit) (Unread,bit)
+  where newer :: (a,BookmarkItem) -> (a,BookmarkItem) -> (a,BookmarkItem)
+        newer bi1 bi2 = maximumBy (comparing (_biLastUpdate . snd)) [bi1,bi2]
 
-insertItems :: Foldable f => f PocketItem -> HocketState -> HocketState
+insertItems :: Foldable f => f BookmarkItem -> HocketState -> HocketState
 insertItems = flip (foldl' (flip insertItem))
 
-removeItem :: PocketItemId -> HocketState -> HocketState
-removeItem pid s = s & hsContents . at pid .~ Nothing
+removeItem :: BookmarkItemId -> HocketState -> HocketState
+removeItem bid s = s & hsContents . at bid .~ Nothing
 
-removeItems :: Foldable f => f PocketItemId -> HocketState -> HocketState
+removeItems :: Foldable f => f BookmarkItemId -> HocketState -> HocketState
 removeItems = flip (foldl' (flip removeItem))
 
-toggleStatus :: PocketItemId -> HocketState -> HocketState
-toggleStatus pid = hsContents . ix pid . _1 %~ toggle
+toggleStatus :: BookmarkItemId -> HocketState -> HocketState
+toggleStatus bid = hsContents . ix bid . _1 %~ toggle
   where toggle Unread = Pending
         toggle Pending = Unread
 

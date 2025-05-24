@@ -1,4 +1,4 @@
-module Network.Pocket.Ui.Widgets (listRemoveSelected
+module Network.Bookmark.Ui.Widgets (listRemoveSelected
                                  ,listInsertSorted
                                  ,clamp) where
 

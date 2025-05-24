@@ -1,0 +1,107 @@
+#+TITLE: Raindrop.io API Playground
+#+AUTHOR: Hocket Migration Helper
+#+FILETAGS: :verb:
+
+* Configuration :noexport:
+This section is for notes and setup, not for sending requests directly.
+
+You will need a Raindrop.io Test Token.
+1. Go to your Raindrop.io settings: https://app.raindrop.io/settings/integrations
+2. Click on "+ Create new app".
+3. Give it a name (e.g., "Hocket Dev").
+4. Click "Create".
+5. You'll see your app listed. Click on it.
+6. Copy the "Test token". This is what you'll use for `{{(verb-var raindrop-token)}}`.
+
+You can set this token in Verb using:
+M-x verb-set-var RET raindrop-token RET YOUR_TOKEN_HERE RET
+
+* Raindrop.io API Base
+:properties:
+:Verb-Prelude+: (verb-set-var "base-url" "https://api.raindrop.io/rest/v1")
+:end:
+template {{(verb-var base-url)}}
+Authorization: Bearer {{(verb-var raindrop-token)}}
+Accept: application/json
+Content-Type: application/json
+
+** Retrieve Raindrops from "Unsorted" Collection
+# Fetches items from the "Unsorted" collection (ID: -1).
+# Adjust perpage and page parameters as needed for pagination.
+get /raindrops/-1?perpage={{(verb-var perpage "10")}}&page={{(verb-var page "0")}}
+
+** Get All Collections
+# Fetches all collections for the authenticated user.
+get /collections
+
+** Create a new Raindrop (in "Unsorted")
+# Creates a new raindrop.
+# It will prompt for a URL.
+# The item will be added to the "Unsorted" collection.
+# pleaseParse: {} tells Raindrop.io to try and parse the page for title, excerpt etc.
+post /raindrop
+
+{
+    "link": "{{(read-string "Enter URL to add: ")}}",
+    "collection": {"$id": -1},
+    "pleaseParse": {}
+}
+
+** Update a Raindrop
+*** Move an item to a different collection
+# Moves a specific raindrop (by its ID) to a different collection.
+# It will prompt for the item ID and the target collection ID.
+put /raindrop/{{(verb-var item-id (read-string "Raindrop ID to move: "))}}
+
+{
+    "collection": {"$id": {{(verb-var target-collection-id (read-string "Target Collection ID: "))}}}
+}
+
+*** Update an item's title
+# Updates the title of a specific raindrop.
+# It will prompt for the item ID and the new title.
+put /raindrop/{{(verb-var item-id (read-string "Raindrop ID to update title: "))}}
+
+{
+    "title": "{{(read-string "New title: ")}}"
+}
+
+** Batch Update Raindrops
+*** Move multiple items to a different collection
+# Moves multiple raindrops (by their IDs) to a different collection.
+# It will prompt for a comma-separated list of item IDs and the target collection ID.
+# Note: The list of IDs needs to be actual numbers, e.g., [123, 456, 789]
+# This example uses a simple string split, ensure IDs are numeric.
+# You might need to adjust the elisp for robust parsing of numbers from the string.
+# For a quick test, you can manually edit the body after the prompt.
+put /raindrops
+
+{
+    "ids": [{{(s-join ", " (mapcar #'string-to-number (s-split "," (read-string "Comma-separated Raindrop IDs to move: ") t)))}}],
+    "collection": {"$id": {{(verb-var target-collection-id (read-string "Target Collection ID: "))}}}
+}
+# Example of how you might structure the IDs if known beforehand:
+# {
+#     "ids": [12345, 67890],
+#     "collection": {"$id": 98765}
+# }
+
+*** Create many items
+
+post /raindrops
+
+{
+  "items": [
+    {
+      "link": "https://news.ycombinator.com/",
+      "pleaseParse": {}
+    }
+  ]
+}
+
+** Delete a Raindrop (Optional)
+# Deletes a specific raindrop by its ID.
+# It will prompt for the item ID.
+delete /raindrop/{{(verb-var item-id (read-string "Raindrop ID to delete: "))}}
+
+* End of API Calls

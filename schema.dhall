@@ -1,4 +1,1 @@
-{
-  consumerKey: Text,
-  accessToken: Text
-}
+{ _raindropToken : Text }

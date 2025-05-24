@@ -23,32 +23,20 @@ module Network.Pocket.Types (
   authorizeEndpoint,
 
   PocketItem (..),
-  excerpt,
-  favorite,
-  givenTitle,
-  givenUrl,
-  hasImage,
-  hasVideo,
-  isArticle,
-  isIndex,
   itemId,
-  resolvedId,
+  givenTitle,
   resolvedTitle,
   resolvedUrl,
-  sortId,
-  status,
   timeAdded,
-  timeFavorited,
-  timeRead,
   timeUpdated,
-  wordCount,
-  itemTags,
-  idEq,
   redditCommentCount,
   isRedditUrl,
   resolvedOrGivenUrl,
 
+  idEq,
+
   PocketItemId (..),
+  _PocketItemId,
   ItemStatus (..),
   BatchAction (..),
   _Archive,
@@ -58,8 +46,6 @@ module Network.Pocket.Types (
   PocketRequest (..),
 
   AsFormParams (..),
-  Hocket,
-  runHocket,
 
   PocketItemBatch(PocketItemBatch),
   batchItems,
@@ -70,22 +56,16 @@ module Network.Pocket.Types (
   tagName,
   tagId,
 
-  Has (..),
-
   RedditCommentCount (..),
   subredditAndArticleId
 ) where
 
-import           Control.Applicative (empty, Alternative)
 import           Control.Lens (view, (^.))
 import           Control.Lens.TH
 import           Control.Monad (mzero)
-import           Control.Monad.Trans.Reader (ReaderT, runReaderT)
 import           Data.Aeson
-import           Data.Aeson.Types (Parser)
 import           Data.Default
 import           Data.Function (on)
-import qualified Data.Aeson.KeyMap as KeyMap
 import           Data.List (isInfixOf)
 import qualified Data.List.Split as S
 import           Data.Text (Text)
@@ -110,22 +90,6 @@ data ItemStatus = Normal | IsArchived | ShouldBeDeleted deriving (Show, Eq, Enum
 
 instance ToJSON ItemStatus where
   toJSON = toJSON . show . fromEnum
-
-data Has = No | Yes | Is deriving (Show, Eq, Enum, Bounded)
-parseItemHas :: Alternative f => Text -> f Has
-parseItemHas "0" = pure No
-parseItemHas "1" = pure Yes
-parseItemHas "2" = pure Is
-parseItemHas _ = empty
-
-instance ToJSON Has where
-  toJSON = toJSON . show . fromEnum
-
-parseItemState :: Alternative f => Text -> f ItemStatus
-parseItemState "0" = pure Normal
-parseItemState "1" = pure IsArchived
-parseItemState "2" = pure ShouldBeDeleted
-parseItemState _ = empty
 
 data PocketCredentials = PocketCredentials { consumerKey :: ConsumerKey
                                            , accessToken :: AccessToken
@@ -154,13 +118,9 @@ instance Default PocketAPIUrls where
                         , _authorizeEndpoint = URL "https://getpocket.com/v3/oauth/authorize"
                         }
 
-type Hocket a = ReaderT (PocketCredentials,PocketAPIUrls) IO a
-
-runHocket :: c -> ReaderT c IO a -> IO a
-runHocket = flip runReaderT
-
 newtype PocketItemId = PocketItemId Text
                      deriving (Show, FormValue, Eq, Ord)
+makePrisms ''PocketItemId
 
 instance ToJSON PocketItemId where
   toJSON (PocketItemId i) = toJSON i
@@ -194,30 +154,14 @@ instance FromJSON Tag where
   parseJSON (Object o) = Tag <$> o .: "tag" <*> o .: "item_id"
   parseJSON _ = mzero
 
-parseTags :: Maybe Object -> Parser [Tag]
-parseTags = maybe (return []) (traverse parseJSON . KeyMap.elems)
-
 data PocketItem =
-  PocketItem { _excerpt :: Text
-             , _favorite :: !Bool
-             , _givenTitle :: !Text
+  PocketItem { _givenTitle :: !Text
              , _givenUrl :: !URL
-             , _hasImage :: !Has
-             , _hasVideo :: !Has
-             , _isArticle :: !Bool
-             , _isIndex :: !Bool
              , _itemId :: !PocketItemId
-             , _resolvedId :: !PocketItemId
              , _resolvedTitle :: !Text
              , _resolvedUrl :: !URL
-             , _sortId :: Int
-             , _status :: !ItemStatus
              , _timeAdded :: !POSIXTime
-             , _timeFavorited :: !POSIXTime
-             , _timeRead :: !POSIXTime
              , _timeUpdated :: !POSIXTime
-             , _wordCount :: !Int
-             , _itemTags :: [Tag]
              , _redditCommentCount :: Maybe Integer
              } deriving (Show,Eq,Generic)
 makeLenses ''PocketItem
@@ -225,35 +169,18 @@ makeLenses ''PocketItem
 idEq :: PocketItem -> PocketItem -> Bool
 idEq = (==) `on` view itemId
 
-truthy :: Text -> Bool
-truthy "1" = True
-truthy _ = False
-
 parseTime :: Text -> POSIXTime
 parseTime = fromIntegral . (read :: String -> Integer) . T.unpack
 
 instance FromJSON PocketItem where
   parseJSON (Object o) = PocketItem
-                     <$> o .: "excerpt"
-                     <*> (truthy <$> o .: "favorite")
-                     <*> o .: "given_title"
+                     <$> o .: "given_title"
                      <*> o .: "given_url"
-                     <*> (parseItemHas =<< (o .: "has_image"))
-                     <*> (parseItemHas =<< (o .: "has_video"))
-                     <*> (truthy <$> (o .: "is_article"))
-                     <*> (truthy <$> (o .: "is_index"))
                      <*> (PocketItemId <$> o .: "item_id")
-                     <*> (PocketItemId <$> o .: "resolved_id")
                      <*> o .: "resolved_title"
                      <*> o .: "resolved_url"
-                     <*> o .: "sort_id"
-                     <*> (parseItemState =<< o .: "status")
                      <*> (parseTime <$> o .: "time_added")
-                     <*> (parseTime <$> o .: "time_favorited")
-                     <*> (parseTime <$> o .: "time_read")
                      <*> (parseTime <$> o .: "time_updated")
-                     <*> (read <$> (o .: "word_count"))
-                     <*> ((o .:? "tags") >>= parseTags)
                      <*> pure Nothing
   parseJSON _ = mzero
 

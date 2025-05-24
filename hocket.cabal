@@ -17,12 +17,10 @@ cabal-version:       >=1.8
 library
   ghc-options:         -Wall -Werror
   hs-source-dirs:      src
-  exposed-modules:     Network.Pocket
-                     , Network.Pocket.Retrieve
-                     , Network.Pocket.Types
-                     , Network.Pocket.Ui.State
-                     , Network.Pocket.Ui.Widgets
-                     , Network.Pocket.Meta
+  exposed-modules:     Network.Raindrop
+                     , Network.Bookmark.Types
+                     , Network.Bookmark.Ui.State
+                     , Network.Bookmark.Ui.Widgets
   Build-depends:       ConfigFile
                      , aeson
                      , async
@@ -91,10 +89,37 @@ test-suite test
   hs-source-dirs:      test
   main-is:             test.hs
   build-depends:       base
+                     , aeson
+                     , async
+                     , attoparsec
+                     , brick
+                     , bytestring
                      , containers
+                     , data-default
+                     , dhall
+                     , formatting
                      , hocket == 0.2.0.0
+                     , http-client
+                     , http-client-tls
+                     , http-types
                      , lens
+                     , lens-action
+                     , lens-aeson
+                     , microlens
+                     , mtl
+                     , network-uri
+                     , old-locale
+                     , process
+                     , sorted-list
+                     , split
                      , tasty
                      , tasty-hspec
                      , tasty-hunit
                      , tasty-quickcheck
+                     , text
+                     , time
+                     , transformers
+                     , unordered-containers
+                     , vector
+                     , vty
+                     , wreq

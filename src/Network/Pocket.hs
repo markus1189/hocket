@@ -14,10 +14,9 @@ where
 import           Control.Applicative ((<$>),(<*>))
 #endif
 
-import Control.Lens (Getter, magnify, view, _2)
+import Control.Lens (Getter, magnify, view)
 import Control.Lens.Operators
 import Control.Monad.IO.Class (liftIO)
-import Control.Monad.Reader.Class
 import Data.Aeson.Lens (key, members, values, _Bool, _Integral, _JSON)
 import Data.Maybe (fromMaybe)
 import qualified Data.Text.Lazy as TL
@@ -27,9 +26,10 @@ import qualified Network.HTTP.Client.TLS as HCT
 import Network.HTTP.Types.Status
 import Network.Pocket.Types
 import qualified Network.Wreq as W
+import Network.Hocket.Types (Hocket, hocketEnvPocketCredentials, hocketEnvPocketAPIUrls)
 
 selectEndpoint :: PocketRequest a -> Hocket URL
-selectEndpoint req = magnify _2 $ view (sel req)
+selectEndpoint req = magnify hocketEnvPocketAPIUrls $ view (sel req)
   where
     sel :: PocketRequest a -> Getter PocketAPIUrls URL
     sel (AddItem _) = addEndpoint
@@ -41,7 +41,7 @@ selectEndpoint req = magnify _2 $ view (sel req)
 
 pocket :: PocketRequest a -> Hocket a
 pocket req = do
-  (URL ep, credentials) <- (,) <$> selectEndpoint req <*> asks fst
+  (URL ep, credentials) <- (,) <$> selectEndpoint req <*> view hocketEnvPocketCredentials
   let opts =
         W.defaults
           & W.manager

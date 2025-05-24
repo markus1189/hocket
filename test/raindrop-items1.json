@@ -1,0 +1,647 @@
+{
+  "result": true,
+  "items": [
+    {
+      "_id": 1085603154,
+      "link": "https://reddit.com",
+      "excerpt": "",
+      "note": "",
+      "type": "link",
+      "user": {
+        "$ref": "users",
+        "$id": 4098096
+      },
+      "cover": "",
+      "tags": [],
+      "removed": false,
+      "media": [],
+      "created": "2025-05-25T08:24:56.498Z",
+      "lastUpdate": "2025-05-25T08:24:56.498Z",
+      "domain": "reddit.com",
+      "title": "https://reddit.com",
+      "collection": {
+        "$ref": "collections",
+        "$id": -1,
+        "oid": -1
+      },
+      "creatorRef": {
+        "_id": 4098096,
+        "name": "markus1189",
+        "avatar": "",
+        "email": ""
+      },
+      "sort": 1085603154,
+      "highlights": [],
+      "collectionId": -1
+    },
+    {
+      "_id": 1085603143,
+      "link": "https://reddit.com",
+      "excerpt": "",
+      "note": "",
+      "type": "link",
+      "user": {
+        "$ref": "users",
+        "$id": 4098096
+      },
+      "cover": "",
+      "tags": [],
+      "removed": false,
+      "media": [],
+      "created": "2025-05-25T08:24:54.167Z",
+      "lastUpdate": "2025-05-25T08:24:54.167Z",
+      "domain": "reddit.com",
+      "title": "https://reddit.com",
+      "collection": {
+        "$ref": "collections",
+        "$id": -1,
+        "oid": -1
+      },
+      "creatorRef": {
+        "_id": 4098096,
+        "name": "markus1189",
+        "avatar": "",
+        "email": ""
+      },
+      "sort": 1085603143,
+      "highlights": [],
+      "collectionId": -1
+    },
+    {
+      "_id": 1085600771,
+      "link": "https://reddit.com",
+      "excerpt": "",
+      "note": "",
+      "type": "link",
+      "user": {
+        "$ref": "users",
+        "$id": 4098096
+      },
+      "cover": "",
+      "tags": [],
+      "removed": false,
+      "media": [],
+      "created": "2025-05-25T08:24:37.441Z",
+      "lastUpdate": "2025-05-25T08:24:37.441Z",
+      "domain": "reddit.com",
+      "title": "https://reddit.com",
+      "collection": {
+        "$ref": "collections",
+        "$id": -1,
+        "oid": -1
+      },
+      "creatorRef": {
+        "_id": 4098096,
+        "name": "markus1189",
+        "avatar": "",
+        "email": ""
+      },
+      "sort": 1085600771,
+      "highlights": [],
+      "collectionId": -1
+    },
+    {
+      "_id": 1085569431,
+      "link": "https://reddit.com",
+      "excerpt": "",
+      "note": "",
+      "type": "link",
+      "user": {
+        "$ref": "users",
+        "$id": 4098096
+      },
+      "cover": "",
+      "tags": [],
+      "removed": false,
+      "media": [],
+      "created": "2025-05-25T08:22:29.495Z",
+      "lastUpdate": "2025-05-25T08:22:29.495Z",
+      "domain": "reddit.com",
+      "title": "https://reddit.com",
+      "collection": {
+        "$ref": "collections",
+        "$id": -1,
+        "oid": -1
+      },
+      "creatorRef": {
+        "_id": 4098096,
+        "name": "markus1189",
+        "avatar": "",
+        "email": ""
+      },
+      "sort": 1085569431,
+      "highlights": [],
+      "collectionId": -1
+    },
+    {
+      "_id": 1085565782,
+      "link": "http://reddit.com",
+      "excerpt": "Reddit is where millions of people gather for conversations about the things they care about, in over 100,000 subreddit communities.",
+      "note": "",
+      "type": "link",
+      "user": {
+        "$ref": "users",
+        "$id": 4098096
+      },
+      "cover": "https://www.redditstatic.com/shreddit/assets/favicon/192x192.png",
+      "tags": [],
+      "removed": false,
+      "collection": {
+        "$ref": "collections",
+        "$id": -1,
+        "oid": -1
+      },
+      "media": [
+        {
+          "type": "image",
+          "link": "https://www.redditstatic.com/shreddit/assets/favicon/192x192.png"
+        }
+      ],
+      "created": "2025-05-25T08:21:59.109Z",
+      "lastUpdate": "2025-05-25T08:21:59.109Z",
+      "domain": "reddit.com",
+      "title": "reddit",
+      "creatorRef": {
+        "_id": 4098096,
+        "name": "markus1189",
+        "avatar": "",
+        "email": ""
+      },
+      "sort": 1085565782,
+      "highlights": [],
+      "collectionId": -1
+    },
+    {
+      "_id": 1085564229,
+      "link": "https://reddit.com",
+      "excerpt": "",
+      "note": "",
+      "type": "link",
+      "user": {
+        "$ref": "users",
+        "$id": 4098096
+      },
+      "cover": "",
+      "tags": [],
+      "removed": false,
+      "media": [],
+      "created": "2025-05-25T08:21:39.290Z",
+      "lastUpdate": "2025-05-25T08:21:39.290Z",
+      "domain": "reddit.com",
+      "title": "https://reddit.com",
+      "collection": {
+        "$ref": "collections",
+        "$id": -1,
+        "oid": -1
+      },
+      "creatorRef": {
+        "_id": 4098096,
+        "name": "markus1189",
+        "avatar": "",
+        "email": ""
+      },
+      "sort": 1085564229,
+      "highlights": [],
+      "collectionId": -1
+    },
+    {
+      "_id": 1085554398,
+      "link": "https://reddit.com",
+      "excerpt": "",
+      "note": "",
+      "type": "link",
+      "user": {
+        "$ref": "users",
+        "$id": 4098096
+      },
+      "cover": "",
+      "tags": [],
+      "removed": false,
+      "media": [],
+      "created": "2025-05-25T08:19:51.447Z",
+      "lastUpdate": "2025-05-25T08:19:51.447Z",
+      "domain": "reddit.com",
+      "title": "https://reddit.com",
+      "collection": {
+        "$ref": "collections",
+        "$id": -1,
+        "oid": -1
+      },
+      "creatorRef": {
+        "_id": 4098096,
+        "name": "markus1189",
+        "avatar": "",
+        "email": ""
+      },
+      "sort": 1085554398,
+      "highlights": [],
+      "collectionId": -1
+    },
+    {
+      "_id": 1085553385,
+      "link": "https://reddit.com",
+      "excerpt": "",
+      "note": "",
+      "type": "link",
+      "user": {
+        "$ref": "users",
+        "$id": 4098096
+      },
+      "cover": "",
+      "tags": [],
+      "removed": false,
+      "media": [],
+      "created": "2025-05-25T08:19:48.108Z",
+      "lastUpdate": "2025-05-25T08:19:48.109Z",
+      "domain": "reddit.com",
+      "title": "https://reddit.com",
+      "collection": {
+        "$ref": "collections",
+        "$id": -1,
+        "oid": -1
+      },
+      "creatorRef": {
+        "_id": 4098096,
+        "name": "markus1189",
+        "avatar": "",
+        "email": ""
+      },
+      "sort": 1085553385,
+      "highlights": [],
+      "collectionId": -1
+    },
+    {
+      "_id": 1085443954,
+      "link": "http://test.de",
+      "excerpt": "Stiftung Warentest: Testberichte zu Elektronik, Haushalt und Gesundheit sowie Finanzen, Versicherung und Steuern",
+      "note": "",
+      "type": "link",
+      "user": {
+        "$ref": "users",
+        "$id": 4098096
+      },
+      "cover": "https://rdl.ink/render/http%3A%2F%2Ftest.de",
+      "tags": [],
+      "removed": false,
+      "collection": {
+        "$ref": "collections",
+        "$id": -1,
+        "oid": -1
+      },
+      "media": [],
+      "created": "2025-05-25T08:03:29.341Z",
+      "lastUpdate": "2025-05-25T08:03:29.341Z",
+      "domain": "test.de",
+      "title": "Stiftung Warentest | Unabhängig. Objektiv. Unbestechlich.",
+      "creatorRef": {
+        "_id": 4098096,
+        "name": "markus1189",
+        "avatar": "",
+        "email": ""
+      },
+      "sort": 1085443954,
+      "highlights": [],
+      "collectionId": -1
+    },
+    {
+      "_id": 1079395079,
+      "link": "https://api.raindrop.io/v2/raindrop/1079395079/file?type=image/jpeg",
+      "title": "File_20250524-173927.jpg",
+      "excerpt": "",
+      "note": "",
+      "type": "image",
+      "user": {
+        "$ref": "users",
+        "$id": 4098096
+      },
+      "cover": "https://rdl.ink/render/https%3A%2F%2Fup.raindrop.io%2Fraindrop%2Ffiles%2F107%2F939%2F507%2F9%2FFile_20250524_173927.jpg",
+      "tags": [],
+      "removed": false,
+      "collection": {
+        "$ref": "collections",
+        "$id": -1,
+        "oid": -1
+      },
+      "media": [],
+      "created": "2025-05-24T15:39:32.567Z",
+      "lastUpdate": "2025-05-24T15:39:32.785Z",
+      "domain": "up.raindrop.io",
+      "creatorRef": {
+        "_id": 4098096,
+        "name": "markus1189",
+        "avatar": "",
+        "email": ""
+      },
+      "sort": 1079395079,
+      "file": {
+        "name": "File_20250524-173927.jpg",
+        "size": 411954,
+        "type": "image/jpeg"
+      },
+      "highlights": [],
+      "collectionId": -1
+    },
+    {
+      "_id": 1079142598,
+      "link": "https://api.raindrop.io/v2/raindrop/1079142598/file?type=image/jpeg",
+      "title": "tempFileForShare_20250524-171305.jpg",
+      "excerpt": "",
+      "note": "",
+      "type": "image",
+      "user": {
+        "$ref": "users",
+        "$id": 4098096
+      },
+      "cover": "https://rdl.ink/render/https%3A%2F%2Fup.raindrop.io%2Fraindrop%2Ffiles%2F107%2F914%2F259%2F8%2Ftemp_File_For_Share_20250524_171305.jpg",
+      "tags": [],
+      "removed": false,
+      "collection": {
+        "$ref": "collections",
+        "$id": -1,
+        "oid": -1
+      },
+      "media": [],
+      "created": "2025-05-24T15:13:11.784Z",
+      "lastUpdate": "2025-05-24T15:13:11.953Z",
+      "domain": "up.raindrop.io",
+      "creatorRef": {
+        "_id": 4098096,
+        "name": "markus1189",
+        "avatar": "",
+        "email": ""
+      },
+      "sort": 1079142598,
+      "file": {
+        "name": "tempFileForShare_20250524-171305.jpg",
+        "size": 462309,
+        "type": "image/jpeg"
+      },
+      "highlights": [],
+      "collectionId": -1
+    },
+    {
+      "_id": 1077326683,
+      "link": "https://google.com",
+      "excerpt": "Search the world's information, including webpages, images, videos and more. Google has many special features to help you find exactly what you're looking for.",
+      "note": "",
+      "type": "link",
+      "user": {
+        "$ref": "users",
+        "$id": 4098096
+      },
+      "cover": "https://rdl.ink/render/https%3A%2F%2Fgoogle.com",
+      "tags": [],
+      "removed": false,
+      "collection": {
+        "$ref": "collections",
+        "$id": -1,
+        "oid": -1
+      },
+      "media": [],
+      "created": "2025-05-24T11:51:10.378Z",
+      "lastUpdate": "2025-05-24T11:51:10.378Z",
+      "domain": "google.com",
+      "title": "Google",
+      "creatorRef": {
+        "_id": 4098096,
+        "name": "markus1189",
+        "avatar": "",
+        "email": ""
+      },
+      "sort": 1077326683,
+      "highlights": [],
+      "collectionId": -1
+    },
+    {
+      "_id": 1076430230,
+      "link": "https://hgv-lorsbach.de/Online-Ortsarchiv/Dokumentearchiv/",
+      "title": "- Dokumentearchiv",
+      "excerpt": "",
+      "note": "",
+      "type": "link",
+      "user": {
+        "$ref": "users",
+        "$id": 4098096
+      },
+      "cover": "https://rdl.ink/render/https%3A%2F%2Fhgv-lorsbach.de%2FOnline-Ortsarchiv%2FDokumentearchiv%2F",
+      "media": [],
+      "tags": [],
+      "important": false,
+      "reminder": {
+        "date": null
+      },
+      "removed": false,
+      "created": "2025-05-24T10:00:12.975Z",
+      "collection": {
+        "$ref": "collections",
+        "$id": -1,
+        "oid": -1
+      },
+      "highlights": [],
+      "lastUpdate": "2025-05-24T10:00:12.975Z",
+      "domain": "hgv-lorsbach.de",
+      "creatorRef": {
+        "_id": 4098096,
+        "name": "markus1189",
+        "avatar": "",
+        "email": ""
+      },
+      "sort": 1076430230,
+      "collectionId": -1
+    },
+    {
+      "_id": 1075025773,
+      "link": "https://news.ycombinator.com/item?id=44075388",
+      "title": "Emacs dired-mode as a file manager",
+      "excerpt": "",
+      "note": "",
+      "type": "link",
+      "user": {
+        "$ref": "users",
+        "$id": 4098096
+      },
+      "cover": "https://rdl.ink/render/https%3A%2F%2Fnews.ycombinator.com%2Fitem%3Fid%3D44075388",
+      "media": [],
+      "tags": [],
+      "important": false,
+      "reminder": {
+        "date": null
+      },
+      "removed": false,
+      "created": "2025-05-24T07:10:29.030Z",
+      "collection": {
+        "$ref": "collections",
+        "$id": -1,
+        "oid": -1
+      },
+      "highlights": [],
+      "lastUpdate": "2025-05-24T07:10:29.030Z",
+      "domain": "news.ycombinator.com",
+      "creatorRef": {
+        "_id": 4098096,
+        "name": "markus1189",
+        "avatar": "",
+        "email": ""
+      },
+      "sort": 1075025773,
+      "collectionId": -1
+    },
+    {
+      "_id": 1074892831,
+      "link": "https://news.ycombinator.com/item?id=44075451",
+      "title": "Show HN: DoubleMemory – more efficient local-first read-it-later app",
+      "excerpt": "",
+      "note": "",
+      "type": "link",
+      "user": {
+        "$ref": "users",
+        "$id": 4098096
+      },
+      "cover": "https://rdl.ink/render/https%3A%2F%2Fnews.ycombinator.com%2Fitem%3Fid%3D44075451",
+      "media": [],
+      "tags": [],
+      "important": false,
+      "reminder": {
+        "date": null
+      },
+      "removed": false,
+      "created": "2025-05-24T06:47:15.755Z",
+      "collection": {
+        "$ref": "collections",
+        "$id": -1,
+        "oid": -1
+      },
+      "highlights": [],
+      "lastUpdate": "2025-05-24T06:47:15.755Z",
+      "domain": "news.ycombinator.com",
+      "creatorRef": {
+        "_id": 4098096,
+        "name": "markus1189",
+        "avatar": "",
+        "email": ""
+      },
+      "sort": 1074892831,
+      "collectionId": -1
+    },
+    {
+      "_id": 1074882545,
+      "link": "https://sequencediagram.org/",
+      "title": "SequenceDiagram.org - UML Sequence Diagram Online Tool",
+      "excerpt": "Free sequence diagram online tool. Create sequence diagrams using textual notation or draw quickly via Drag and Drop with an easy to use interface.",
+      "note": "",
+      "type": "link",
+      "user": {
+        "$ref": "users",
+        "$id": 4098096
+      },
+      "cover": "https://sequencediagram.org/assets/icon128x128.png",
+      "media": [
+        {
+          "link": "https://sequencediagram.org/assets/icon128x128.png",
+          "type": "image"
+        }
+      ],
+      "tags": [],
+      "important": false,
+      "reminder": {
+        "date": null
+      },
+      "removed": false,
+      "created": "2025-05-24T06:44:15.236Z",
+      "collection": {
+        "$ref": "collections",
+        "$id": -1,
+        "oid": -1
+      },
+      "highlights": [],
+      "lastUpdate": "2025-05-24T06:44:16.451Z",
+      "domain": "sequencediagram.org",
+      "creatorRef": {
+        "_id": 4098096,
+        "name": "markus1189",
+        "avatar": "",
+        "email": ""
+      },
+      "sort": 1074882545,
+      "collectionId": -1
+    },
+    {
+      "_id": 1070472546,
+      "link": "https://api.raindrop.io/v2/raindrop/1070472546/file?type=image/jpeg",
+      "title": "File_20250523-222559.jpg",
+      "excerpt": "",
+      "note": "",
+      "type": "image",
+      "user": {
+        "$ref": "users",
+        "$id": 4098096
+      },
+      "cover": "https://rdl.ink/render/https%3A%2F%2Fup.raindrop.io%2Fraindrop%2Ffiles%2F107%2F047%2F254%2F6%2FFile_20250523_222559.jpg",
+      "tags": [],
+      "removed": false,
+      "collection": {
+        "$ref": "collections",
+        "$id": -1,
+        "oid": -1
+      },
+      "media": [],
+      "created": "2025-05-23T20:26:03.007Z",
+      "lastUpdate": "2025-05-23T20:26:03.206Z",
+      "domain": "up.raindrop.io",
+      "creatorRef": {
+        "_id": 4098096,
+        "name": "markus1189",
+        "avatar": "",
+        "email": ""
+      },
+      "sort": 1070472546,
+      "file": {
+        "name": "File_20250523-222559.jpg",
+        "size": 80136,
+        "type": "image/jpeg"
+      },
+      "highlights": [],
+      "collectionId": -1
+    },
+    {
+      "_id": 1070362199,
+      "link": "https://api.raindrop.io/v2/raindrop/1070362199/file?type=image/jpeg",
+      "title": "File_20250523-220901.jpg",
+      "excerpt": "",
+      "note": "",
+      "type": "image",
+      "user": {
+        "$ref": "users",
+        "$id": 4098096
+      },
+      "cover": "https://rdl.ink/render/https%3A%2F%2Fup.raindrop.io%2Fraindrop%2Ffiles%2F107%2F036%2F219%2F9%2FFile_20250523_220901.jpg",
+      "tags": [],
+      "removed": false,
+      "collection": {
+        "$ref": "collections",
+        "$id": -1,
+        "oid": -1
+      },
+      "media": [],
+      "created": "2025-05-23T20:09:04.982Z",
+      "lastUpdate": "2025-05-23T20:09:05.134Z",
+      "domain": "up.raindrop.io",
+      "creatorRef": {
+        "_id": 4098096,
+        "name": "markus1189",
+        "avatar": "",
+        "email": ""
+      },
+      "sort": 1070362199,
+      "file": {
+        "name": "File_20250523-220901.jpg",
+        "size": 125407,
+        "type": "image/jpeg"
+      },
+      "highlights": [],
+      "collectionId": -1
+    }
+  ],
+  "count": 18,
+  "collectionId": -1
+}
