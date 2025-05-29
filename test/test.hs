@@ -47,7 +47,7 @@ bookmarkItem1 = BookmarkItem (BookmarkItemId "1")
 bookmarkItem2 :: BookmarkItem
 bookmarkItem2 = bookmarkItem1 {_biLastUpdate = read "2016-05-22 12:54:59 UTC", _biTitle = "newer title" }
 
-testState = initialState (BookmarkCredentials (RaindropToken ""))
+testState = initialState (BookmarkCredentials (RaindropToken "") 0)
 
 hocketStateTests = testGroup "HocketState"
   [ testCase "inserting items into the initial state" $
