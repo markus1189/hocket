@@ -1,0 +1,530 @@
+#+TITLE: Raindrop.io API Playground - Complete Edition
+#+AUTHOR: Hocket Migration Helper
+#+FILETAGS: :verb:
+
+* Configuration :noexport:
+This section is for notes and setup, not for sending requests directly.
+
+You will need a Raindrop.io Test Token.
+1. Go to your Raindrop.io settings: https://app.raindrop.io/settings/integrations
+2. Click on "+ Create new app".
+3. Give it a name (e.g., "Hocket Dev").
+4. Click "Create".
+5. You'll see your app listed. Click on it.
+6. Copy the "Test token". This is what you'll use for `{{(verb-var raindrop-token)}}`.
+
+You can set this token in Verb using:
+M-x verb-set-var RET raindrop-token RET YOUR_TOKEN_HERE RET
+
+* Raindrop.io API Base
+:properties:
+:Verb-Prelude+: (verb-set-var "base-url" "https://api.raindrop.io/rest/v1")
+:end:
+template {{(verb-var base-url)}}
+Authorization: Bearer {{(verb-var raindrop-token)}}
+Accept: application/json
+Content-Type: application/json
+
+** Authentication & User Management
+
+*** Get Current User
+# Get details of the currently authenticated user
+get /user
+
+*** Get User by Name
+# Get publicly available user details by username
+get /user/{{(read-string "Username: ")}}
+
+*** Update User Profile
+# Update user profile information
+put /user
+
+{
+    "fullName": "{{(read-string "Full Name: ")}}",
+    "config": {
+        "raindrops_view": "{{(completing-read "View style: " '("list" "grid" "simple" "masonry"))}}",
+        "raindrops_sort": "{{(completing-read "Sort order: " '("-created" "created" "title" "-title" "domain" "-domain" "-lastUpdate"))}}",
+        "lang": "{{(read-string "Language (e.g., en_US): ")}}"
+    }
+}
+
+*** Get User Statistics
+# Get system collections count and user stats
+get /user/stats
+
+*** Connect Social Account
+# Connect a social network account (redirects to provider)
+get /user/connect/{{(completing-read "Provider: " '("facebook" "google" "twitter" "vkontakte" "dropbox" "gdrive"))}}
+
+*** Disconnect Social Account
+# Disconnect a social network account
+get /user/connect/{{(completing-read "Provider: " '("facebook" "google" "twitter" "vkontakte" "dropbox" "gdrive"))}}/revoke
+
+** Collections Management
+
+*** Get All Root Collections
+# Retrieve all root-level collections
+get /collections
+
+*** Get Child Collections
+# Retrieve all nested collections (with parent.$id)
+get /collections/childrens
+
+*** Get Single Collection
+# Get details of a specific collection
+get /collection/{{(verb-var collection-id (read-string "Collection ID: "))}}
+
+*** Create New Collection
+# Create a new collection
+post /collection
+
+{
+    "title": "{{(read-string "Collection title: ")}}",
+    "view": "{{(completing-read "View style: " '("list" "grid" "simple" "masonry"))}}",
+    "public": {{(if (y-or-n-p "Make collection public? ") "true" "false")}},
+    "parent": {"$id": {{(read-string "Parent collection ID (empty for root): ")}}}
+}
+
+*** Update Collection
+# Update an existing collection
+put /collection/{{(verb-var collection-id (read-string "Collection ID to update: "))}}
+
+{
+    "title": "{{(read-string "New collection title: ")}}",
+    "view": "{{(completing-read "View style: " '("list" "grid" "simple" "masonry"))}}",
+    "public": {{(if (y-or-n-p "Make collection public? ") "true" "false")}},
+    "expanded": {{(if (y-or-n-p "Expand collection? ") "true" "false")}}
+}
+
+*** Delete Collection
+# Remove a collection and move its raindrops to Trash
+delete /collection/{{(verb-var collection-id (read-string "Collection ID to delete: "))}}
+
+*** Delete Multiple Collections
+# Remove multiple collections at once
+delete /collections
+
+{
+    "ids": [{{(s-join ", " (s-split "," (read-string "Comma-separated Collection IDs: ") t))}}]
+}
+
+*** Reorder All Collections
+# Sort all collections by title, count, etc.
+put /collections
+
+{
+    "sort": "{{(completing-read "Sort by: " '("title" "-title" "-count"))}}"
+}
+
+*** Expand/Collapse All Collections
+# Expand or collapse all collections
+put /collections
+
+{
+    "expanded": {{(if (y-or-n-p "Expand all collections? ") "true" "false")}}
+}
+
+*** Merge Collections
+# Merge multiple collections into one
+put /collections/merge
+
+{
+    "to": {{(read-string "Target collection ID: ")}},
+    "ids": [{{(s-join ", " (s-split "," (read-string "Comma-separated Collection IDs to merge: ") t))}}]
+}
+
+*** Clean Empty Collections
+# Remove all empty collections
+put /collections/clean
+
+*** Empty Trash
+# Permanently delete all items in trash
+delete /collection/-99
+
+*** Search Collection Covers
+# Search for collection icons/covers
+get /collections/covers/{{(read-string "Search term (e.g., pokemon): ")}}
+
+*** Get Featured Covers
+# Get featured collection covers
+get /collections/covers
+
+** Collection Sharing
+
+*** Share Collection
+# Share collection with other users
+post /collection/{{(verb-var collection-id (read-string "Collection ID to share: "))}}/sharing
+
+{
+    "emails": ["{{(read-string "Email to share with: ")}}"],
+    "role": "{{(completing-read "Role: " '("member" "viewer"))}}"
+}
+
+*** Get Collection Collaborators
+# Get list of users who have access to collection
+get /collection/{{(verb-var collection-id (read-string "Collection ID: "))}}/sharing
+
+*** Update Collaborator Role
+# Change access level of a collaborator
+put /collection/{{(verb-var collection-id (read-string "Collection ID: "))}}/sharing/{{(read-string "User ID: ")}}
+
+{
+    "role": "{{(completing-read "New role: " '("member" "viewer"))}}"
+}
+
+*** Remove Collaborator
+# Remove user from shared collection
+delete /collection/{{(verb-var collection-id (read-string "Collection ID: "))}}/sharing/{{(read-string "User ID to remove: ")}}
+
+*** Leave Shared Collection
+# Leave a collection you're collaborating on
+delete /collection/{{(verb-var collection-id (read-string "Collection ID to leave: "))}}/sharing
+
+*** Accept Collection Invitation
+# Accept invitation to join shared collection
+post /collection/{{(verb-var collection-id (read-string "Collection ID: "))}}/join
+
+{
+    "token": "{{(read-string "Invitation token from email: ")}}"
+}
+
+** Raindrops (Bookmarks) Management
+
+*** Get Raindrops from Collection
+# Retrieve raindrops from a specific collection
+# Collection IDs: 0 = all, -1 = unsorted, -99 = trash
+get /raindrops/{{(verb-var collection-id (read-string "Collection ID (0=all, -1=unsorted, -99=trash): "))}}?perpage={{(verb-var perpage "25")}}&page={{(verb-var page "0")}}&sort={{(verb-var sort "-created")}}&search={{(verb-var search "")}}
+
+*** Get Single Raindrop
+# Get details of a specific raindrop
+get /raindrop/{{(verb-var raindrop-id (read-string "Raindrop ID: "))}}
+
+*** Create Single Raindrop
+# Create a new bookmark
+post /raindrop
+
+{
+    "link": "{{(read-string "URL: ")}}",
+    "title": "{{(read-string "Title (optional): ")}}",
+    "excerpt": "{{(read-string "Description (optional): ")}}",
+    "collection": {"$id": {{(read-string "Collection ID (-1 for unsorted): ")}}},
+    "tags": [{{(mapconcat (lambda (tag) (format "\"%s\"" tag)) (s-split "," (read-string "Tags (comma-separated): ") t) ", ")}}],
+    "important": {{(if (y-or-n-p "Mark as favorite? ") "true" "false")}},
+    "pleaseParse": {}
+}
+
+*** Create Multiple Raindrops
+# Create multiple bookmarks at once (max 100)
+post /raindrops
+
+{
+    "items": [
+        {
+            "link": "{{(read-string "First URL: ")}}",
+            "collection": {"$id": {{(read-string "Collection ID: ")}}},
+            "pleaseParse": {}
+        }
+    ]
+}
+
+*** Update Single Raindrop
+# Update an existing raindrop
+put /raindrop/{{(verb-var raindrop-id (read-string "Raindrop ID to update: "))}}
+
+{
+    "title": "{{(read-string "New title: ")}}",
+    "excerpt": "{{(read-string "New description: ")}}",
+    "tags": [{{(mapconcat (lambda (tag) (format "\"%s\"" tag)) (s-split "," (read-string "Tags (comma-separated): ") t) ", ")}}],
+    "important": {{(if (y-or-n-p "Mark as favorite? ") "true" "false")}},
+    "collection": {"$id": {{(read-string "Collection ID: ")}}}
+}
+
+*** Update Multiple Raindrops
+# Batch update raindrops in a collection
+put /raindrops/{{(verb-var collection-id (read-string "Collection ID: "))}}
+
+{
+    "ids": [{{(s-join ", " (s-split "," (read-string "Comma-separated Raindrop IDs (optional): ") t))}}],
+    "important": {{(if (y-or-n-p "Mark as favorite? ") "true" "false")}},
+    "tags": [{{(mapconcat (lambda (tag) (format "\"%s\"" tag)) (s-split "," (read-string "Tags to add (comma-separated, empty to clear): ") t) ", ")}}],
+    "collection": {"$id": {{(read-string "Move to collection ID (optional): ")}}}
+}
+
+*** Delete Single Raindrop
+# Move raindrop to trash (or permanently delete if already in trash)
+delete /raindrop/{{(verb-var raindrop-id (read-string "Raindrop ID to delete: "))}}
+
+*** Delete Multiple Raindrops
+# Move multiple raindrops to trash
+delete /raindrops/{{(verb-var collection-id (read-string "Collection ID: "))}}
+
+{
+    "ids": [{{(s-join ", " (s-split "," (read-string "Comma-separated Raindrop IDs: ") t))}}]
+}
+
+*** Upload File as Raindrop
+# Upload a file and create a raindrop (requires multipart/form-data)
+# Note: This is a placeholder - actual file upload requires special handling in Verb
+put /raindrop/file
+Content-Type: multipart/form-data
+
+# You'll need to manually construct the multipart body for file uploads
+
+*** Upload Raindrop Cover
+# Upload custom cover for a raindrop (requires multipart/form-data)
+put /raindrop/{{(verb-var raindrop-id (read-string "Raindrop ID: "))}}/cover
+Content-Type: multipart/form-data
+
+# You'll need to manually construct the multipart body for file uploads
+
+*** Get Permanent Copy
+# Get permanent cached copy of a raindrop (PRO feature)
+get /raindrop/{{(verb-var raindrop-id (read-string "Raindrop ID: "))}}/cache
+
+*** Suggest Collection and Tags for New Bookmark
+# Get AI suggestions for collection and tags based on URL
+post /raindrop/suggest
+
+{
+    "link": "{{(read-string "URL to analyze: ")}}"
+}
+
+*** Suggest Collection and Tags for Existing Bookmark
+# Get AI suggestions for existing bookmark
+get /raindrop/{{(verb-var raindrop-id (read-string "Raindrop ID: "))}}/suggest
+
+** Highlights Management
+
+*** Get All Highlights
+# Retrieve all highlights across collections
+get /highlights?page={{(verb-var page "0")}}&perpage={{(verb-var perpage "25")}}
+
+*** Get Highlights in Collection
+# Get highlights from specific collection
+get /highlights/{{(verb-var collection-id (read-string "Collection ID: "))}}?page={{(verb-var page "0")}}&perpage={{(verb-var perpage "25")}}
+
+*** Get Raindrop Highlights
+# Get highlights for a specific raindrop
+get /raindrop/{{(verb-var raindrop-id (read-string "Raindrop ID: "))}}
+
+*** Add Highlight to Raindrop
+# Add a new highlight to a raindrop
+put /raindrop/{{(verb-var raindrop-id (read-string "Raindrop ID: "))}}
+
+{
+    "highlights": [
+        {
+            "text": "{{(read-string "Highlight text: ")}}",
+            "color": "{{(completing-read "Highlight color: " '("yellow" "blue" "brown" "cyan" "gray" "green" "indigo" "orange" "pink" "purple" "red" "teal"))}}",
+            "note": "{{(read-string "Note (optional): ")}}"
+        }
+    ]
+}
+
+*** Update Highlight
+# Update an existing highlight
+put /raindrop/{{(verb-var raindrop-id (read-string "Raindrop ID: "))}}
+
+{
+    "highlights": [
+        {
+            "_id": "{{(read-string "Highlight ID: ")}}",
+            "text": "{{(read-string "New highlight text: ")}}",
+            "color": "{{(completing-read "New highlight color: " '("yellow" "blue" "brown" "cyan" "gray" "green" "indigo" "orange" "pink" "purple" "red" "teal"))}}",
+            "note": "{{(read-string "New note: ")}}"
+        }
+    ]
+}
+
+*** Remove Highlight
+# Remove a highlight from raindrop
+put /raindrop/{{(verb-var raindrop-id (read-string "Raindrop ID: "))}}
+
+{
+    "highlights": [
+        {
+            "_id": "{{(read-string "Highlight ID to remove: ")}}",
+            "text": ""
+        }
+    ]
+}
+
+** Tags Management
+
+*** Get All Tags
+# Get all tags from all collections
+get /tags
+
+*** Get Tags from Collection
+# Get tags from specific collection
+get /tags/{{(verb-var collection-id (read-string "Collection ID (optional): "))}}
+
+*** Rename Tag
+# Rename a tag across collections
+put /tags/{{(verb-var collection-id (read-string "Collection ID (optional): "))}}
+
+{
+    "tags": ["{{(read-string "Current tag name: ")}}"],
+    "replace": "{{(read-string "New tag name: ")}}"
+}
+
+*** Merge Tags
+# Merge multiple tags into one
+put /tags/{{(verb-var collection-id (read-string "Collection ID (optional): "))}}
+
+{
+    "tags": [{{(mapconcat (lambda (tag) (format "\"%s\"" tag)) (s-split "," (read-string "Tags to merge (comma-separated): ") t) ", ")}}],
+    "replace": "{{(read-string "New merged tag name: ")}}"
+}
+
+*** Delete Tags
+# Remove tags from collection
+delete /tags/{{(verb-var collection-id (read-string "Collection ID (optional): "))}}
+
+{
+    "tags": [{{(mapconcat (lambda (tag) (format "\"%s\"" tag)) (s-split "," (read-string "Tags to delete (comma-separated): ") t) ", ")}}]
+}
+
+** Filters & Search
+
+*** Get Collection Filters
+# Get available filters for a collection (tags, types, etc.)
+get /filters/{{(verb-var collection-id (read-string "Collection ID (0 for all): "))}}?tagsSort={{(verb-var tags-sort "-count")}}&search={{(verb-var search "")}}
+
+** Import & Export
+
+*** Parse URL for Import
+# Extract metadata from any URL
+get /import/url/parse?url={{(url-encode-url (read-string "URL to parse: "))}}
+
+*** Check URL Existence
+# Check if URLs are already saved
+post /import/url/exists
+
+{
+    "urls": [{{(mapconcat (lambda (url) (format "\"%s\"" url)) (s-split "," (read-string "URLs to check (comma-separated): ") t) ", ")}}]
+}
+
+*** Parse HTML Import File
+# Convert HTML bookmark file to JSON (requires multipart/form-data)
+post /import/file
+Content-Type: multipart/form-data
+
+# You'll need to manually construct the multipart body for file uploads
+
+*** Export Collection
+# Export collection in various formats
+get /raindrops/{{(verb-var collection-id (read-string "Collection ID (0 for all): "))}}/export.{{(completing-read "Format: " '("csv" "html" "zip"))}}?sort={{(verb-var sort "-created")}}&search={{(verb-var search "")}}
+
+** Backups
+
+*** Get All Backups
+# List all available backups
+get /backups
+
+*** Generate New Backup
+# Create a new backup (takes time to process)
+get /backup
+
+*** Download Backup File
+# Download a specific backup file
+get /backup/{{(read-string "Backup ID: ")}}.{{(completing-read "Format: " '("html" "csv"))}}
+
+** Advanced Search Examples
+
+*** Search by Type
+# Find all images in unsorted collection
+get /raindrops/-1?search=type:image
+
+*** Search by Domain
+# Find all bookmarks from specific domain
+get /raindrops/0?search=site:github.com
+
+*** Search by Tag
+# Find bookmarks with specific tag
+get /raindrops/0?search=tag:javascript
+
+*** Search Favorites
+# Find all favorite bookmarks
+get /raindrops/0?search=is:favorite
+
+*** Search Broken Links
+# Find all broken bookmarks
+get /raindrops/0?search=is:broken
+
+*** Search Duplicates
+# Find duplicate bookmarks
+get /raindrops/0?search=is:duplicate
+
+*** Search Without Tags
+# Find bookmarks without any tags
+get /raindrops/0?search=is:notag
+
+*** Complex Search Query
+# Combine multiple search criteria
+get /raindrops/0?search={{(url-encode-url (read-string "Search query (e.g., 'javascript AND type:article'): "))}}
+
+** Batch Operations Examples
+
+*** Bulk Tag Addition
+# Add tags to multiple raindrops
+put /raindrops/{{(verb-var collection-id (read-string "Collection ID: "))}}
+
+{
+    "search": "{{(read-string "Search query to filter raindrops: ")}}",
+    "tags": [{{(mapconcat (lambda (tag) (format "\"%s\"" tag)) (s-split "," (read-string "Tags to add (comma-separated): ") t) ", ")}}]
+}
+
+*** Bulk Collection Move
+# Move multiple raindrops to different collection
+put /raindrops/{{(verb-var collection-id (read-string "Source Collection ID: "))}}
+
+{
+    "search": "{{(read-string "Search query to filter raindrops: ")}}",
+    "collection": {"$id": {{(read-string "Target Collection ID: ")}}}
+}
+
+*** Bulk Favorite Toggle
+# Mark/unmark multiple raindrops as favorites
+put /raindrops/{{(verb-var collection-id (read-string "Collection ID: "))}}
+
+{
+    "search": "{{(read-string "Search query to filter raindrops: ")}}",
+    "important": {{(if (y-or-n-p "Mark as favorite? ") "true" "false")}}
+}
+
+*** Bulk Delete by Search
+# Delete multiple raindrops matching search criteria
+delete /raindrops/{{(verb-var collection-id (read-string "Collection ID: "))}}?search={{(url-encode-url (read-string "Search query: "))}}
+
+* Quick Reference
+
+** Collection IDs
+- 0: All collections (except Trash)
+- -1: Unsorted collection
+- -99: Trash collection
+
+** Search Operators
+- type:TYPE (article, image, video, document, audio, link)
+- site:DOMAIN
+- tag:TAG
+- is:favorite, is:broken, is:duplicate, is:notag
+- created:YYYY-MM-DD
+- AND, OR, NOT operators
+
+** Sort Options
+- -created (newest first, default)
+- created (oldest first)
+- title (A-Z)
+- -title (Z-A)
+- domain (by hostname A-Z)
+- -domain (by hostname Z-A)
+- score (by relevancy, when searching)
+
+** View Styles
+- list (default)
+- grid
+- simple
+- masonry (Pinterest-like)
+
+* End of API Playground

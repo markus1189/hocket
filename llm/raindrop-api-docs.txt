@@ -1,0 +1,3246 @@
+Directory structure:
+└── raindropio-developer-site/
+    ├── README.md
+    ├── SUMMARY.md
+    ├── terms.md
+    ├── more/
+    │   ├── changelog.md
+    │   └── showcase.md
+    └── v1/
+        ├── backups.md
+        ├── export.md
+        ├── filters.md
+        ├── highlights.md
+        ├── import.md
+        ├── tags.md
+        ├── authentication/
+        │   ├── README.md
+        │   ├── calls.md
+        │   └── token.md
+        ├── collections/
+        │   ├── README.md
+        │   ├── covers-icons.md
+        │   ├── methods.md
+        │   ├── nested-structure.md
+        │   └── sharing.md
+        ├── raindrops/
+        │   ├── README.md
+        │   ├── multiple.md
+        │   └── single.md
+        └── user/
+            ├── README.md
+            └── authenticated.md
+
+
+Files Content:
+
+================================================
+FILE: README.md
+================================================
+---
+description: >-
+  Build and integrate tools and applications to help members manage their
+  bookmarks on Raindrop.io
+---
+
+# Overview
+
+This is the official documentation for Raindrop.io API. A reference to the functionality our public API provides with detailed description of each API endpoint, parameters, and examples.
+
+Please note that you must [register your application](https://app.raindrop.io/settings/integrations) and authenticate with OAuth when making requests. Before doing so, be sure to read our [Terms & Guidelines](terms.md) to learn how the API may be used.
+
+### Format
+
+API endpoints accept arguments either as url-encoded values for non-POST requests or as json-encoded objects encoded in POST request body with `Content-Type: application/json` header.
+
+Where possible, the API strives to use appropriate HTTP verbs for each action.
+
+| Verb   | Description                                                |
+| ------ | ---------------------------------------------------------- |
+| GET    | Used for retrieving resources.                             |
+| POST   | Used for creating resources.                               |
+| PUT    | Used for updating resources, or performing custom actions. |
+| DELETE | Used for deleting resources.                               |
+
+This API relies on standard HTTP response codes to indicate operation result. The table below is a simple reference about the most used status codes:
+
+| Status code | Description                                                                                                                      |
+| ----------: | -------------------------------------------------------------------------------------------------------------------------------- |
+|         200 | The request was processed successfully.                                                                                          |
+|         204 | The request was processed successfully without any data to return.                                                               |
+|         4xx | The request was processed with an error and should not be retried unmodified as they won’t be processed any different by an API. |
+|         5xx | The request failed due to a server error, it’s safe to retry later.                                                              |
+
+All `200 OK` responses have the `Content-type: application/json` and contain a JSON-encoded representation of one or more objects.
+
+Payload of POST requests has to be JSON-encoded and accompanied with `Content-Type: application/json` header.
+
+### Timestamps <a href="#timestamps" id="timestamps"></a>
+
+All timestamps are returned in ISO 8601 format:
+
+```bash
+YYYY-MM-DDTHH:MM:SSZ
+```
+
+### Rate Limiting <a href="#rate-limiting" id="rate-limiting"></a>
+
+For requests using OAuth, you can make up to 120 requests per minute per authenticated user.
+
+The headers tell you everything you need to know about your current rate limit status:
+
+| Header name         | Description                                                                       |
+| ------------------- | --------------------------------------------------------------------------------- |
+| X-RateLimit-Limit   | The maximum number of requests that the consumer is permitted to make per minute. |
+| RateLimit-Remaining | The number of requests remaining in the current rate limit window.                |
+| X-RateLimit-Reset   | The time at which the current rate limit window resets in UTC epoch seconds.      |
+
+Once you go over the rate limit you will receive an error response:
+
+```http
+HTTP/1.1 429 Too Many Requests
+Status: 429 Too Many Requests
+X-RateLimit-Limit: 120
+X-RateLimit-Remaining: 0
+X-RateLimit-Reset: 1392321600
+```
+
+### CORS <a href="#cross-origin-resource-sharing" id="cross-origin-resource-sharing"></a>
+
+The API supports Cross Origin Resource Sharing (CORS) for AJAX requests. You can read the [CORS W3C recommendation](https://www.w3.org/TR/cors/), or [this intro](http://code.google.com/p/html5security/wiki/CrossOriginRequestSecurity) from the HTML 5 Security Guide.
+
+Here’s a sample request sent from a browser hitting `http://example.com`:
+
+```http
+HTTP/1.1 200 OK
+Access-Control-Allow-Origin: http://example.com
+Access-Control-Expose-Headers: ETag, Content-Type, Accept, X-RateLimit-Limit, X-RateLimit-Remaining, X-RateLimit-Reset
+Access-Control-Allow-Credentials: true
+```
+
+
+
+================================================
+FILE: SUMMARY.md
+================================================
+# Table of contents
+
+* [Overview](README.md)
+* [Terms & Guidelines](terms.md)
+
+## Rest API v1 <a href="#v1" id="v1"></a>
+
+* [Authentication](v1/authentication/README.md)
+  * [Obtain access token](v1/authentication/token.md)
+  * [Make authorized calls](v1/authentication/calls.md)
+* [Collections](v1/collections/README.md)
+  * [Collection methods](v1/collections/methods.md)
+  * [Nested structure](v1/collections/nested-structure.md)
+  * [Sharing](v1/collections/sharing.md)
+  * [Covers/icons](v1/collections/covers-icons.md)
+* [Raindrops](v1/raindrops/README.md)
+  * [Single raindrop](v1/raindrops/single.md)
+  * [Multiple raindrops](v1/raindrops/multiple.md)
+* [Highlights](v1/highlights.md)
+* [User](v1/user/README.md)
+  * [Authenticated user](v1/user/authenticated.md)
+* [Tags](v1/tags.md)
+* [Filters](v1/filters.md)
+* [Import](v1/import.md)
+* [Export](v1/export.md)
+* [Backups](v1/backups.md)
+
+## More
+
+* [Changelog](more/changelog.md)
+* [Showcase](more/showcase.md)
+
+
+
+================================================
+FILE: terms.md
+================================================
+# Terms & Guidelines
+
+### How may I use the API? <a href="#how-may-i-use-the-api" id="how-may-i-use-the-api"></a>
+
+#### DO <a href="#do" id="do"></a>
+
+I encourage you to build applications that **extend** Raindrop.io to platforms beyond the web and offer services that Raindrop.io does not.
+
+#### DON’T <a href="#dont" id="dont"></a>
+
+Don’t build what I'm building. I invested a lot of time, money and hard work in Raindrop.io. I rely on Raindrop.io for income. As such, do not build an application, website, product, or business that attempts to harm, or replace Raindrop.io, website, or services.
+
+In particular, do not use the API, or any Raindrop.io data, to build the following:
+
+* A website that replicates or replaces raindrop.io
+
+I'll do the best to communicate fair use of the Raindrop.io API in this space and others, but the onus is on you to contact me and inquire whether your use of the API is permitted.
+
+### Commercial Use <a href="#commercial-use" id="commercial-use"></a>
+
+You are free to use the Raindrop.io API for commercial use, provided that you abide by these terms and do not build an application or business that attempts to harm, compete with or replace Raindrop.io, our website, or our services.
+
+### Be Gentle <a href="#be-gentle" id="be-gentle"></a>
+
+Don’t overburden our servers. We’ve published some specifics with regard to rate limiting, but we reserve the right to determine abuse or excessive usage of the API and throttle or block any service accordingly. Attempts to circumvent rate limiting, such as leveraging multiple applications or generating bogus user accounts, are strictly prohibited.
+
+### Termination <a href="#termination" id="termination"></a>
+
+Raindrop.io can refuse API access at any time for any reason. This is not a card we hope to play often, but it’s impossible to anticipate every situation. We reserve the right to decline any request for API usage and block access to the API.
+
+### Liability <a href="#liability" id="liability"></a>
+
+Raindrop.io is not liable for any direct, indirect, incidental, special, consequential or exemplary damages arising from your use of the API. These include, but are not limited to, damages for loss of profits, goodwill, use, data or other intangible losses, resulting from your API usage or third-party products that access data via the API.
+
+Your use of the Raindrop.io API is at your own discretion and risk, and you will be solely responsible for any damage that results its use, including, but not limited to, any damage to computer systems or loss of data incurred by you, your users, or your customers.
+
+### Terms Can Change <a href="#terms-can-change" id="terms-can-change"></a>
+
+Raindrop.io reserves the right to update and change these terms at any time without notice.\
+
+
+
+================================================
+FILE: more/changelog.md
+================================================
+# Changelog
+
+### 1.0.4
+
+* Please use `/filters/:collectionId` route instead of `/raindrops/:collectionId/filters`
+* Route `GET /user/:id` removed
+* Route `GET /tags/suggest` removed
+
+### 1.0.3
+
+* Merge and remove multiple collections endpoint
+
+### 1.0.2
+
+* Filters endpoint now support sorting results
+
+### 1.0.1
+
+* Raindrop now have `created` field
+* Raindrop now update `lastUpdate` field on each update
+
+
+
+================================================
+FILE: more/showcase.md
+================================================
+# Showcase
+
+### iOS, Android
+
+[Official Raindrop.io mobile app](https://github.com/raindropio/mobile) \(Open source, JS, React Native, Redux\)
+
+{% hint style="info" %}
+Currently, Raindrop.io mobile apps use a private API, but the methods and their parameters are almost equal to the ones described in this documentation
+{% endhint %}
+
+### Plugins
+
+[Alfred Workflow](https://www.packal.org/workflow/search-raindropio) by Andreas Westerlind
+
+
+
+
+================================================
+FILE: v1/backups.md
+================================================
+# Backups
+
+{% swagger baseUrl="https://api.raindrop.io" path="/rest/v1/backups" method="get" summary="Get all" %}
+{% swagger-description %}
+Useful to get backup ID's that can be used in `/backup/{ID}.{format}` endpoint.
+
+Sorted by date (new first)
+{% endswagger-description %}
+
+{% swagger-response status="200" description="" %}
+```json
+{
+    "result": true,
+    "items": [
+        {
+            "_id": "659d42a35ffbb2eb5ae1cb86",
+            "created": "2024-01-09T12:57:07.630Z"
+        }
+    ]
+}
+```
+{% endswagger-response %}
+{% endswagger %}
+
+{% swagger baseUrl="https://api.raindrop.io" path="/rest/v1/backup/{ID}.{format}" method="get" summary="Download file" %}
+{% swagger-description %}
+For example:
+
+`https://api.raindrop.io/rest/v1/backup/659d42a35ffbb2eb5ae1cb86.csv`
+{% endswagger-description %}
+
+{% swagger-parameter in="path" required="true" name="ID" %}
+Backup ID
+{% endswagger-parameter %}
+
+{% swagger-parameter in="path" name="format" required="true" %}
+File format: `html` or `csv`
+{% endswagger-parameter %}
+{% endswagger %}
+
+{% swagger baseUrl="https://api.raindrop.io" path="/rest/v1/backup" method="get" summary="Generate new" %}
+{% swagger-description %}
+Useful to create a brand new backup. This requires some time.
+
+New backup will appear in the list of `/backups` endpoint
+{% endswagger-description %}
+
+{% swagger-response status="200" description="" %}
+```
+We will send you email with html export file when it be ready! Time depends on bookmarks count and queue.
+```
+{% endswagger-response %}
+{% endswagger %}
+
+
+
+================================================
+FILE: v1/export.md
+================================================
+---
+description: Export all raindrops in specific format
+---
+
+# Export
+
+## Export in format
+
+<mark style="color:green;">`GET`</mark> `https://api.raindrop.io/rest/v1/raindrops/{collectionId}/export.{format}`
+
+**Path Parameters**
+
+<table><thead><tr><th width="243">Name</th><th>Type</th><th>Description</th></tr></thead><tbody><tr><td><code>collectionId</code><mark style="color:red;">*</mark></td><td>number</td><td>Collection ID. Specify <code>0</code> to get all raindrops</td></tr><tr><td><code>format</code><mark style="color:red;">*</mark></td><td>string</td><td><code>csv</code>, <code>html</code> or <code>zip</code></td></tr></tbody></table>
+
+**Query Parameters**
+
+<table><thead><tr><th width="243">Name</th><th>Type</th><th>Description</th></tr></thead><tbody><tr><td><code>sort</code></td><td>string</td><td>Check <a href="https://developer.raindrop.io/v1/raindrops/multiple">https://developer.raindrop.io/v1/raindrops/multiple</a></td></tr><tr><td><code>search</code></td><td>string</td><td>Check <a href="https://developer.raindrop.io/v1/raindrops/multiple">https://developer.raindrop.io/v1/raindrops/multiple</a></td></tr></tbody></table>
+
+
+
+================================================
+FILE: v1/filters.md
+================================================
+# Filters
+
+To help users easily find their content you can suggest context aware filters like we have in Raindrop.io app
+
+![Filters right above search field](<../.gitbook/assets/filters (1).png>)
+
+## Fields
+
+| Field            | Type            | Description                                              |
+| ---------------- | --------------- | -------------------------------------------------------- |
+| broken           | `Object`        |                                                          |
+| broken.count     | `Integer`       | Broken links count                                       |
+| duplicates       | `Object`        |                                                          |
+| duplicates.count | `Integer`       | Duplicate links count                                    |
+| important        | `Object`        |                                                          |
+| important.count  | `Integer`       | Count of raindrops that marked as "favorite"             |
+| notag            | `Object`        |                                                          |
+| notag.count      | `Integer`       | Count of raindrops without any tag                       |
+| tags             | `Array<Object>` | List of tags in format `{"_id": "tag name", "count": 1}` |
+| types            | `Array<Object>` | List of types in format `{"_id": "type", "count": 1}`    |
+
+{% swagger baseUrl="https://api.raindrop.io" path="/rest/v1/filters/{collectionId}" method="get" summary="Get filters" %}
+{% swagger-description %}
+
+{% endswagger-description %}
+
+{% swagger-parameter in="path" name="collectionId" type="string" %}
+Collection ID. `0` for all
+{% endswagger-parameter %}
+
+{% swagger-parameter in="query" name="tagsSort" type="string" %}
+Sort tags by:\
+**`-count`** by count, default\
+**`_id`** by name
+{% endswagger-parameter %}
+
+{% swagger-parameter in="query" name="search" type="string" %}
+Check "raindrops" documentation for more details
+{% endswagger-parameter %}
+
+{% swagger-response status="200" description="" %}
+```javascript
+{
+  "result": true,
+  "broken": {
+    "count": 31
+  },
+  "duplicates": {
+    "count": 7
+  },
+  "important": {
+    "count": 59
+  },
+  "notag": {
+    "count": 1366
+  },
+  "tags": [
+    {
+      "_id": "performanc",
+      "count": 19
+    },
+    {
+      "_id": "guides",
+      "count": 9
+    }
+  ],
+  "types": [
+    {
+      "_id": "article",
+      "count": 313
+    },
+    {
+      "_id": "image",
+      "count": 143
+    },
+    {
+      "_id": "video",
+      "count": 26
+    },
+    {
+      "_id": "document",
+      "count": 7
+    }
+  ]
+}
+```
+{% endswagger-response %}
+{% endswagger %}
+
+
+
+================================================
+FILE: v1/highlights.md
+================================================
+# Highlights
+
+Single `highlight` object:
+
+| Field   | Type     | Description                                                                                                                                                                                                                                                                                                          |
+| ------- | -------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| \_id    | `String` | Unique id of highlight                                                                                                                                                                                                                                                                                               |
+| text    | `String` | Text of highlight (required)                                                                                                                                                                                                                                                                                         |
+| title   | `String` | Title of bookmark                                                                                                                                                                                                                                                                                                    |
+| color   | `String` | <p>Color of highlight. <br>Default <code>yellow</code><br><br>Can be <code>blue</code>, <code>brown</code>, <code>cyan</code>, <code>gray</code>, <code>green</code>, <code>indigo</code>, <code>orange</code>, <code>pink</code>, <code>purple</code>, <code>red</code>, <code>teal</code>, <code>yellow</code></p> |
+| note    | `String` | Optional note for highlight                                                                                                                                                                                                                                                                                          |
+| created | `String` | Creation date of highlight                                                                                                                                                                                                                                                                                           |
+| tags    | `Array`  | Tags list                                                                                                                                                                                                                                                                                                            |
+| link    | `String` | Highlighted page URL                                                                                                                                                                                                                                                                                                 |
+
+{% swagger method="get" path="/rest/v1/highlights" baseUrl="https://api.raindrop.io" summary="Get all highlights" %}
+{% swagger-description %}
+
+{% endswagger-description %}
+
+{% swagger-parameter in="query" name="page" type="Number" %}
+
+{% endswagger-parameter %}
+
+{% swagger-parameter in="query" name="perpage" type="Number" %}
+How many highlights per page. 50 max. Default 25
+{% endswagger-parameter %}
+
+{% swagger-response status="200: OK" description="" %}
+```javascript
+{
+    "result": true,
+    "items": [
+        {
+            "note": "Trully native macOS app",
+            "color": "red",
+            "text": "Orion is the new WebKit-based browser for Mac",
+            "created": "2022-03-21T14:41:34.059Z",
+            "tags": ["tag1", "tag2"],
+            "_id": "62388e9e48b63606f41e44a6",
+            "raindropRef": 123,
+            "link": "https://apple.com",
+            "title": "Orion Browser"
+        },
+        {
+            "note": "",
+            "color": "green",
+            "text": "Built on WebKit, Orion gives you a fast, smooth and lightweight browsing experience",
+            "created": "2022-03-21T15:13:21.128Z",
+            "tags": ["tag1", "tag2"],
+            "_id": "62389611058af151c840f667",
+            "raindropRef": 123,
+            "link": "https://apple.com",
+            "title": "Apple"
+        }
+    ]
+}
+```
+{% endswagger-response %}
+{% endswagger %}
+
+{% swagger method="get" path="/rest/v1/highlights/{collectionId}" baseUrl="https://api.raindrop.io" summary="Get all highlights in a collection" %}
+{% swagger-description %}
+
+{% endswagger-description %}
+
+{% swagger-parameter in="path" name="collectionId" type="Number" required="true" %}
+Collection ID
+{% endswagger-parameter %}
+
+{% swagger-parameter in="path" name="page" type="Number" %}
+
+{% endswagger-parameter %}
+
+{% swagger-parameter in="path" name="perpage" type="Number" %}
+How many highlights per page. 50 max. Default 25
+{% endswagger-parameter %}
+
+{% swagger-response status="200: OK" description="" %}
+```javascript
+{
+    "result": true,
+    "items": [
+        {
+            "note": "Trully native macOS app",
+            "color": "red",
+            "text": "Orion is the new WebKit-based browser for Mac",
+            "created": "2022-03-21T14:41:34.059Z",
+            "tags": ["tag1", "tag2"],
+            "_id": "62388e9e48b63606f41e44a6",
+            "raindropRef": 123,
+            "link": "https://apple.com",
+            "title": "Apple"
+        },
+        {
+            "note": "",
+            "color": "green",
+            "text": "Built on WebKit, Orion gives you a fast, smooth and lightweight browsing experience",
+            "created": "2022-03-21T15:13:21.128Z",
+            "tags": ["tag1", "tag2"],
+            "_id": "62389611058af151c840f667",
+            "raindropRef": 123,
+            "link": "https://apple.com",
+            "title": "Apple"
+        }
+    ]
+}
+```
+{% endswagger-response %}
+{% endswagger %}
+
+{% swagger baseUrl="https://api.raindrop.io" path="/rest/v1/raindrop/{id}" method="get" summary="Get highlights of raindrop" %}
+{% swagger-description %}
+
+{% endswagger-description %}
+
+{% swagger-parameter in="path" name="id" type="number" required="true" %}
+Existing raindrop ID
+{% endswagger-parameter %}
+
+{% swagger-response status="200" description="" %}
+```javascript
+{
+    "result": true,
+    "item": {
+        "_id": 373777232,
+        "highlights": [
+            {
+                "note": "Trully native macOS app",
+                "color": "red",
+                "text": "Orion is the new WebKit-based browser for Mac",
+                "created": "2022-03-21T14:41:34.059Z",
+                "lastUpdate": "2022-03-22T14:30:52.004Z",
+                "_id": "62388e9e48b63606f41e44a6"
+            },
+            {
+                "note": "",
+                "color": "green",
+                "text": "Built on WebKit, Orion gives you a fast, smooth and lightweight browsing experience",
+                "created": "2022-03-21T15:13:21.128Z",
+                "lastUpdate": "2022-03-22T09:15:18.751Z",
+                "_id": "62389611058af151c840f667"
+            }
+        ]
+    }
+}
+```
+{% endswagger-response %}
+{% endswagger %}
+
+{% swagger baseUrl="https://api.raindrop.io" path="/rest/v1/raindrop/{id}" method="put" summary="Add highlight" %}
+{% swagger-description %}
+Just specify a `highlights` array in body with `object` for each highlight
+
+**Fore example:**
+
+`{"highlights": [ { "text": "Some quote", "color": "red", "note": "Some note" } ] }`
+{% endswagger-description %}
+
+{% swagger-parameter in="path" name="id" type="number" required="true" %}
+Existing raindrop ID
+{% endswagger-parameter %}
+
+{% swagger-parameter in="body" name="highlights" type="array" required="true" %}
+
+{% endswagger-parameter %}
+
+{% swagger-parameter in="body" name="highlights[].text" required="true" %}
+
+{% endswagger-parameter %}
+
+{% swagger-parameter in="body" name="highlights[].note" %}
+
+{% endswagger-parameter %}
+
+{% swagger-parameter in="body" name="highlights[].color" %}
+
+{% endswagger-parameter %}
+
+{% swagger-response status="200" description="" %}
+```javascript
+{
+    "result": true,
+    "item": {
+        "_id": 373777232,
+        "highlights": [
+            {
+                "note": "Trully native macOS app",
+                "color": "red",
+                "text": "Orion is the new WebKit-based browser for Mac",
+                "created": "2022-03-21T14:41:34.059Z",
+                "lastUpdate": "2022-03-22T14:30:52.004Z",
+                "_id": "62388e9e48b63606f41e44a6"
+            },
+            {
+                "note": "",
+                "color": "green",
+                "text": "Built on WebKit, Orion gives you a fast, smooth and lightweight browsing experience",
+                "created": "2022-03-21T15:13:21.128Z",
+                "lastUpdate": "2022-03-22T09:15:18.751Z",
+                "_id": "62389611058af151c840f667"
+            }
+        ]
+    }
+}
+```
+{% endswagger-response %}
+{% endswagger %}
+
+{% swagger baseUrl="https://api.raindrop.io" path="/rest/v1/raindrop/{id}" method="put" summary="Update highlight" %}
+{% swagger-description %}
+Just specify a `highlights` array in body with `object` containing particular `_id` of highlight you want to update and all other fields you want to change.
+
+**Fore example:**
+
+`{"highlights": [ { "_id": "62388e9e48b63606f41e44a6", "note": "New note" } ] }`
+{% endswagger-description %}
+
+{% swagger-parameter in="path" name="id" type="number" required="true" %}
+Existing raindrop ID
+{% endswagger-parameter %}
+
+{% swagger-parameter in="body" name="highlights" type="array" required="true" %}
+
+{% endswagger-parameter %}
+
+{% swagger-parameter in="body" name="highlights[]._id" required="true" %}
+Particular highlight _id you want to remove
+{% endswagger-parameter %}
+
+{% swagger-parameter in="body" name="highlights[].text" required="false" %}
+Should be empty string
+{% endswagger-parameter %}
+
+{% swagger-parameter in="body" name="highlights[].note" %}
+
+{% endswagger-parameter %}
+
+{% swagger-parameter in="body" name="highlights[].color" %}
+
+{% endswagger-parameter %}
+
+{% swagger-response status="200" description="" %}
+```javascript
+{
+    "result": true,
+    "item": {
+        "_id": 373777232,
+        "highlights": [
+            {
+                "note": "Trully native macOS app",
+                "color": "red",
+                "text": "Orion is the new WebKit-based browser for Mac",
+                "created": "2022-03-21T14:41:34.059Z",
+                "lastUpdate": "2022-03-22T14:30:52.004Z",
+                "_id": "62388e9e48b63606f41e44a6"
+            },
+            {
+                "note": "",
+                "color": "green",
+                "text": "Built on WebKit, Orion gives you a fast, smooth and lightweight browsing experience",
+                "created": "2022-03-21T15:13:21.128Z",
+                "lastUpdate": "2022-03-22T09:15:18.751Z",
+                "_id": "62389611058af151c840f667"
+            }
+        ]    }}
+```
+{% endswagger-response %}
+{% endswagger %}
+
+{% swagger baseUrl="https://api.raindrop.io" path="/rest/v1/raindrop/{id}" method="put" summary="Remove highlight" %}
+{% swagger-description %}
+Just specify a `highlights` array in body with `object` containing particular `_id` of highlight you want to remove and empty string for `text` field.
+
+**Fore example:**
+
+`{"highlights": [ { "_id": "62388e9e48b63606f41e44a6", "text": "" } ] }`
+{% endswagger-description %}
+
+{% swagger-parameter in="path" name="id" type="number" required="true" %}
+Existing raindrop ID
+{% endswagger-parameter %}
+
+{% swagger-parameter in="body" name="highlights" type="array" required="true" %}
+
+{% endswagger-parameter %}
+
+{% swagger-parameter in="body" name="highlights[]._id" required="true" %}
+Particular highlight _id you want to remove
+{% endswagger-parameter %}
+
+{% swagger-parameter in="body" name="highlights[].text" required="true" %}
+Should be empty string
+{% endswagger-parameter %}
+
+{% swagger-response status="200" description="" %}
+```javascript
+{
+    "result": true,
+    "item": {
+        "_id": 373777232,
+        "highlights": [
+            {
+                "note": "Trully native macOS app",
+                "color": "red",
+                "text": "Orion is the new WebKit-based browser for Mac",
+                "created": "2022-03-21T14:41:34.059Z",
+                "lastUpdate": "2022-03-22T14:30:52.004Z",
+                "_id": "62388e9e48b63606f41e44a6"
+            },
+            {
+                "note": "",
+                "color": "green",
+                "text": "Built on WebKit, Orion gives you a fast, smooth and lightweight browsing experience",
+                "created": "2022-03-21T15:13:21.128Z",
+                "lastUpdate": "2022-03-22T09:15:18.751Z",
+                "_id": "62389611058af151c840f667"
+            }
+        ]
+    }}
+```
+{% endswagger-response %}
+{% endswagger %}
+
+
+
+================================================
+FILE: v1/import.md
+================================================
+---
+description: Handy methods to implement import functionality
+---
+
+# Import
+
+## Parse URL
+
+<mark style="color:blue;">`GET`</mark> `https://api.raindrop.io/rest/v1/import/url/parse`
+
+Parse and extract useful info from any URL
+
+#### Query Parameters
+
+| Name | Type   | Description |
+| ---- | ------ | ----------- |
+| url  | string | URL         |
+
+{% tabs %}
+{% tab title="200 " %}
+```javascript
+//Success
+{
+  "item": {
+    "title": "Яндекс",
+    "excerpt": "Найдётся всё",
+    "media": [
+      {
+        "type": "image",
+        "link": "http://yastatic.net/s3/home/logos/share/share-logo_ru.png"
+      }
+    ],
+    "type": "link",
+    "meta": {
+      "possibleArticle": false,
+      "canonical": "https://ya.ru",
+      "site": "Яндекс",
+      "tags": []
+    }
+  },
+  "result": true
+}
+
+//Invalid URL
+{
+  "error": "not_found",
+  "errorMessage": "invalid_url",
+  "item": {
+    "title": "Fdfdfdf",
+    "excerpt": "",
+    "media": [
+      {
+        "link": "<screenshot>"
+      }
+    ],
+    "type": "link",
+    "parser": "local",
+    "meta": {
+      "possibleArticle": false,
+      "tags": []
+    }
+  },
+  "result": true
+}
+
+//Not found
+{
+  "error": "not_found",
+  "errorMessage": "url_status_404",
+  "item": {
+    "title": "Some",
+    "excerpt": "",
+    "media": [
+      {
+        "link": "<screenshot>"
+      }
+    ],
+    "type": "link",
+    "parser": "local",
+    "meta": {
+      "possibleArticle": false,
+      "tags": []
+    }
+  },
+  "result": true
+}
+```
+{% endtab %}
+{% endtabs %}
+
+## Check URL(s) existence&#x20;
+
+<mark style="color:green;">`POST`</mark> `https://api.raindrop.io/rest/v1/import/url/exists`
+
+Does specified URL's are already saved?
+
+#### Request Body
+
+| Name | Type  | Description |
+| ---- | ----- | ----------- |
+| urls | array | URL's       |
+
+{% tabs %}
+{% tab title="200 ids array contains ID of existing bookmarks" %}
+```javascript
+//Found
+{
+    "result": true,
+    "ids": [
+        3322,
+        12323
+    ]
+}
+
+//Not found
+{
+    "result": false,
+    "ids": []
+}
+```
+{% endtab %}
+{% endtabs %}
+
+## Parse HTML import file
+
+<mark style="color:green;">`POST`</mark> `https://api.raindrop.io/rest/v1/import/file`
+
+Convert HTML bookmark file to JSON. \
+Support Nestcape, Pocket and Instapaper file formats
+
+#### Headers
+
+| Name         | Type   | Description         |
+| ------------ | ------ | ------------------- |
+| Content-Type | string | multipart/form-data |
+
+#### Request Body
+
+| Name   | Type   | Description |
+| ------ | ------ | ----------- |
+| import | string | File        |
+
+{% tabs %}
+{% tab title="200 " %}
+```javascript
+{
+  "result": true,
+  "items": [
+    {
+      "title": "Web",
+      "folders": [
+        {
+          "title": "Default",
+          "folders": [],
+          "bookmarks": [
+            {
+              "link": "https://aaa.com/a",
+              "title": "Name 1",
+              "lastUpdate": "2016-09-13T11:17:09.000Z",
+              "tags": ["tag"],
+              "excerpt": ""
+            }
+          ]
+        }
+      ],
+      "bookmarks": [
+        {
+          "link": "https://bbb.com/b",
+          "title": "Name 2",
+          "lastUpdate": "2016-09-13T11:17:09.000Z",
+          "tags": ["tag"],
+          "excerpt": ""
+        }
+      ]
+    },
+    {
+      "title": "Home",
+      "folders": [
+        {
+          "title": "Inspiration",
+          "folders": [],
+          "bookmarks": [
+            {
+              "link": "https://ccc.com/c",
+              "title": "Name 3",
+              "lastUpdate": "2016-09-13T11:17:09.000Z",
+              "tags": ["tag"],
+              "excerpt": ""
+            }
+          ]
+        }
+      ],
+      "bookmarks": []
+    }
+  ]
+}
+```
+{% endtab %}
+{% endtabs %}
+
+
+
+================================================
+FILE: v1/tags.md
+================================================
+# Tags
+
+{% swagger baseUrl="https://api.raindrop.io" path="/rest/v1/tags/{collectionId}" method="get" summary="Get tags" %}
+{% swagger-description %}
+
+{% endswagger-description %}
+
+{% swagger-parameter in="path" name="collectionId" type="number" %}
+Optional collection ID, when not specified all tags from all collections will be retrieved
+{% endswagger-parameter %}
+
+{% swagger-response status="200" description="" %}
+```javascript
+{
+    "result": true,
+    "items": [
+        {
+            "_id": "api",
+            "count": 100
+        }
+    ]
+}
+```
+{% endswagger-response %}
+{% endswagger %}
+
+{% swagger baseUrl="https://api.raindrop.io" path="/rest/v1/tags/{collectionId}" method="put" summary="Rename tag" %}
+{% swagger-description %}
+
+{% endswagger-description %}
+
+{% swagger-parameter in="path" name="collectionId" type="number" %}
+It's possible to restrict rename action to just one collection. It's optional
+{% endswagger-parameter %}
+
+{% swagger-parameter in="body" name="replace" type="string" %}
+New name
+{% endswagger-parameter %}
+
+{% swagger-parameter in="body" name="tags" type="array" %}
+Specify
+
+**array**
+
+ with
+
+**only one**
+
+ string (name of a tag)
+{% endswagger-parameter %}
+
+{% swagger-response status="200" description="" %}
+```javascript
+{
+    "result": true
+}
+```
+{% endswagger-response %}
+{% endswagger %}
+
+{% swagger baseUrl="https://api.raindrop.io" path="/rest/v1/tags/{collectionId}" method="put" summary="Merge tags" %}
+{% swagger-description %}
+Basically this action rename bunch of
+
+`tags`
+
+ to new name (
+
+`replace`
+
+ field)
+{% endswagger-description %}
+
+{% swagger-parameter in="path" name="collectionId" type="string" %}
+It's possible to restrict merge action to just one collection. It's optional
+{% endswagger-parameter %}
+
+{% swagger-parameter in="body" name="replace" type="string" %}
+New name
+{% endswagger-parameter %}
+
+{% swagger-parameter in="body" name="tags" type="array" %}
+List of tags
+{% endswagger-parameter %}
+
+{% swagger-response status="200" description="" %}
+```javascript
+{
+    "result": true
+}
+```
+{% endswagger-response %}
+{% endswagger %}
+
+{% swagger baseUrl="https://api.raindrop.io" path="/rest/v1/tags/{collectionId}" method="delete" summary="Remove tag(s)" %}
+{% swagger-description %}
+
+{% endswagger-description %}
+
+{% swagger-parameter in="path" name="collectionId" type="string" %}
+It's possible to restrict remove action to just one collection. It's optional
+{% endswagger-parameter %}
+
+{% swagger-parameter in="body" name="tags" type="array" %}
+List of tags
+{% endswagger-parameter %}
+
+{% swagger-response status="200" description="" %}
+```javascript
+{
+    "result": true
+}
+```
+{% endswagger-response %}
+{% endswagger %}
+
+
+
+================================================
+FILE: v1/authentication/README.md
+================================================
+# Authentication
+
+In order to make authorized calls to Raindrop.io API, you must do the following:
+
+* [x] [Register your application](https://app.raindrop.io/#/settings/apps/dev)
+* [x] [Obtain access token](token.md)
+
+
+
+
+================================================
+FILE: v1/authentication/calls.md
+================================================
+---
+description: Build something great
+---
+
+# Make authorized calls
+
+Once you have received an **access\_token**, include it in all API calls in [authorization header](https://developer.mozilla.org/en-US/docs/Web/HTTP/Headers/Authorization) with value `Bearer access_token`
+
+```http
+Authorization: Bearer ae261404-11r4-47c0-bce3-e18a423da828
+```
+
+
+
+
+================================================
+FILE: v1/authentication/token.md
+================================================
+# Obtain access token
+
+External applications could obtain a user authorized API token via the OAuth2 protocol. Before getting started, developers need to create their applications in [App Management Console](https://app.raindrop.io/settings/integrations) and configure a valid OAuth redirect URL. A registered Raindrop.io application is assigned a unique `Client ID` and `Client Secret` which are needed for the OAuth2 flow.
+
+This procedure is comprised of several steps, which will be described below.
+
+{% hint style="info" %}
+If you just want to test your application, or do not plan to access any data except yours account you don't need to make all of those steps.
+
+Just go to [App Management Console](https://app.raindrop.io/settings/integrations) and open your application settings. Copy **Test token** and use it as described in [**Make authorized calls**](calls.md)**.**
+{% endhint %}
+
+{% swagger baseUrl="https://raindrop.io" path="/oauth/authorize" method="get" summary="Step 1: The authorization request" %}
+{% swagger-description %}
+Direct the user to our authorization URL with specified request parameters.
+
+\
+
+
+— If the user is not logged in, they will be asked to log in
+
+\
+
+
+— The user will be asked if he would like to grant your application access to his Raindrop.io data
+{% endswagger-description %}
+
+{% swagger-parameter in="query" name="redirect_uri" type="string" %}
+Redirect URL configured in your application setting
+{% endswagger-parameter %}
+
+{% swagger-parameter in="query" name="client_id" type="string" %}
+The unique Client ID of the Raindrop.io app that you registered
+{% endswagger-parameter %}
+
+{% swagger-response status="307" description="Check details in Step 2" %}
+```
+```
+{% endswagger-response %}
+{% endswagger %}
+
+![User will be asked if he would like to grant your application access to his Raindrop.io data](../../.gitbook/assets/authorize.png)
+
+Here example CURL request:
+
+```bash
+curl "https://api.raindrop.io/v1/oauth/authorize?client_id=5e1c382cf6f48c0211359083&redirect_uri=https:%2F%2Foauthdebugger.com%2Fdebug"
+```
+
+## Step 2: The redirection to your application site
+
+When the user grants your authorization request, the user will be redirected to the redirect URL configured in your application setting. The redirect request will come with query parameter attached: `code` .
+
+The `code` parameter contains the authorization code that you will use to exchange for an access token.
+
+In case of error redirect request will come with `error` query parameter:
+
+| Error                        | Description                                                                                                    |
+| ---------------------------- | -------------------------------------------------------------------------------------------------------------- |
+| access\_denied               | When the user denies your authorization request                                                                |
+| invalid\_application\_status | When your application exceeds the maximum token limit or when your application is being suspended due to abuse |
+
+{% swagger baseUrl="https://raindrop.io" path="/oauth/access_token" method="post" summary="Step 3: The token exchange" %}
+{% swagger-description %}
+Once you have the authorization
+
+`code`
+
+, you can exchange it for the
+
+`access_token`
+
+ by doing a
+
+`POST`
+
+ request with all required body parameters as JSON:
+{% endswagger-description %}
+
+{% swagger-parameter in="header" name="Content-Type" type="string" %}
+application/json
+{% endswagger-parameter %}
+
+{% swagger-parameter in="body" name="grant_type" type="string" %}
+**authorization_code**
+{% endswagger-parameter %}
+
+{% swagger-parameter in="body" name="code" type="string" %}
+Code that you received in step 2
+{% endswagger-parameter %}
+
+{% swagger-parameter in="body" name="client_id" type="string" %}
+The unique Client ID of the Raindrop.io app that you registered
+{% endswagger-parameter %}
+
+{% swagger-parameter in="body" name="client_secret" type="string" %}
+Client secret
+{% endswagger-parameter %}
+
+{% swagger-parameter in="body" name="redirect_uri" type="string" %}
+Same
+
+`redirect_uri`
+
+ from step 1
+{% endswagger-parameter %}
+
+{% swagger-response status="200" description="" %}
+```javascript
+{
+  "access_token": "ae261404-11r4-47c0-bce3-e18a423da828",
+  "refresh_token": "c8080368-fad2-4a3f-b2c9-71d3z85011vb",
+  "expires": 1209599768, //in miliseconds, deprecated
+  "expires_in": 1209599, //in seconds, use this instead!!!
+  "token_type": "Bearer"
+}
+```
+{% endswagger-response %}
+
+{% swagger-response status="400" description="Occurs when code parameter is invalid" %}
+```javascript
+{"error": "bad_authorization_code"}
+```
+{% endswagger-response %}
+{% endswagger %}
+
+Here an example CURL request:
+
+```bash
+curl -X "POST" "https://raindrop.io/oauth/access_token" \
+     -H 'Content-Type: application/json' \
+     -d $'{
+  "code": "c8983220-1cca-4626-a19d-801a6aae003c",
+  "client_id": "5e1c589cf6f48c0211311383",
+  "redirect_uri": "https://oauthdebugger.com/debug",
+  "client_secret": "c3363988-9d27-4bc6-a0ae-d126ce78dc09",
+  "grant_type": "authorization_code"
+}'
+```
+
+{% swagger baseUrl="https://raindrop.io" path="/oauth/access_token" method="post" summary="♻️ The access token refresh" %}
+{% swagger-description %}
+For security reasons access tokens (except "test tokens") will
+
+**expire after two weeks**
+
+. In this case you should request the new one, by calling
+
+`POST`
+
+ request with body parameters (JSON):
+{% endswagger-description %}
+
+{% swagger-parameter in="header" name="Content-Type" type="string" %}
+application/json
+{% endswagger-parameter %}
+
+{% swagger-parameter in="body" name="client_id" type="string" %}
+The unique Client ID of your app that you registered
+{% endswagger-parameter %}
+
+{% swagger-parameter in="body" name="client_secret" type="string" %}
+Client secret of your app
+{% endswagger-parameter %}
+
+{% swagger-parameter in="body" name="grant_type" type="string" %}
+**refresh_token**
+{% endswagger-parameter %}
+
+{% swagger-parameter in="body" name="refresh_token" type="string" %}
+Refresh token that you get in step 3
+{% endswagger-parameter %}
+
+{% swagger-response status="200" description="" %}
+```javascript
+{
+  "access_token": "ae261404-18r4-47c0-bce3-e18a423da898",
+  "refresh_token": "c8080368-fad2-4a9f-b2c9-73d3z850111b",
+  "expires": 1209599768, //in miliseconds, deprecated
+  "expires_in": 1209599, //in seconds, use this instead!!!
+  "token_type": "Bearer"
+}
+```
+{% endswagger-response %}
+{% endswagger %}
+
+
+
+================================================
+FILE: v1/collections/README.md
+================================================
+# Collections
+
+### Fields
+
+<table>
+  <thead>
+    <tr>
+      <th style="text-align:left">Field</th>
+      <th style="text-align:left">Type</th>
+      <th style="text-align:left">Description</th>
+    </tr>
+  </thead>
+  <tbody>
+    <tr>
+      <td style="text-align:left">_id</td>
+      <td style="text-align:left"><code>Integer</code>
+      </td>
+      <td style="text-align:left">The id of the collection.</td>
+    </tr>
+    <tr>
+      <td style="text-align:left">access</td>
+      <td style="text-align:left"><code>Object</code>
+      </td>
+      <td style="text-align:left"></td>
+    </tr>
+    <tr>
+      <td style="text-align:left">access.level</td>
+      <td style="text-align:left"><code>Integer</code>
+      </td>
+      <td style="text-align:left">
+        <p></p>
+        <ol>
+          <li>read only access (equal to <code>public=true</code>)</li>
+          <li>collaborator with read only access</li>
+          <li>collaborator with write only access</li>
+          <li>owner</li>
+        </ol>
+      </td>
+    </tr>
+    <tr>
+      <td style="text-align:left">access.draggable</td>
+      <td style="text-align:left"><code>Boolean</code>
+      </td>
+      <td style="text-align:left">Does it possible to change parent of this collection?</td>
+    </tr>
+    <tr>
+      <td style="text-align:left">collaborators</td>
+      <td style="text-align:left"><code>Object</code>
+      </td>
+      <td style="text-align:left">When this object is present, means that collections is shared. Content
+        of this object is private and not very useful.
+        <br />All sharing API methods <a href="sharing.md">described here</a>
+      </td>
+    </tr>
+    <tr>
+      <td style="text-align:left">color</td>
+      <td style="text-align:left"><code>String</code>
+      </td>
+      <td style="text-align:left">Primary color of collection cover as <code>HEX</code>
+      </td>
+    </tr>
+    <tr>
+      <td style="text-align:left">count</td>
+      <td style="text-align:left"><code>Integer</code>
+      </td>
+      <td style="text-align:left">Count of raindrops in collection</td>
+    </tr>
+    <tr>
+      <td style="text-align:left">cover</td>
+      <td style="text-align:left"><code>Array&lt;String&gt;</code>
+      </td>
+      <td style="text-align:left">Collection cover URL.
+        <br />This array always have one item due to legacy reasons</td>
+    </tr>
+    <tr>
+      <td style="text-align:left">created</td>
+      <td style="text-align:left"><code>String</code>
+      </td>
+      <td style="text-align:left">When collection is created</td>
+    </tr>
+    <tr>
+      <td style="text-align:left">expanded</td>
+      <td style="text-align:left"><code>Boolean</code>
+      </td>
+      <td style="text-align:left">Whether the collection&#x2019;s sub-collections are expanded</td>
+    </tr>
+    <tr>
+      <td style="text-align:left">lastUpdate</td>
+      <td style="text-align:left"><code>String</code>
+      </td>
+      <td style="text-align:left">When collection is updated</td>
+    </tr>
+    <tr>
+      <td style="text-align:left">parent</td>
+      <td style="text-align:left"><code>Object</code>
+      </td>
+      <td style="text-align:left"></td>
+    </tr>
+    <tr>
+      <td style="text-align:left">parent.$id</td>
+      <td style="text-align:left"><code>Integer</code>
+      </td>
+      <td style="text-align:left">The id of the parent collection. Not specified for root collections</td>
+    </tr>
+    <tr>
+      <td style="text-align:left">public</td>
+      <td style="text-align:left"><code>Boolean</code>
+      </td>
+      <td style="text-align:left">Collection and raindrops that it contains will be accessible without authentication
+        by public link</td>
+    </tr>
+    <tr>
+      <td style="text-align:left">sort</td>
+      <td style="text-align:left"><code>Integer</code>
+      </td>
+      <td style="text-align:left">The order of collection (descending). Defines the position of the collection
+        among all the collections with the same <code>parent.$id</code>
+      </td>
+    </tr>
+    <tr>
+      <td style="text-align:left">title</td>
+      <td style="text-align:left"><code>String</code>
+      </td>
+      <td style="text-align:left">Name of the collection</td>
+    </tr>
+    <tr>
+      <td style="text-align:left">user</td>
+      <td style="text-align:left"><code>Object</code>
+      </td>
+      <td style="text-align:left"></td>
+    </tr>
+    <tr>
+      <td style="text-align:left">user.$id</td>
+      <td style="text-align:left"><code>Integer</code>
+      </td>
+      <td style="text-align:left">Owner ID</td>
+    </tr>
+    <tr>
+      <td style="text-align:left">view</td>
+      <td style="text-align:left"><code>String</code>
+      </td>
+      <td style="text-align:left">
+        <p>View style of collection, can be:</p>
+        <ul>
+          <li><code>list</code> (default)</li>
+          <li><code>simple</code>
+          </li>
+          <li><code>grid</code>
+          </li>
+          <li><code>masonry</code> Pinterest like grid</li>
+        </ul>
+      </td>
+    </tr>
+  </tbody>
+</table>
+
+{% hint style="warning" %}
+Our API response could contain **other fields**, not described above. It's **unsafe to use** them in your integration! They could be removed or renamed at any time.
+{% endhint %}
+
+### System collections
+
+Every user have several system non-removable collections. They are not contained in any API responses.
+
+| \_id | Description |
+| :--- | :--- |
+| **-1** | "**Unsorted**" collection |
+| **-99** | "**Trash**" collection |
+
+
+
+
+================================================
+FILE: v1/collections/covers-icons.md
+================================================
+# Covers/icons
+
+In your app you could easily make icon/cover selector from more than 10 000 icons
+
+![](../../.gitbook/assets/icon-finder.png)
+
+{% swagger baseUrl="https://api.raindrop.io" path="/rest/v1/collections/covers/{text}" method="get" summary="Search for cover" %}
+{% swagger-description %}
+Search for specific cover (icon)
+{% endswagger-description %}
+
+{% swagger-parameter in="path" name="text" type="string" %}
+For example "pokemon"
+{% endswagger-parameter %}
+
+{% swagger-response status="200" description="" %}
+```javascript
+{
+  "items": [
+    {
+      "title": "Icons8",
+      "icons": [
+        {
+          "png": "https://rd-icons-icons8.gumlet.com/color/5x/mystic-pokemon.png?fill-color=transparent"
+        }
+      ]
+    },
+    {
+      "title": "Iconfinder",
+      "icons": [
+        {
+          "png": "https://cdn4.iconfinder.com/data/icons/pokemon-go/512/Pokemon_Go-01-128.png",
+          "svg": "https://api.iconfinder.com/v2/icons/1320040/formats/svg/1760420/download"
+        }
+      ]
+    }
+  ],
+  "result": true
+}
+```
+{% endswagger-response %}
+{% endswagger %}
+
+{% swagger baseUrl="https://api.raindrop.io" path="/rest/v1/collections/covers" method="get" summary="Featured covers" %}
+{% swagger-description %}
+
+{% endswagger-description %}
+
+{% swagger-parameter in="path" name="" type="string" %}
+
+{% endswagger-parameter %}
+
+{% swagger-response status="200" description="" %}
+```javascript
+{
+  "items": [
+    {
+      "title": "Colors circle",
+      "icons": [
+        {
+          "png": "https://up.raindrop.io/collection/templates/colors/ios1.png"
+        }
+      ]
+    },
+    {
+      "title": "Hockey",
+      "icons": [
+        {
+          "png": "https://up.raindrop.io/collection/templates/hockey-18/12i.png"
+        }
+      ]
+    }
+  ]
+}
+```
+{% endswagger-response %}
+{% endswagger %}
+
+
+
+================================================
+FILE: v1/collections/methods.md
+================================================
+# Collection methods
+
+## Get root collections
+
+<mark style="color:blue;">`GET`</mark> `https://api.raindrop.io/rest/v1/collections`
+
+Returns JSON-encoded array containing all root collections
+
+{% tabs %}
+{% tab title="200 " %}
+```javascript
+{
+  "result": true,
+  "items": [
+    {
+      "_id": 8492393,
+      "access": {
+        "level": 4,
+        "draggable": true
+      },
+      "collaborators": {
+        "$id": "5dc1759a0e123be5f2654b6f"
+      },
+      "color": "#0c797d",
+      "count": 16,
+      "cover": [
+        "https://up.raindrop.io/collection/thumbs/849/239/3/333ce18769311113836cf93a223a14a3.png"
+      ],
+      "created": "2019-10-09T11:49:53.518Z",
+      "expanded": false,
+      "lastUpdate": "2019-11-27T17:51:19.085Z",
+      "public": false,
+      "sort": 8492393,
+      "title": "Development",
+      "user": {
+        "$id": 32
+      },
+      "view": "list"
+    }
+  ]
+}
+```
+{% endtab %}
+{% endtabs %}
+
+## Get child collections
+
+<mark style="color:blue;">`GET`</mark> `https://api.raindrop.io/rest/v1/collections/childrens`
+
+Returns JSON-encoded array containing all nested collections (that have positive `parent.$id`)
+
+{% tabs %}
+{% tab title="200 " %}
+```javascript
+{
+  "result": true,
+  "items": [
+    {
+      "_id": 8492393,
+      "access": {
+        "level": 4,
+        "draggable": true
+      },
+      "collaborators": {
+        "$id": "5dc1759a0e123be5f2654b6f"
+      },
+      "color": "#0c797d",
+      "count": 16,
+      "cover": [
+        "https://up.raindrop.io/collection/thumbs/849/239/3/333ce18769311113836cf93a223a14a3.png"
+      ],
+      "created": "2019-10-09T11:49:53.518Z",
+      "expanded": false,
+      "lastUpdate": "2019-11-27T17:51:19.085Z",
+      "parent": { "$id": 1111 },
+      "public": false,
+      "sort": 8492393,
+      "title": "Development",
+      "user": {
+        "$id": 32
+      },
+      "view": "list"
+    }
+  ]
+}
+```
+{% endtab %}
+{% endtabs %}
+
+## Get collection
+
+<mark style="color:blue;">`GET`</mark> `https://api.raindrop.io/rest/v1/collection/{id}`
+
+#### Path Parameters
+
+| Name | Type   | Description   |
+| ---- | ------ | ------------- |
+| id   | number | Collection ID |
+
+{% tabs %}
+{% tab title="200 " %}
+```javascript
+{
+  "result": true,
+  "item": {
+    "_id": 8492393,
+    "access": {
+      "for": 32,
+      "level": 4,
+      "root": true,
+      "draggable": true
+    },
+    "author": true,
+    "collaborators": {
+      "$id": "5dc1759a0e123be5f2654b6f"
+    },
+    "color": "#0c797d",
+    "count": 16,
+    "cover": [
+      "https://up.raindrop.io/collection/thumbs/849/239/3/333ce18769311113836cf93a223a14a3.png"
+    ],
+    "created": "2019-10-09T11:49:53.518Z",
+    "expanded": false,
+    "lastUpdate": "2019-11-27T17:51:19.085Z",
+    "public": false,
+    "sort": 8492393,
+    "title": "Development",
+    "user": {
+      "$id": 32
+    },
+    "view": "list"
+  }
+}
+```
+{% endtab %}
+{% endtabs %}
+
+## Create collection
+
+<mark style="color:green;">`POST`</mark> `https://api.raindrop.io/rest/v1/collection`
+
+Create a new collection
+
+#### Request Body
+
+| Name       | Type    | Description                                                                                                                       |
+| ---------- | ------- | --------------------------------------------------------------------------------------------------------------------------------- |
+| view       | string  | More details in "Fields"                                                                                                          |
+| title      | string  | Name of the collection                                                                                                            |
+| sort       | number  | The order of collection (descending). Defines the position of the collection among all the collections with the same `parent.$id` |
+| public     | boolean | Collection and raindrops that it contains will be accessible without authentication?                                              |
+| parent.$id | integer | The ID of parent collection. Empty for root collections                                                                           |
+| cover      | array   | Collection cover url                                                                                                              |
+
+{% tabs %}
+{% tab title="200 " %}
+```javascript
+{
+    "result": true,
+    "item": {
+        ...
+    }
+}
+```
+{% endtab %}
+
+{% tab title="400 Incorrect 'view' field value" %}
+```javascript
+{
+    "result": false,
+    "error": "view",
+    "errorMessage": "Collection validation failed: view: `bla` is not a valid enum value for path `view`."
+}
+```
+{% endtab %}
+{% endtabs %}
+
+## Update collection
+
+<mark style="color:orange;">`PUT`</mark> `https://api.raindrop.io/rest/v1/collection/{id}`
+
+Update an existing collection
+
+#### Path Parameters
+
+| Name | Type   | Description            |
+| ---- | ------ | ---------------------- |
+| id   | number | Existing collection id |
+
+#### Request Body
+
+| Name       | Type    | Description                                                                                                                       |
+| ---------- | ------- | --------------------------------------------------------------------------------------------------------------------------------- |
+| expanded   | boolean | Whether the collection\`s sub-collections are expanded                                                                            |
+| view       | string  | More details in "Fields"                                                                                                          |
+| title      | string  | Name of the collection                                                                                                            |
+| sort       | number  | The order of collection (descending). Defines the position of the collection among all the collections with the same `parent.$id` |
+| public     | boolean | Collection and raindrops that it contains will be accessible without authentication?                                              |
+| parent.$id | integer | The ID of parent collection. Empty for root collections                                                                           |
+| cover      | array   | Collection cover url                                                                                                              |
+
+{% tabs %}
+{% tab title="200 " %}
+```javascript
+{
+    "result": true,
+    "item": {
+        ...
+    }
+}
+```
+{% endtab %}
+{% endtabs %}
+
+## Upload cover
+
+<mark style="color:orange;">`PUT`</mark> `https://api.raindrop.io/rest/v1/collection/{id}/cover`
+
+It's possible to upload cover from desktop. PNG, GIF and JPEG supported
+
+#### Path Parameters
+
+| Name | Type   | Description            |
+| ---- | ------ | ---------------------- |
+| id   | string | Existing collection ID |
+
+#### Headers
+
+| Name         | Type   | Description         |
+| ------------ | ------ | ------------------- |
+| Content-Type | string | multipart/form-data |
+
+#### Request Body
+
+| Name  | Type   | Description |
+| ----- | ------ | ----------- |
+| cover | object | File        |
+
+{% tabs %}
+{% tab title="200 " %}
+```javascript
+{
+    "result": true,
+    "item": {
+        ...
+    }
+}
+```
+{% endtab %}
+{% endtabs %}
+
+## Remove collection
+
+<mark style="color:red;">`DELETE`</mark> `https://api.raindrop.io/rest/v1/collection/{id}`
+
+Remove an existing collection and all its descendants.\
+Raindrops will be moved to "Trash" collection
+
+#### Path Parameters
+
+| Name | Type   | Description            |
+| ---- | ------ | ---------------------- |
+| id   | number | Existing collection ID |
+
+{% tabs %}
+{% tab title="200 " %}
+```javascript
+{
+    "result": true
+}
+```
+{% endtab %}
+{% endtabs %}
+
+## Remove multiple collections
+
+<mark style="color:red;">`DELETE`</mark> `https://api.raindrop.io/rest/v1/collections`
+
+Remove multiple collections at once.\
+Nested collections are ignored (include ID's in `ids` array to remove them)
+
+#### Request Body
+
+| Name | Type  | Description            |
+| ---- | ----- | ---------------------- |
+| ids  | array | Array of collection ID |
+
+{% tabs %}
+{% tab title="200 " %}
+```
+```
+{% endtab %}
+{% endtabs %}
+
+## Reorder all collections
+
+<mark style="color:orange;">`PUT`</mark> `https://api.raindrop.io/rest/v1/collections`
+
+Updates order of all collections&#x20;
+
+#### Request Body
+
+| Name | Type   | Description                                                                                                                                                                                          |
+| ---- | ------ | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| sort | string | <p>Change order of all collections.<br>Possible values:<br>"title" - sort alphabetically ascending<br>"-title" - sort alphabetically descending<br>"-count" - sort by raindrops count descending</p> |
+
+{% tabs %}
+{% tab title="200 " %}
+```javascript
+{
+    "result": true
+}
+```
+{% endtab %}
+{% endtabs %}
+
+## Expand/collapse all collections
+
+<mark style="color:orange;">`PUT`</mark> `https://api.raindrop.io/rest/v1/collections`
+
+#### Path Parameters
+
+| Name     | Type    | Description                                      |
+| -------- | ------- | ------------------------------------------------ |
+| expanded | boolean | <p>TRUE = expand all<br>FALSE = collapse all</p> |
+
+{% tabs %}
+{% tab title="200 " %}
+```javascript
+{
+    "result": true
+}
+```
+{% endtab %}
+{% endtabs %}
+
+## Merge collections
+
+<mark style="color:orange;">`PUT`</mark> `https://api.raindrop.io/rest/v1/collections/merge`
+
+Merge multiple collections
+
+#### Request Body
+
+| Name | Type   | Description                                                |
+| ---- | ------ | ---------------------------------------------------------- |
+| to   | number | Collection ID where listed collection `ids` will be merged |
+| ids  | array  | Collection ID's                                            |
+
+{% tabs %}
+{% tab title="200 " %}
+```
+```
+{% endtab %}
+{% endtabs %}
+
+## Remove all empty collections
+
+<mark style="color:orange;">`PUT`</mark> `https://api.raindrop.io/rest/v1/collections/clean`
+
+{% tabs %}
+{% tab title="200 " %}
+```javascript
+{
+    "result": true,
+    "count": 3
+}
+```
+{% endtab %}
+{% endtabs %}
+
+## Empty Trash
+
+<mark style="color:red;">`DELETE`</mark> `https://api.raindrop.io/rest/v1/collection/-99`
+
+{% tabs %}
+{% tab title="200 " %}
+```javascript
+{
+  "result": true
+}
+```
+{% endtab %}
+{% endtabs %}
+
+## Get system collections count
+
+<mark style="color:blue;">`GET`</mark> `https://api.raindrop.io/rest/v1/user/stats`
+
+{% tabs %}
+{% tab title="200 " %}
+```javascript
+{
+  "items": [
+    {
+      "_id": 0,
+      "count": 1570
+    },
+    {
+      "_id": -1,
+      "count": 34
+    },
+    {
+      "_id": -99,
+      "count": 543
+    }
+  ],
+  "meta": {
+    "pro": true,
+    "_id": 32,
+    "changedBookmarksDate": "2020-02-11T11:23:43.143Z",
+    "duplicates": {
+      "count": 3
+    },
+    "broken": {
+      "count": 31
+    }
+  },
+  "result": true
+}
+```
+{% endtab %}
+{% endtabs %}
+
+
+
+
+================================================
+FILE: v1/collections/nested-structure.md
+================================================
+# Nested structure
+
+### Overview
+
+If you look into Raindrop UI you will notice a sidebar in left corner, where collections are located. Collections itself divided by groups. Groups useful to create separate sets of collections, for example "Home", "Work", etc.
+
+![](../../.gitbook/assets/sidebar.png)
+
+`Groups` array is a single place where user **root** collection list and order is persisted. Why just not to save order position inside collection item itself? Because collections can be shared and they group and order can vary from user to user.
+
+So to fully recreate sidebar like in our app you need to make 3 separate API calls \(sorry, will be improved in future API updates\):
+
+#### 1. [Get user object](../user/authenticated.md#get-user)
+
+It contains `groups` array with exact collection ID's. Typically this array looks like this:
+
+```javascript
+{
+  "groups": [
+    {
+      "title": "Home",
+      "hidden": false,
+      "sort": 0,
+      "collections": [
+        8364483,
+        8364403,
+        66
+      ]
+    },
+    {
+      "title": "Work",
+      "hidden": false,
+      "sort": 1,
+      "collections": [
+        8492393
+      ]
+    }
+  ]
+}
+```
+
+{% hint style="warning" %}
+Collection ID's listed below is just first level of collections structure! To create full tree of nested collections you need to get child items separately.
+{% endhint %}
+
+To get name, count, icon and other info about collections, make those two separate calls:
+
+#### 2. [Get root collections](methods.md#get-root-collections)
+
+Sort order of root collections persisted in `groups[].collections` array
+
+#### 3. [Get child collections](methods.md#get-child-collections)
+
+Sort order of child collections persisted in collection itself in `sort` field
+
+
+
+
+================================================
+FILE: v1/collections/sharing.md
+================================================
+---
+description: >-
+  Collection can be shared with other users, which are then called
+  collaborators, and this section describes the different commands that are
+  related to sharing.
+---
+
+# Sharing
+
+### Collaborators
+
+Every user who shares at least one collection with another user, has a collaborators record in the API response. The record contains a restricted subset of user-specific fields.
+
+| Field      | Description                                                                                                                                                             |
+| ---------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| \_id       | User ID of the collaborator                                                                                                                                             |
+| email      | <p>Email of the collaborator</p><p>Empty when authorized user have read-only access</p>                                                                                 |
+| email\_MD5 | MD5 hash of collaborator email. Useful for using with Gravatar for example                                                                                              |
+| fullName   | Full name of the collaborator                                                                                                                                           |
+| role       | <p>Access level:</p><p><strong><code>member</code></strong> have write access and can invite more users</p><p><strong><code>viewer</code></strong> read-only access</p> |
+
+{% swagger baseUrl="https://api.raindrop.io" path="/rest/v1/collection/{id}/sharing" method="post" summary="Share collection" %}
+{% swagger-description %}
+Share collection with another user(s). As result invitation(s) will be send to specified email(s) with link to join collection.
+{% endswagger-description %}
+
+{% swagger-parameter in="path" name="id" type="number" %}
+Existing collection ID
+{% endswagger-parameter %}
+
+{% swagger-parameter in="body" name="role" type="string" %}
+Access level. Possible values:
+
+\
+
+
+
+
+**`member`**
+
+\
+
+
+
+
+**`viewer`**
+{% endswagger-parameter %}
+
+{% swagger-parameter in="body" name="emails" type="array" %}
+The user email(s) with whom to share the project.
+
+\
+
+
+Maximum 10
+{% endswagger-parameter %}
+
+{% swagger-response status="200" description="" %}
+```javascript
+{
+    "result": true,
+    "emails": [
+        "some@user.com",
+        "other@user.com"
+    ]
+}
+```
+{% endswagger-response %}
+
+{% swagger-response status="400" description="" %}
+```javascript
+//'emails' array is empty
+{
+    "result": false,
+    "errorMessage": "no emails"
+}
+
+//'emails' array larger than 10
+{
+    "result": false,
+    "errorMessage": "you cant send more than 10 invites at once"
+}
+```
+{% endswagger-response %}
+
+{% swagger-response status="403" description="" %}
+```javascript
+//When user have more than 100 pending invitations:
+{
+    "result": false,
+    "errorMessage": "you have too many pending invitations, you will be banned if you continue send more"
+}
+
+//User doesn't have enought permissions to invite more people
+{
+    "result": false,
+    "errorMessage": "you dont have permissions to invite more people"
+}
+```
+{% endswagger-response %}
+{% endswagger %}
+
+{% swagger baseUrl="https://api.raindrop.io" path="/rest/v1/collection/{id}/sharing" method="get" summary="Get collaborators list of collection" %}
+{% swagger-description %}
+
+{% endswagger-description %}
+
+{% swagger-parameter in="path" name="id" type="number" %}
+Existing collection ID
+{% endswagger-parameter %}
+
+{% swagger-response status="200" description="" %}
+```javascript
+{
+  "items": [
+    {
+      "_id": 373381,
+      "email": "some@mail.com",
+      "email_MD5": "e12bda18ca265d3f3e30d247adea2549",
+      "fullName": "Jakie Future",
+      "registered": "2019-08-18T17:01:43.664Z",
+      "role": "viewer"
+    }
+  ],
+  "result": true
+}
+```
+{% endswagger-response %}
+{% endswagger %}
+
+{% swagger baseUrl="https://api.raindrop.io" path="/rest/v1/collection/{id}/sharing" method="delete" summary="Unshare or leave collection" %}
+{% swagger-description %}
+There two possible results of calling this method, depends on who authenticated user is:
+
+\
+
+
+\-
+
+**Owner**
+
+: collection will be unshared and all collaborators will be removed
+
+\
+
+
+\-
+
+**Member or viewer**
+
+: authenticated user will be removed from collaborators list
+{% endswagger-description %}
+
+{% swagger-parameter in="path" name="id" type="number" %}
+Existing collection ID
+{% endswagger-parameter %}
+
+{% swagger-response status="200" description="" %}
+```javascript
+{
+    "result": true
+}
+```
+{% endswagger-response %}
+{% endswagger %}
+
+{% swagger baseUrl="https://api.raindrop.io" path="/rest/v1/collection/{id}/sharing/{userId}" method="put" summary="Change access level of collaborator" %}
+{% swagger-description %}
+
+{% endswagger-description %}
+
+{% swagger-parameter in="path" name="userId" type="number" %}
+User ID of collaborator
+{% endswagger-parameter %}
+
+{% swagger-parameter in="path" name="id" type="number" %}
+Existing collection ID
+{% endswagger-parameter %}
+
+{% swagger-parameter in="body" name="role" type="string" %}
+**`member`**
+
+ or
+
+**`viewer`**
+{% endswagger-parameter %}
+
+{% swagger-response status="200" description="" %}
+```javascript
+{
+    "result": true
+}
+```
+{% endswagger-response %}
+{% endswagger %}
+
+{% swagger baseUrl="https://api.raindrop.io" path="/rest/v1/collection/{id}/sharing/{userId}" method="delete" summary="Delete a collaborator" %}
+{% swagger-description %}
+Remove an user from shared collection
+{% endswagger-description %}
+
+{% swagger-parameter in="path" name="userId" type="number" %}
+User ID of collaborator
+{% endswagger-parameter %}
+
+{% swagger-parameter in="path" name="id" type="number" %}
+Existing collection ID
+{% endswagger-parameter %}
+
+{% swagger-response status="200" description="" %}
+```javascript
+{
+    "result": true
+}
+```
+{% endswagger-response %}
+{% endswagger %}
+
+{% swagger baseUrl="https://api.raindrop.io" path="/rest/v1/collection/{id}/join" method="post" summary="Accept an invitation" %}
+{% swagger-description %}
+Accept an invitation to join a shared collection
+{% endswagger-description %}
+
+{% swagger-parameter in="path" name="id" type="number" %}
+Existing collection ID
+{% endswagger-parameter %}
+
+{% swagger-parameter in="body" name="token" type="string" %}
+Secret token from email
+{% endswagger-parameter %}
+
+{% swagger-response status="200" description="" %}
+```javascript
+{
+    "result": true,
+    "role": "member"
+}
+```
+{% endswagger-response %}
+
+{% swagger-response status="403" description="" %}
+```javascript
+//Incorrect token
+{
+    "result": false,
+    "error": "CollaboratorsIncorrectToken",
+    "errorMessage": "Incorrect or expired token"
+}
+
+//Collection no more exists
+{
+    "result": false,
+    "error": "CollaboratorsNoCollection",
+    "errorMessage": "Shared collection not found or removed"
+}
+
+{
+    "result": false,
+    "error": "CollaboratorsAlready",
+    "errorMessage": "You already owner of this collection"
+}
+```
+{% endswagger-response %}
+{% endswagger %}
+
+
+
+================================================
+FILE: v1/raindrops/README.md
+================================================
+---
+description: We call bookmarks (or items) as "raindrops"
+---
+
+# Raindrops
+
+### Main fields
+
+| Field          | Type            | Description                                                                       |
+| -------------- | --------------- | --------------------------------------------------------------------------------- |
+| \_id           | `Integer`       | Unique identifier                                                                 |
+| collection     | `Object`        | ​                                                                                 |
+| collection.$id | `Integer`       | Collection that the raindrop resides in                                           |
+| cover          | `String`        | Raindrop cover URL                                                                |
+| created        | `String`        | Creation date                                                                     |
+| domain         | `String`        | <p>Hostname of a link.<br>Files always have <code>raindrop.io</code> hostname</p> |
+| excerpt        | `String`        | Description; max length: 10000                                                    |
+| note           | `String`        | Note; max length: 10000                                                           |
+| lastUpdate     | `String`        | Update date                                                                       |
+| link           | `String`        | URL                                                                               |
+| media          | `Array<Object>` | ​Covers list in format: `[ {"link":"url"} ]`                                      |
+| tags           | `Array<String>` | Tags list                                                                         |
+| title          | `String`        | Title; max length: 1000                                                           |
+| type           | `String`        | `link` `article` `image` `video` `document` or `audio`                            |
+| user           | `Object`        | ​                                                                                 |
+| user.$id       | `Integer`       | Raindrop owner                                                                    |
+
+### Other fields
+
+| Field                 | Type      | Description                                                                                                                                                                                                                                                                                                          |
+| --------------------- | --------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| broken                | `Boolean` | Marked as broken (original `link` is not reachable anymore)                                                                                                                                                                                                                                                          |
+| cache                 | `Object`  | Permanent copy (cached version) details                                                                                                                                                                                                                                                                              |
+| cache.status          | `String`  | `ready` `retry` `failed` `invalid-origin` `invalid-timeout` or `invalid-size`                                                                                                                                                                                                                                        |
+| cache.size            | `Integer` | Full size in bytes                                                                                                                                                                                                                                                                                                   |
+| cache.created         | `String`  | Date when copy is successfully made                                                                                                                                                                                                                                                                                  |
+| creatorRef            | `Object`  | <p>Sometime raindrop may belong to other user, not to the one who created it. <br>For example when this raindrop is created in shared collection by other user.<br>This object contains info about original author.</p>                                                                                              |
+| creatorRef.\_id       | `Integer` | Original author (user ID) of a raindrop                                                                                                                                                                                                                                                                              |
+| creatorRef.fullName   | `String`  | Original author name of a raindrop                                                                                                                                                                                                                                                                                   |
+| file                  | `Object`  | <p>This raindrop uploaded from desktop</p><p><a href="https://help.raindrop.io/article/48-uploading-files">Supported file formats</a></p>                                                                                                                                                                            |
+| file.name             | `String`  | File name                                                                                                                                                                                                                                                                                                            |
+| file.size             | `Integer` | File size in bytes                                                                                                                                                                                                                                                                                                   |
+| file.type             | `String`  | Mime type                                                                                                                                                                                                                                                                                                            |
+| important             | `Boolean` | Marked as "favorite"                                                                                                                                                                                                                                                                                                 |
+| highlights            | `Array`   |                                                                                                                                                                                                                                                                                                                      |
+| highlights\[].\_id    | `String`  | Unique id of highlight                                                                                                                                                                                                                                                                                               |
+| highlights\[].text    | `String`  | Text of highlight (required)                                                                                                                                                                                                                                                                                         |
+| highlights\[].color   | `String`  | <p>Color of highlight. <br>Default <code>yellow</code><br><br>Can be <code>blue</code>, <code>brown</code>, <code>cyan</code>, <code>gray</code>, <code>green</code>, <code>indigo</code>, <code>orange</code>, <code>pink</code>, <code>purple</code>, <code>red</code>, <code>teal</code>, <code>yellow</code></p> |
+| highlights\[].note    | `String`  | Optional note for highlight                                                                                                                                                                                                                                                                                          |
+| highlights\[].created | `String`  | Creation date of highlight                                                                                                                                                                                                                                                                                           |
+| reminder              | `Object`  | Specify this object to attach reminder                                                                                                                                                                                                                                                                               |
+| reminder.data         | `Date`    | YYYY-MM-DDTHH:mm:ss.sssZ                                                                                                                                                                                                                                                                                             |
+
+{% hint style="warning" %}
+Our API response could contain **other fields**, not described above. It's **unsafe to use** them in your integration! They could be removed or renamed at any time.
+{% endhint %}
+
+
+
+================================================
+FILE: v1/raindrops/multiple.md
+================================================
+---
+description: >-
+  In this page you will find how to retrieve, create, update or delete multiple
+  raindrops at once.
+---
+
+# Multiple raindrops
+
+### Common parameters
+
+To filter, sort or limit raindrops use one of the parameters described below. Check each method for exact list of supported parameters.
+
+| Parameter    | Type             | Description                                                                                                                                                                                                                                                                                                                                                                                                                                                      |
+| ------------ | ---------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| collectionId | `Integer`        | <p>Path parameter that specify from which collection to get raindrops. Or specify one of system:</p><p><code>0</code> to get all (except Trash)</p><p><code>-1</code> to get from "Unsorted"</p><p><code>-99</code> to get from "Trash"</p><p></p><p>Warning: update or remove methods not support <code>0</code> yet. Will be fixed in future.</p>                                                                                                              |
+| search       | `String`         | <p>As text, check all <a href="https://help.raindrop.io/using-search#operators">examples here</a></p><p>You can first test your searches in Raindrop app and if it works correctly, just copy content of search field and use it here</p>                                                                                                                                                                                                                        |
+| sort         | `String`         | <p>Query parameter for sorting:</p><p><code>-created</code> by date descending (default)</p><p><code>created</code> by date ascending</p><p><code>score</code> by relevancy (only applicable when search is specified)</p><p><code>-sort</code> by order</p><p><code>title</code> by title (ascending)</p><p><code>-title</code> by title (descending)</p><p><code>domain</code> by hostname (ascending)</p><p><code>-domain</code> by hostname (descending)</p> |
+| page         | `Integer`        | Query parameter. 0, 1, 2, 3 ...                                                                                                                                                                                                                                                                                                                                                                                                                                  |
+| perpage      | `Integer`        | Query parameter. How many raindrops per page. 50 max                                                                                                                                                                                                                                                                                                                                                                                                             |
+| ids          | `Array<Integer>` | You can specify exact raindrop ID's for batch update/remove methods                                                                                                                                                                                                                                                                                                                                                                                              |
+| nested       | `Boolean`        | Also include bookmarks from nested collections (true/false)                                                                                                                                                                                                                                                                                                                                                                                                      |
+
+## Get raindrops
+
+<mark style="color:blue;">`GET`</mark> `https://api.raindrop.io/rest/v1/raindrops/{collectionId}`
+
+#### Path Parameters
+
+| Name                                           | Type   | Description                                   |
+| ---------------------------------------------- | ------ | --------------------------------------------- |
+| collectionId<mark style="color:red;">\*</mark> | number | Collection ID. Specify 0 to get all raindrops |
+
+#### Query Parameters
+
+| Name    | Type    | Description |
+| ------- | ------- | ----------- |
+| sort    | string  |             |
+| perpage | number  |             |
+| page    | number  |             |
+| search  | string  |             |
+| nested  | boolean |             |
+
+{% tabs %}
+{% tab title="200 " %}
+```
+```
+{% endtab %}
+{% endtabs %}
+
+## Create many raindrops
+
+<mark style="color:green;">`POST`</mark> `https://api.raindrop.io/rest/v1/raindrops`
+
+#### Request Body
+
+| Name                                    | Type  | Description                                                                                                              |
+| --------------------------------------- | ----- | ------------------------------------------------------------------------------------------------------------------------ |
+| items<mark style="color:red;">\*</mark> | array | <p>Array of objects. Format of single object described in "Create single raindrop".<br>Maximum 100 objects in array!</p> |
+
+{% tabs %}
+{% tab title="200 " %}
+```javascript
+{
+    "result": true,
+    "items": [
+        {
+            ...
+        }
+    ]
+}
+```
+{% endtab %}
+{% endtabs %}
+
+## Update many raindrops
+
+<mark style="color:orange;">`PUT`</mark> `https://api.raindrop.io/rest/v1/raindrops/{collectionId}`
+
+Specify optional `search` and/or `ids` parameters to limit raindrops that will be updated.\
+Possible fields that could be updated are described in "Body Parameters"
+
+#### Path Parameters
+
+| Name                                           | Type    | Description |
+| ---------------------------------------------- | ------- | ----------- |
+| collectionId<mark style="color:red;">\*</mark> | number  |             |
+| nested                                         | boolean |             |
+
+#### Request Body
+
+| Name       | Type    | Description                                                                                                                                     |
+| ---------- | ------- | ----------------------------------------------------------------------------------------------------------------------------------------------- |
+| ids        | array   |                                                                                                                                                 |
+| important  | boolean | <p>TRUE - mark as "favorite"<br>FALSE - unmark as "favorite"</p>                                                                                |
+| tags       | array   | <p>Will append specified tags to raindrops.<br>Or will remove all tags from raindrops if <code>[]</code> (empty array) is specified</p>         |
+| media      | array   | <p>Will append specified media items to raindrops.<br>Or will remove all media from raindrops if <code>[]</code> (empty array) is specified</p> |
+| cover      | string  | <p>Set URL for cover.<br><em>Tip:</em> specify <code>&#x3C;screenshot></code> to set screenshots for all raindrops</p>                          |
+| collection | object  | Specify `{"$id": collectionId}` to move raindrops to other collection                                                                           |
+
+{% tabs %}
+{% tab title="200 " %}
+```
+```
+{% endtab %}
+{% endtabs %}
+
+## Remove many raindrops
+
+<mark style="color:red;">`DELETE`</mark> `https://api.raindrop.io/rest/v1/raindrops/{collectionId}`
+
+Specify optional `search` and/or `ids` parameters to limit raindrops that will be moved to "**Trash**"\
+When `:collectionId` is **-99**, raindrops will be permanently removed!
+
+#### Path Parameters
+
+| Name                                           | Type    | Description |
+| ---------------------------------------------- | ------- | ----------- |
+| collectionId<mark style="color:red;">\*</mark> | number  |             |
+| nested                                         | boolean |             |
+
+#### Query Parameters
+
+| Name   | Type   | Description |
+| ------ | ------ | ----------- |
+| search | string |             |
+
+#### Request Body
+
+| Name | Type  | Description |
+| ---- | ----- | ----------- |
+| ids  | array |             |
+
+{% tabs %}
+{% tab title="200 " %}
+```javascript
+{
+    "result": true,
+    "modified": 330
+}
+```
+{% endtab %}
+{% endtabs %}
+
+
+
+================================================
+FILE: v1/raindrops/single.md
+================================================
+---
+description: >-
+  In this page you will find how to retrieve, create, update or delete single
+  raindrop.
+---
+
+# Single raindrop
+
+## Get raindrop
+
+<mark style="color:blue;">`GET`</mark> `https://api.raindrop.io/rest/v1/raindrop/{id}`
+
+#### Path Parameters
+
+| Name                                 | Type   | Description          |
+| ------------------------------------ | ------ | -------------------- |
+| id<mark style="color:red;">\*</mark> | number | Existing raindrop ID |
+
+{% tabs %}
+{% tab title="200 " %}
+```
+```
+{% endtab %}
+{% endtabs %}
+
+## Create raindrop
+
+<mark style="color:green;">`POST`</mark> `https://api.raindrop.io/rest/v1/raindrop`
+
+Description and possible values of fields described in "Fields"
+
+#### Request Body
+
+| Name                                   | Type    | Description                                                                                                                                |
+| -------------------------------------- | ------- | ------------------------------------------------------------------------------------------------------------------------------------------ |
+| pleaseParse                            | object  | Specify empty object to automatically parse meta data (cover, description, html) in the background                                         |
+| created                                | string  |                                                                                                                                            |
+| lastUpdate                             | string  |                                                                                                                                            |
+| order                                  | number  | <p>Specify sort order (ascending).<br>For example if you want to move raindrop to the first place set this field to <strong>0</strong></p> |
+| important                              | boolean |                                                                                                                                            |
+| tags                                   | array   |                                                                                                                                            |
+| media                                  | array   |                                                                                                                                            |
+| cover                                  | string  |                                                                                                                                            |
+| collection                             | object  |                                                                                                                                            |
+| type                                   | string  |                                                                                                                                            |
+| excerpt                                | string  |                                                                                                                                            |
+| title                                  | string  |                                                                                                                                            |
+| link<mark style="color:red;">\*</mark> | string  |                                                                                                                                            |
+| highlights                             | array   |                                                                                                                                            |
+| reminder                               | object  |                                                                                                                                            |
+
+
+
+{% tabs %}
+{% tab title="200 " %}
+```javascript
+{
+    "result": true,
+    "item": {
+        ...
+    }
+}
+```
+{% endtab %}
+{% endtabs %}
+
+## Update raindrop
+
+<mark style="color:orange;">`PUT`</mark> `https://api.raindrop.io/rest/v1/raindrop/{id}`
+
+Description and possible values of fields described in "Fields"
+
+#### Path Parameters
+
+| Name                                 | Type   | Description          |
+| ------------------------------------ | ------ | -------------------- |
+| id<mark style="color:red;">\*</mark> | number | Existing raindrop ID |
+
+#### Request Body
+
+| Name        | Type    | Description                                                                                                                                |
+| ----------- | ------- | ------------------------------------------------------------------------------------------------------------------------------------------ |
+| created     | string  |                                                                                                                                            |
+| lastUpdate  | string  |                                                                                                                                            |
+| pleaseParse | object  | Specify empty object to re-parse link meta data (cover, type, html) in the background                                                      |
+| order       | number  | <p>Specify sort order (ascending).<br>For example if you want to move raindrop to the first place set this field to <strong>0</strong></p> |
+| important   | boolean |                                                                                                                                            |
+| tags        | array   |                                                                                                                                            |
+| media       | array   |                                                                                                                                            |
+| cover       | string  |                                                                                                                                            |
+| collection  | object  |                                                                                                                                            |
+| type        | string  |                                                                                                                                            |
+| excerpt     | string  |                                                                                                                                            |
+| title       | string  |                                                                                                                                            |
+| link        | string  |                                                                                                                                            |
+| highlights  | array   |                                                                                                                                            |
+| reminder    | object  |                                                                                                                                            |
+
+{% tabs %}
+{% tab title="200 " %}
+```javascript
+{
+    "result": true,
+    "item": {
+        ...
+    }
+}
+```
+{% endtab %}
+{% endtabs %}
+
+## Remove raindrop
+
+<mark style="color:red;">`DELETE`</mark> `https://api.raindrop.io/rest/v1/raindrop/{id}`
+
+When you remove raindrop it will be moved to user `Trash` collection. But if you try to remove raindrop from `Trash`, it will be removed permanently.
+
+#### Path Parameters
+
+| Name                                 | Type   | Description          |
+| ------------------------------------ | ------ | -------------------- |
+| id<mark style="color:red;">\*</mark> | number | Existing raindrop ID |
+
+{% tabs %}
+{% tab title="200 " %}
+```javascript
+{
+    "result": true
+}
+```
+{% endtab %}
+{% endtabs %}
+
+## Upload file
+
+<mark style="color:orange;">`PUT`</mark> `https://api.raindrop.io/rest/v1/raindrop/file`
+
+Make sure to send PUT request with [multipart/form-data](https://developer.mozilla.org/en-US/docs/Web/HTTP/Methods/POST#example) body
+
+#### Headers
+
+| Name                                           | Type   | Description         |
+| ---------------------------------------------- | ------ | ------------------- |
+| Content-Type<mark style="color:red;">\*</mark> | string | multipart/form-data |
+
+#### Request Body
+
+| Name                                   | Type   | Description   |
+| -------------------------------------- | ------ | ------------- |
+| file<mark style="color:red;">\*</mark> | object | File          |
+| collectionId                           | String | Collection Id |
+
+{% tabs %}
+{% tab title="200 " %}
+```javascript
+{
+    "result": true,
+    "item": {
+        "title": "File name",
+        "type": "image",
+        "link": "https://up.raindrop.io/raindrop/111/file.jpeg",
+        "domain": "raindrop.io",
+        "file": {
+            "name": "File name.jpeg",
+            "size": 10000
+        }
+        ...
+    }
+}
+```
+{% endtab %}
+
+{% tab title="400 " %}
+```javascript
+//file is not specified
+{
+  "result": false,
+  "error": -1,
+  "errorMessage": "no file"
+}
+
+//unsupported file format
+{
+  "result": false,
+  "error": "file_invalid",
+  "errorMessage": "File is invalid"
+}
+
+//file size is big
+{
+  "result": false,
+  "error": "file_size_limit",
+  "errorMessage": "File size limit"
+}
+```
+{% endtab %}
+{% endtabs %}
+
+## Upload cover
+
+<mark style="color:orange;">`PUT`</mark> `https://api.raindrop.io/rest/v1/raindrop/{id}/cover`
+
+PNG, GIF or JPEG
+
+#### Path Parameters
+
+| Name                                 | Type   | Description          |
+| ------------------------------------ | ------ | -------------------- |
+| id<mark style="color:red;">\*</mark> | number | Existing raindrop ID |
+
+#### Headers
+
+| Name                                           | Type   | Description         |
+| ---------------------------------------------- | ------ | ------------------- |
+| Content-Type<mark style="color:red;">\*</mark> | string | multipart/form-data |
+
+#### Request Body
+
+| Name                                    | Type   | Description |
+| --------------------------------------- | ------ | ----------- |
+| cover<mark style="color:red;">\*</mark> | object | File        |
+
+{% tabs %}
+{% tab title="200 " %}
+```javascript
+{
+    "result": true,
+    "item": {
+        "cover": "https://up.raindrop.io/raindrop/...",
+        "media": [
+            {
+                "link": "https://up.raindrop.io/raindrop/..."
+            }
+        ]
+        ...
+    }
+}
+```
+{% endtab %}
+
+{% tab title="400 " %}
+```javascript
+//file is not specified
+{
+  "result": false,
+  "error": -1,
+  "errorMessage": "no file"
+}
+
+//unsupported file format
+{
+  "result": false,
+  "error": "file_invalid",
+  "errorMessage": "File is invalid"
+}
+
+//file size is big
+{
+  "result": false,
+  "error": "file_size_limit",
+  "errorMessage": "File size limit"
+}
+```
+{% endtab %}
+{% endtabs %}
+
+## Get permanent copy
+
+<mark style="color:blue;">`GET`</mark> `https://api.raindrop.io/rest/v1/raindrop/{id}/cache`
+
+Links permanently saved with all content (only in PRO plan). Using this method you can navigate to this copy.
+
+#### Path Parameters
+
+| Name                                 | Type   | Description          |
+| ------------------------------------ | ------ | -------------------- |
+| id<mark style="color:red;">\*</mark> | number | Existing raindrop ID |
+
+{% tabs %}
+{% tab title="307 " %}
+```http
+Location: https://s3.aws...
+```
+{% endtab %}
+{% endtabs %}
+
+## Suggest collection and tags for new bookmark
+
+<mark style="color:green;">`POST`</mark> `https://api.raindrop.io/rest/v1/raindrop/suggest`
+
+#### Request Body
+
+| Name                                   | Type   | Description |
+| -------------------------------------- | ------ | ----------- |
+| link<mark style="color:red;">\*</mark> | string |             |
+
+{% tabs %}
+{% tab title="200 " %}
+```json
+{
+    "result": true,
+    "item": {
+        "collections": [
+            {
+                "$id": 568368
+            },
+            {
+                "$id": 8519567
+            },
+            {
+                "$id": 1385626
+            },
+            {
+                "$id": 8379661
+            },
+            {
+                "$id": 20865985
+            }
+        ],
+        "tags": [
+            "fonts",
+            "free",
+            "engineering",
+            "icons",
+            "invalid_parser"
+        ]
+    }
+}
+```
+{% endtab %}
+{% endtabs %}
+
+## Suggest collection and tags for existing bookmark
+
+<mark style="color:blue;">`GET`</mark> `https://api.raindrop.io/rest/v1/raindrop/{id}/suggest`
+
+#### Path Parameters
+
+| Name                               | Type   | Description |
+| ---------------------------------- | ------ | ----------- |
+| <mark style="color:red;">\*</mark> | String | Bookmark id |
+
+{% tabs %}
+{% tab title="200 " %}
+```json
+{
+    "result": true,
+    "item": {
+        "collections": [
+            {
+                "$id": 568368
+            },
+            {
+                "$id": 8519567
+            },
+            {
+                "$id": 1385626
+            },
+            {
+                "$id": 8379661
+            },
+            {
+                "$id": 20865985
+            }
+        ],
+        "tags": [
+            "fonts",
+            "free",
+            "engineering",
+            "icons",
+            "invalid_parser"
+        ]
+    }
+}
+```
+{% endtab %}
+{% endtabs %}
+
+
+
+================================================
+FILE: v1/user/README.md
+================================================
+# User
+
+### Main fields
+
+| Field | Publicly visible | Type | Description |
+| :--- | :--- | :--- | :--- |
+| \_id | **Yes** | `Integer` | Unique user ID |
+| config | No | `Object` | More details in "Config fields" |
+| email | No | `String` | Only visible for you |
+| email\_MD5 | **Yes** | `String` | MD5 hash of email. Useful for using with Gravatar for example |
+| files.used | No | `Integer` | How much space used for files this month |
+| files.size | No | `Integer` | Total space for file uploads  |
+| files.lastCheckPoint | No | `String` | When space for file uploads is reseted last time |
+| fullName | **Yes** | `String` | Full name, max 1000 chars |
+| groups | No | `Array<Object>` | More details below in "Groups" |
+| password | No | `Boolean` | Does user have a password |
+| pro | **Yes** | `Boolean` | PRO subscription |
+| proExpire | No | `String` | When PRO subscription will expire |
+| registered | No | `String` | Registration date |
+
+### Config fields
+
+<table>
+  <thead>
+    <tr>
+      <th style="text-align:left">Field</th>
+      <th style="text-align:left">Publicly visible</th>
+      <th style="text-align:left">Type</th>
+      <th style="text-align:left">Description</th>
+    </tr>
+  </thead>
+  <tbody>
+    <tr>
+      <td style="text-align:left">config.broken_level</td>
+      <td style="text-align:left">No</td>
+      <td style="text-align:left"><code>String</code>
+      </td>
+      <td style="text-align:left">
+        <p>Broken links finder configuration, possible values:</p>
+        <p><code>basic</code>  <code>default</code>  <code>strict</code> or <code>off</code>
+        </p>
+      </td>
+    </tr>
+    <tr>
+      <td style="text-align:left">config.font_color</td>
+      <td style="text-align:left">No</td>
+      <td style="text-align:left"><code>String</code>
+      </td>
+      <td style="text-align:left">Bookmark preview style: <code>sunset</code>  <code>night</code> or empty</td>
+    </tr>
+    <tr>
+      <td style="text-align:left">config.font_size</td>
+      <td style="text-align:left">No</td>
+      <td style="text-align:left"><code>Integer</code>
+      </td>
+      <td style="text-align:left">Bookmark preview font size: from 0 to 9</td>
+    </tr>
+    <tr>
+      <td style="text-align:left">config.lang</td>
+      <td style="text-align:left">No</td>
+      <td style="text-align:left"><code>String</code>
+      </td>
+      <td style="text-align:left">UI language in 2 char code</td>
+    </tr>
+    <tr>
+      <td style="text-align:left">config.last_collection</td>
+      <td style="text-align:left">No</td>
+      <td style="text-align:left"><code>Integer</code>
+      </td>
+      <td style="text-align:left">Last viewed collection ID</td>
+    </tr>
+    <tr>
+      <td style="text-align:left">config.raindrops_sort</td>
+      <td style="text-align:left">No</td>
+      <td style="text-align:left"><code>String</code>
+      </td>
+      <td style="text-align:left">
+        <p>Default bookmark sort:</p>
+        <p><code>title</code>  <code>-title</code>  <code>-sort</code>  <code>domain</code>  <code>-domain</code>  <code>+lastUpdate</code> or <code>-lastUpdate</code>
+        </p>
+      </td>
+    </tr>
+    <tr>
+      <td style="text-align:left">config.raindrops_view</td>
+      <td style="text-align:left">No</td>
+      <td style="text-align:left"><code>String</code>
+      </td>
+      <td style="text-align:left">
+        <p>Default bookmark view:</p>
+        <p><code>grid</code>  <code>list</code>  <code>simple</code> or <code>masonry</code>
+        </p>
+      </td>
+    </tr>
+  </tbody>
+</table>
+
+### Groups object fields <a id="single-group-detail"></a>
+
+| Field | Type | Description |
+| :--- | :--- | :--- |
+| title | `String` | Name of group |
+| hidden | `Boolean` | Does group is collapsed |
+| sort | `Integer` | Ascending order position |
+| collections | `Array<Integer>` | Collection ID's in order |
+
+### Other fields
+
+| Field | Publicly visible | Type | Description |
+| :--- | :--- | :--- | :--- |
+| facebook.enabled | No | `Boolean` | Does Facebook account is linked |
+| twitter.enabled | No | `Boolean` | Does Twitter account is linked |
+| vkontakte.enabled | No | `Boolean` | Does Vkontakte account is linked |
+| google.enabled | No | `Boolean` | Does Google account is linked |
+| dropbox.enabled | No | `Boolean` | Does Dropbox backup is enabled |
+| gdrive.enabled | No | `Boolean` | Does Google Drive backup is enabled |
+
+{% hint style="warning" %}
+Our API response could contain **other fields**, not described above. It's **unsafe to use** them in your integration! They could be removed or renamed at any time.
+{% endhint %}
+
+
+
+
+================================================
+FILE: v1/user/authenticated.md
+================================================
+# Authenticated user
+
+{% swagger baseUrl="https://api.raindrop.io" path="/rest/v1/user" method="get" summary="Get user" %}
+{% swagger-description %}
+Get currently authenticated user details
+{% endswagger-description %}
+
+{% swagger-response status="200" description="" %}
+```javascript
+{
+    "result": true,
+    "user": {
+      "_id": 32,
+      "config": {
+        "broken_level": "strict",
+        "font_color": "",
+        "font_size": 0,
+        "lang": "ru_RU",
+        "last_collection": 8492393,
+        "raindrops_sort": "-lastUpdate",
+        "raindrops_view": "list"
+      },
+      "dropbox": {
+        "enabled": true
+      },
+      "email": "some@email.com",
+      "email_MD5": "13a0a20681d8781912e5314150694bf7",
+      "files": {
+        "used": 6766094,
+        "size": 10000000000,
+        "lastCheckPoint": "2020-01-26T23:53:19.676Z"
+      },
+      "fullName": "Mussabekov Rustem",
+      "gdrive": {
+        "enabled": true
+      },
+      "groups": [
+        {
+          "title": "My Collections",
+          "hidden": false,
+          "sort": 0,
+          "collections": [
+            8364483,
+            8364403,
+            66
+          ]
+        }
+      ],
+      "password": true,
+      "pro": true,
+      "proExpire": "2028-09-27T22:00:00.000Z",
+      "registered": "2014-09-30T07:51:15.406Z"
+  }
+}
+```
+{% endswagger-response %}
+
+{% swagger-response status="401" description="" %}
+```http
+Unauthorized
+```
+{% endswagger-response %}
+{% endswagger %}
+
+{% swagger baseUrl="https://api.raindrop.io" path="/rest/v1/user/{name}" method="get" summary="Get user by name" %}
+{% swagger-description %}
+Get's publicly available user details
+{% endswagger-description %}
+
+{% swagger-parameter in="path" name="name" type="number" required="true" %}
+Username
+{% endswagger-parameter %}
+
+{% swagger-response status="200" description="" %}
+```javascript
+{
+  "result": true,
+  "user": {
+    "_id": 32,
+    "email_MD5": "13a0a20681d8781912e5314150694bf7",
+    "fullName": "Mussabekov Rustem",
+    "pro": true,
+    "registered": "2014-09-30T07:51:15.406Z"
+  }
+}
+```
+{% endswagger-response %}
+
+{% swagger-response status="404" description="" %}
+```javascript
+{
+  "error": -1,
+  "errorMessage": "not found",
+  "result": false
+}
+```
+{% endswagger-response %}
+{% endswagger %}
+
+{% swagger baseUrl="https://api.raindrop.io" path="/rest/v1/user" method="put" summary="Update user" %}
+{% swagger-description %}
+To change email, config, password, etc... you can do it from single endpoint&#x20;
+{% endswagger-description %}
+
+{% swagger-parameter in="body" name="groups" type="array" %}
+
+{% endswagger-parameter %}
+
+{% swagger-parameter in="body" name="config" type="object" %}
+
+{% endswagger-parameter %}
+
+{% swagger-parameter in="body" name="newpassword" type="string" %}
+
+{% endswagger-parameter %}
+
+{% swagger-parameter in="body" name="oldpassword" type="string" %}
+
+{% endswagger-parameter %}
+
+{% swagger-parameter in="body" name="fullName" type="string" %}
+
+{% endswagger-parameter %}
+
+{% swagger-parameter in="body" name="email" type="string" %}
+
+{% endswagger-parameter %}
+
+{% swagger-response status="200" description="" %}
+```javascript
+{
+    "result": true,
+    "user": {
+        ...
+    }
+}
+```
+{% endswagger-response %}
+
+{% swagger-response status="400" description="" %}
+```javascript
+//email specified but empty
+{
+  "result": false,
+  "error": 1,
+  "errorMessage": "email required"
+}
+
+//fullName specified but empty
+{
+  "result": false,
+  "error": 2,
+  "errorMessage": "User validation failed: fullName: is required"
+}
+
+//newpassword specified, but oldpassword is empty
+{
+  "result": false,
+  "error": 3,
+  "errorMessage": "oldpassword incorrect"
+}
+
+//incorrect config key value
+{
+  "result": false,
+  "error": "config.raindrops_sort",
+  "errorMessage": "User validation failed: config.raindrops_sort: `1` is not a valid enum value for path `raindrops_sort`., config: Validation failed: raindrops_sort: `1` is not a valid enum value for path `raindrops_sort`."
+}
+```
+{% endswagger-response %}
+{% endswagger %}
+
+{% swagger baseUrl="https://api.raindrop.io" path="/rest/v1/user/connect/{provider}" method="get" summary="Connect social network account" %}
+{% swagger-description %}
+Connect social network account as sign in authentication option
+{% endswagger-description %}
+
+{% swagger-parameter in="path" name="provider" type="string" %}
+`facebook` `google` `twitter` `vkontakte` `dropbox` or `gdrive`
+{% endswagger-parameter %}
+
+{% swagger-response status="307" description="" %}
+```http
+Location: https://some.com/...
+```
+{% endswagger-response %}
+{% endswagger %}
+
+{% swagger baseUrl="https://api.raindrop.io" path="/rest/v1/user/connect/{provider}/revoke" method="get" summary="Disconnect social network account" %}
+{% swagger-description %}
+Disconnect social network account from available authentication options
+{% endswagger-description %}
+
+{% swagger-parameter in="path" name="provider" type="string" %}
+`facebook` `google` `twitter` `vkontakte` `dropbox` or `gdrive`
+{% endswagger-parameter %}
+
+{% swagger-response status="200" description="" %}
+```
+```
+{% endswagger-response %}
+{% endswagger %}
