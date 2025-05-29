@@ -1,21 +1,20 @@
 # Hocket #
 
-Hocket - The Haskell [pocket](http://getpocket.com/) client
+Hocket - The Haskell [Raindrop.io](https://raindrop.io/) client
 
 [![Build Status](https://travis-ci.org/markus1189/hocket.png?branch=master)](https://travis-ci.org/markus1189/hocket)
 
 ## About ##
 
-Hocket is a minimalistic [pocket](http://getpocket.com/) client that
+Hocket is a minimalistic [Raindrop.io](https://raindrop.io/) client that
 works on the commandline (using
-[vty-ui](http://jtdaugherty.github.com/vty-ui/)) written in Haskell.
+[brick](https://github.com/jtdaugherty/brick)) written in Haskell.
 
 It's minimalistic in the sense that it matches my personal workflow
-with pocket, currently supported features:
+with Raindrop.io, currently supported features:
 
-- view unread pocket items
-- archive items (mark as read)
-- rename items
+- view unread bookmark items
+- archive items (move to special collection)
 
 ## Installation ##
 
@@ -27,32 +26,18 @@ Hocket requires a `config.dhall` file to authenticate you. Example:
 
 ```
 {
-  consumerKey = "xxxxx-xxxxxxxxxxxxxxxxxxxxxxxx",
-  accessToken = "xxxxxxxx-xxxx-xxxx-xxxx-xxxxxx"
+  _raindropToken = "your-raindrop-test-token-here"
 }
 ```
 
-## How to get a consumer key and access token ##
+## How to get a Raindrop.io Test Token ##
 
-NOTE: this is a little rough currently, because it has to be done only
-once (and currently I am the only user).  Ideally this should be added
-to `hocket` so that the user does not have to do the steps manually,
-if you think so too, prs welcome!
-
-1. Get a consumer key from http://getpocket.com/developer/apps/new
-2.
-  ```
-  curl --data-urlencode consumer_key=YOUR_CONSUMER_KEY --data-urlencode redirect_uri=https://github.com/markus1189/hocket https://getpocket.com/v3/oauth/request`
-  ```
-  to get a request token
-3. Go to
-https://getpocket.com/auth/authorize?request_token=YOUR_REQUEST_TOKEN&redirect_uri=https://github.com/markus1189/hocket
-4. Finally, get the access_token:
-  ```
-  curl --data-urlencode consumer_key='YOUR_CONSUMER_KEY' --data-urlencode code='YOUR_REQUEST_TOKEN' https://getpocket.com/v3/oauth/authorize
-  ```
-
-5. Fill in `consumer_key` and `access_token` into hour `hocket.cfg`
+1. Go to your Raindrop.io settings: https://app.raindrop.io/settings/integrations
+2. Click on "+ Create new app"
+3. Give it a name (e.g., "Hocket")
+4. Click "Create"
+5. You'll see your app listed. Click on it
+6. Copy the "Test token" - this is what you'll use for `_raindropToken` in your `config.dhall`
 
 ## Is it done? ##
 
