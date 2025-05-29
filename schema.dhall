@@ -1,1 +1,1 @@
-{ _raindropToken : Text }
+{ _raindropToken : Text, _archiveCollectionId : Natural }

@@ -106,7 +106,6 @@ import Network.Bookmark.Types
     URL (..),
     RaindropCollectionId (RaindropCollectionId),
     BookmarkRequest (ArchiveBookmark, RetrieveBookmarks),
-    raindropToken,
     biId,
     biLink,
     biTitle,
@@ -387,22 +386,17 @@ hBar = withAttr (attrName "bar") . padRight Max . txt
 
 retrieveItems :: BookmarkCredentials -> Maybe POSIXTime -> IO (Either HttpException [BookmarkItemBatch])
 retrieveItems cred _ = do
-  let rt = view raindropToken cred
   tryHttpException $ unfoldrM (\currentPage -> do
-                                  (_, items) <- raindrop rt (RetrieveBookmarks currentPage (RaindropCollectionId "-1"))
+                                  (_, items) <- raindrop cred (RetrieveBookmarks currentPage (RaindropCollectionId "-1"))
                                   pure $ if length items == 0
                                     then Nothing
                                     else Just (BookmarkItemBatch 0 items (fromIntegral $ length items), currentPage +1)
                               ) 0
-  -- tryHttpException $ do
-  --   (count, items) <- raindrop rt (RetrieveBookmarks 0 (RaindropCollectionId "-1"))
-  --   pure [BookmarkItemBatch currentTime items (fromIntegral $ length items)]
 
 performArchive :: BookmarkCredentials -> [BookmarkItem] -> IO (Either HttpException [(BookmarkItem, Bool)])
 performArchive cred items = do
-  let rt = view raindropToken cred
   tryHttpException $ do
-    results <- traverse (raindrop rt . ArchiveBookmark . view biId) items
+    results <- traverse (raindrop cred . ArchiveBookmark . view biId) items
     pure (zip items results)
 
 tryHttpException :: IO a -> IO (Either HttpException a)

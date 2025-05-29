@@ -33,7 +33,8 @@ module Network.Bookmark.Types
     batchTS,
     batchItems,
     batchTotal,
-    raindropToken
+    raindropToken,
+    archiveCollectionId
   )
 where
 
@@ -62,7 +63,8 @@ makePrisms ''RaindropCollectionId
 newtype URL = URL String deriving (Show, Eq, Generic)
 
 data BookmarkCredentials = BookmarkCredentials
-  { _raindropToken :: RaindropToken
+  { _raindropToken :: RaindropToken,
+    _archiveCollectionId :: Natural
   } deriving (Generic)
 
 makeLenses ''BookmarkCredentials
