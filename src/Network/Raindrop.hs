@@ -47,9 +47,12 @@ raindrop creds (BatchArchiveBookmarks bids) = do
         ]
   resp <- W.putWith (commonOpts rt) "https://api.raindrop.io/rest/v1/raindrops/-1" payload
   pure ((== Just True) $ resp ^? W.responseBody . key "result" . _Bool)
-raindrop creds (RetrieveBookmarks page (RaindropCollectionId cid)) = do
+raindrop creds (RetrieveBookmarks page (RaindropCollectionId cid) mSearchParam) = do
   let rt = view raindropToken creds
-      opts = commonOpts rt & param "page" .~ [T.pack $ show page] & param "perpage" .~ ["50"]
+      baseOpts = commonOpts rt & param "page" .~ [T.pack $ show page] & param "perpage" .~ ["50"]
+      opts = case mSearchParam of
+               Nothing -> baseOpts
+               Just searchParam -> baseOpts & param "search" .~ [searchParam]
   resp <- W.getWith opts ("https://api.raindrop.io/rest/v1/raindrops/" <> T.unpack cid)
   let count = resp ^? W.responseBody . key "count" . _Integral @_ @Natural
   pure (fromMaybe 0 count, resp ^.. W.responseBody . key "items" . values . _JSON)

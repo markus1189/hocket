@@ -56,7 +56,7 @@ data Name = ItemListName | PendingListName deriving (Show,Eq,Ord)
 data HocketState = HocketState { _itemList :: List Name BookmarkItem
                                , _pendingList :: List Name BookmarkItem
                                , _focusRing :: F.FocusRing Name
-                               , _hsLastUpdated :: Maybe POSIXTime
+                               , _hsLastUpdated :: Maybe POSIXTime -- AI: here is the state keeping
                                , _hsAsync :: Maybe (Async ())
                                , _hsStatus :: Maybe Text
                                , _hsContents :: Map BookmarkItemId (Status,BookmarkItem)

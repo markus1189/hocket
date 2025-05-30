@@ -95,7 +95,7 @@ data BookmarkRequest a where
   AddBookmark :: Text -> BookmarkRequest (Maybe BookmarkItemId)
   ArchiveBookmark :: BookmarkItemId -> BookmarkRequest Bool
   BatchArchiveBookmarks :: [BookmarkItemId] -> BookmarkRequest Bool
-  RetrieveBookmarks :: Natural -> RaindropCollectionId -> BookmarkRequest (Natural, [BookmarkItem])
+  RetrieveBookmarks :: Natural -> RaindropCollectionId -> Maybe Text -> BookmarkRequest (Natural, [BookmarkItem])
 
 data BookmarkItemBatch = BookmarkItemBatch
   { _batchTS :: POSIXTime

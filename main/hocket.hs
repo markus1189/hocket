@@ -55,7 +55,7 @@ import Control.Lens.Operators
     (^..),
     (^?),
   )
-import Control.Monad (mfilter, unless, void)
+import Control.Monad (mfilter, unless, void, when)
 import Control.Monad.IO.Class (liftIO)
 import Control.Monad.State (MonadState)
 import Control.Monad.Loops (unfoldrM)
@@ -66,12 +66,13 @@ import Data.Maybe (fromMaybe, isJust, mapMaybe)
 import Data.Text (Text)
 import qualified Data.Text as T
 import qualified Data.Text.Encoding as T
-import Data.Time.Clock.POSIX (POSIXTime, posixSecondsToUTCTime)
+import Data.Time.Clock.POSIX (POSIXTime, posixSecondsToUTCTime, utcTimeToPOSIXSeconds)
 import Data.Time.LocalTime
   ( TimeZone,
     getCurrentTimeZone,
     utcToLocalTime,
   )
+import Data.Time.Format (formatTime, defaultTimeLocale)
 import Dhall (auto, input)
 import Events
   ( AsyncCommand (..),
@@ -108,8 +109,10 @@ import Network.Bookmark.Types
     BookmarkRequest (BatchArchiveBookmarks, RetrieveBookmarks),
     biId,
     biLink,
+     biExcerpt,
     biTitle,
     biCreated,
+    biLastUpdate,
   )
 import Network.Bookmark.Ui.State
   ( HocketState,
@@ -192,6 +195,9 @@ unlessAsyncRunning act = do
   asyncRunning <- use id <&> isJust . view hsAsync
   unless asyncRunning act
 
+formatPOSIXTime :: POSIXTime -> Text
+formatPOSIXTime t = T.pack $ formatTime defaultTimeLocale "%Y-%m-%d" (posixSecondsToUTCTime t)
+
 asyncCommandEventHandler ::
   BChan HocketEvent ->
   AsyncCommand ->
@@ -201,9 +207,15 @@ asyncCommandEventHandler es FetchItems = do
   unlessAsyncRunning $ do
     fetchAsync <-
       liftIO . async $ do
-        let suffix = maybe "" (\since -> " since: " <> show (round @_ @Int since)) $ s ^. hsLastUpdated
-        es `trigger` setStatusEvt (Just ("fetching" <> T.pack suffix))
-        eitherErrorBis <- retrieveItems (s ^. hsCredentials) (s ^. hsLastUpdated)
+        let searchParam = case s ^. hsLastUpdated of
+              Nothing -> Nothing
+              Just lastTime ->
+                let dayBefore = lastTime - 86400
+                    dateStr = formatPOSIXTime dayBefore
+                in Just ("lastUpdate:>" <> dateStr)
+            suffix = maybe "" (\since -> " since: " <> formatPOSIXTime (since - 86400)) $ s ^. hsLastUpdated
+        es `trigger` setStatusEvt (Just ("fetching" <> suffix))
+        eitherErrorBis <- retrieveItems (s ^. hsCredentials) searchParam
         case eitherErrorBis of
           Left e ->
             es `trigger` asyncActionFailedEvt (errorMessageFromException e)
@@ -215,7 +227,10 @@ asyncCommandEventHandler es FetchItems = do
 asyncCommandEventHandler _ (FetchedItems ts bis) = do
   id %= insertItems bis
   hsAsync .= Nothing
-  hsLastUpdated ?= ts
+  currentLastUpdated <- use hsLastUpdated
+  case currentLastUpdated of
+    Nothing -> hsLastUpdated .= Just ts
+    Just current -> when (ts >= current) $ hsLastUpdated .= Just ts
 asyncCommandEventHandler es (AsyncActionFailed err) = do
   hsAsync .= Nothing
   liftIO (es `trigger` setStatusEvt (Just ("failed" <> maybe "<no err>" (": " <>) err)))
@@ -326,6 +341,12 @@ drawGui tz s = [w]
               listDrawElement
               (isFocused s PendingListName)
               (s ^. pendingList),
+          hBar
+            ( maybe
+                " "
+                (\item -> if T.null (item ^. biExcerpt) then " " else T.replace "\n" " " (item ^. biExcerpt))
+                (focusedItem s)
+            ),
           hBar " "
             <+> withAttr
               (attrName "bar")
@@ -384,14 +405,19 @@ whiteFg = Vty.defAttr `Vty.withForeColor` Vty.white
 hBar :: Text -> Widget Name
 hBar = withAttr (attrName "bar") . padRight Max . txt
 
-retrieveItems :: BookmarkCredentials -> Maybe POSIXTime -> IO (Either HttpException [BookmarkItemBatch])
-retrieveItems cred _ = do
+retrieveItems :: BookmarkCredentials -> Maybe Text -> IO (Either HttpException [BookmarkItemBatch])
+retrieveItems cred searchParam = do
   tryHttpException $ unfoldrM (\currentPage -> do
-                                  (_, items) <- raindrop cred (RetrieveBookmarks currentPage (RaindropCollectionId "-1"))
-                                  pure $ if length items == 0
-                                    then Nothing
-                                    else Just (BookmarkItemBatch 0 items (fromIntegral $ length items), currentPage +1)
-                              ) 0
+    (_, items) <- raindrop cred (RetrieveBookmarks currentPage (RaindropCollectionId "-1") searchParam)
+
+    let mostRecentUpdate = if null items
+                          then 0
+                          else maximum (map (utcTimeToPOSIXSeconds . view biLastUpdate) items)
+
+    pure $ if length items == 0
+      then Nothing
+      else Just (BookmarkItemBatch mostRecentUpdate items (fromIntegral $ length items), currentPage + 1)
+    ) 0
 
 performArchive :: BookmarkCredentials -> [BookmarkItem] -> IO (Either HttpException [(BookmarkItem, Bool)])
 performArchive cred items = do
