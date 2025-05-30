@@ -110,6 +110,7 @@ import Network.Bookmark.Types
     biId,
     biLink,
      biExcerpt,
+     biNote,
     biTitle,
     biCreated,
     biLastUpdate,
@@ -321,6 +322,12 @@ hocketAttrMap =
       )
     ]
 
+getDisplayContent :: BookmarkItem -> Text
+getDisplayContent item
+  | not (T.null (item ^. biNote)) = T.replace "\n" " " (item ^. biNote)
+  | not (T.null (item ^. biExcerpt)) = T.replace "\n" " " (item ^. biExcerpt)
+  | otherwise = " "
+
 drawGui :: TimeZone -> HocketState -> [Widget Name]
 drawGui tz s = [w]
   where
@@ -344,7 +351,7 @@ drawGui tz s = [w]
           hBar
             ( maybe
                 " "
-                (\item -> if T.null (item ^. biExcerpt) then " " else T.replace "\n" " " (item ^. biExcerpt))
+                getDisplayContent
                 (focusedItem s)
             ),
           hBar " "
