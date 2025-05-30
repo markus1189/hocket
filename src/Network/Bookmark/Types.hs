@@ -94,6 +94,7 @@ makeLenses ''BookmarkItem
 data BookmarkRequest a where
   AddBookmark :: Text -> BookmarkRequest (Maybe BookmarkItemId)
   ArchiveBookmark :: BookmarkItemId -> BookmarkRequest Bool
+  BatchArchiveBookmarks :: [BookmarkItemId] -> BookmarkRequest Bool
   RetrieveBookmarks :: Natural -> RaindropCollectionId -> BookmarkRequest (Natural, [BookmarkItem])
 
 data BookmarkItemBatch = BookmarkItemBatch

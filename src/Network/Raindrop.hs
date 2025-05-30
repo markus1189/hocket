@@ -38,6 +38,15 @@ raindrop creds (ArchiveBookmark bid) = do
         [ "collection" A..= A.object ["$id" A..= archiveId]
         ]
   pure ((== Just True) $ resp ^? W.responseBody . key "result" . _Bool)
+raindrop creds (BatchArchiveBookmarks bids) = do
+  let rt = view raindropToken creds
+      archiveId = view archiveCollectionId creds
+      payload = A.object 
+        [ "ids" A..= map (^. _BookmarkItemId) bids
+        , "collection" A..= A.object ["$id" A..= archiveId]
+        ]
+  resp <- W.putWith (commonOpts rt) "https://api.raindrop.io/rest/v1/raindrops/-1" payload
+  pure ((== Just True) $ resp ^? W.responseBody . key "result" . _Bool)
 raindrop creds (RetrieveBookmarks page (RaindropCollectionId cid)) = do
   let rt = view raindropToken creds
       opts = commonOpts rt & param "page" .~ [T.pack $ show page] & param "perpage" .~ ["50"]

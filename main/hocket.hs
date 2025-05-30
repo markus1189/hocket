@@ -105,7 +105,7 @@ import Network.Bookmark.Types
     BookmarkItemBatch (..),
     URL (..),
     RaindropCollectionId (RaindropCollectionId),
-    BookmarkRequest (ArchiveBookmark, RetrieveBookmarks),
+    BookmarkRequest (BatchArchiveBookmarks, RetrieveBookmarks),
     biId,
     biLink,
     biTitle,
@@ -396,8 +396,9 @@ retrieveItems cred _ = do
 performArchive :: BookmarkCredentials -> [BookmarkItem] -> IO (Either HttpException [(BookmarkItem, Bool)])
 performArchive cred items = do
   tryHttpException $ do
-    results <- traverse (raindrop cred . ArchiveBookmark . view biId) items
-    pure (zip items results)
+    let itemIds = map (view biId) items
+    success <- raindrop cred (BatchArchiveBookmarks itemIds)
+    pure $ map (, success) items
 
 tryHttpException :: IO a -> IO (Either HttpException a)
 tryHttpException = try @HttpException
