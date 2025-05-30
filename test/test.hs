@@ -26,7 +26,7 @@ import           Data.Ratio ((%))
 main = defaultMain tests
 
 tests :: TestTree
-tests = testGroup "Tests" [hocketStateTests, raindropParsingTests, dateTimeParsingTests]
+tests = testGroup "Tests" [hocketStateTests, raindropParsingTests, dateTimeParsingTests, jsonRoundtripTests]
 
 bookmarkItem1 :: BookmarkItem
 bookmarkItem1 = BookmarkItem (BookmarkItemId "1")
@@ -117,3 +117,47 @@ testParseUTCTimeString = testCase "parsing ISO8601 UTCTime string '2025-05-25T15
       assertEqual "Time component (DiffTime as Rational)" expectedDiffTimeAsRational (toRational diffTime)
 
       -- UTCTime is implicitly UTC, so no TimeZone checks are needed.
+
+-- JSON Roundtrip Tests
+jsonRoundtripTests :: TestTree
+jsonRoundtripTests = testGroup "JSON Roundtrip"
+  [ testBookmarkItemRoundtrip
+  , testBookmarkItemEdgeCases
+  ]
+
+testBookmarkItemRoundtrip :: TestTree
+testBookmarkItemRoundtrip = testCase "BookmarkItem JSON encode/decode roundtrip" $ do
+  let original = bookmarkItem1
+  let encoded = A.encode original
+  let decoded = A.eitherDecode encoded :: Either String BookmarkItem
+  
+  case decoded of
+    Left err -> assertFailure $ "JSON roundtrip failed: " ++ err
+    Right item -> assertEqual "Roundtrip should preserve original item" original item
+
+
+testBookmarkItemEdgeCases :: TestTree
+testBookmarkItemEdgeCases = testCase "BookmarkItem edge cases" $ do
+  let itemWithEmptyFields = BookmarkItem 
+        (BookmarkItemId "999")
+        ""  -- empty link
+        ""  -- empty excerpt
+        ""  -- empty note
+        "link"
+        []  -- empty tags
+        True
+        (read "2016-05-22 12:33:11 UTC")
+        (read "2016-05-22 12:54:59 UTC")
+        ""  -- empty domain
+        ""  -- empty title
+        0
+        []  -- empty highlights
+        0
+  
+  let encoded = A.encode itemWithEmptyFields
+  let decoded = A.eitherDecode encoded :: Either String BookmarkItem
+  
+  case decoded of
+    Left err -> assertFailure $ "Edge case roundtrip failed: " ++ err
+    Right item -> assertEqual "Empty fields should roundtrip correctly" itemWithEmptyFields item
+
