@@ -11,7 +11,6 @@ module Network.Raindrop.Types
     _RaindropCollectionId,
     RaindropItem (..),
     RaindropRequest (..),
-    toPocketItem,
   )
 where
 
@@ -23,8 +22,6 @@ import Data.Aeson (FromJSON(parseJSON), ToJSON(toJSON), Value(Object), object, (
 import Control.Monad (mzero)
 import Data.Time.Format.ISO8601 (iso8601ParseM, iso8601Show)
 import Data.Time (UTCTime)
-import Data.Time.Clock.POSIX (utcTimeToPOSIXSeconds)
-import Network.Pocket.Types (PocketItem(..), PocketItemId(..), URL(..))
 
 newtype RaindropToken = RaindropToken Text deriving (Show, Eq)
 makePrisms ''RaindropToken
@@ -101,15 +98,3 @@ instance ToJSON RaindropItem where
     , "highlights" .= _riHighlights item
     , "collectionId" .= _riCollectionId item
     ]
-
-toPocketItem :: RaindropItem -> PocketItem
-toPocketItem ri = PocketItem
-  { _givenTitle = _riTitle ri
-  , _givenUrl = URL (Text.unpack (_riLink ri))
-  , _itemId = PocketItemId (Text.pack (show (_riId ri ^. _RaindropItemId)))
-  , _resolvedTitle = _riTitle ri -- Using Raindrop title as resolved title
-  , _resolvedUrl = URL (Text.unpack (_riLink ri)) -- Using Raindrop link as resolved URL
-  , _timeAdded = utcTimeToPOSIXSeconds (_riCreated ri)
-  , _timeUpdated = utcTimeToPOSIXSeconds (_riLastUpdate ri)
-  , _redditCommentCount = Nothing
-  }
