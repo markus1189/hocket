@@ -324,8 +324,8 @@ hocketAttrMap =
 
 getDisplayContent :: BookmarkItem -> Text
 getDisplayContent item
-  | not (T.null (item ^. biNote)) = T.replace "\n" " " (item ^. biNote)
-  | not (T.null (item ^. biExcerpt)) = T.replace "\n" " " (item ^. biExcerpt)
+  | not (T.null (item ^. biNote)) = "NOTE " <> T.replace "\n" " " (item ^. biNote)
+  | not (T.null (item ^. biExcerpt)) = "EXCERPT " <> T.replace "\n" " " (item ^. biExcerpt)
   | otherwise = " "
 
 drawGui :: TimeZone -> HocketState -> [Widget Name]
