@@ -23,7 +23,7 @@ data HocketEvent = HocketAsync !AsyncCommand
                  deriving (Show,Eq)
 
 data AsyncCommand = FetchItems
-                  | FetchedItems !POSIXTime ![BookmarkItem]
+                  | FetchedItems !POSIXTime ![BookmarkItem] !Bool
                   | ArchiveItems
                   | ArchivedItems ![BookmarkItemId]
                   | AsyncActionFailed !(Maybe Text)
@@ -38,8 +38,8 @@ data UiCommand = ShiftItem !BookmarkItemId
 fetchItemsEvt :: HocketEvent
 fetchItemsEvt = HocketAsync FetchItems
 
-fetchedItemsEvt :: POSIXTime -> [BookmarkItem] -> HocketEvent
-fetchedItemsEvt t itms = HocketAsync (FetchedItems t itms)
+fetchedItemsEvt :: POSIXTime -> [BookmarkItem] -> Bool -> HocketEvent
+fetchedItemsEvt t itms isAllCollections = HocketAsync (FetchedItems t itms isAllCollections)
 
 archiveItemsEvt :: HocketEvent
 archiveItemsEvt = HocketAsync ArchiveItems

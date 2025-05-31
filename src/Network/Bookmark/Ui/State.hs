@@ -52,14 +52,14 @@ data Status = Pending | Unread deriving (Show, Eq, Ord)
 data Name = ItemListName | PendingListName deriving (Show, Eq, Ord)
 
 data HocketState = HocketState
-  { _itemList :: List Name BookmarkItem,
-    _pendingList :: List Name BookmarkItem,
-    _focusRing :: F.FocusRing Name,
-    _hsLastUpdated :: Maybe POSIXTime,
-    _hsAsync :: Maybe (Async ()),
-    _hsStatus :: Maybe Text,
-    _hsContents :: Map BookmarkItemId (Status, BookmarkItem),
-    _hsCredentials :: BookmarkCredentials
+  { _itemList :: !(List Name BookmarkItem),
+    _pendingList :: !(List Name BookmarkItem),
+    _focusRing :: !(F.FocusRing Name),
+    _hsLastUpdated :: !(Maybe POSIXTime),
+    _hsAsync :: !(Maybe (Async ())),
+    _hsStatus :: !(Maybe Text),
+    _hsContents :: !(Map BookmarkItemId (Status, BookmarkItem)),
+    _hsCredentials :: !BookmarkCredentials
   }
 
 makeLenses ''HocketState

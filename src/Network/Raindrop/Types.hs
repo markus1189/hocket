@@ -78,7 +78,7 @@ instance FromJSON RaindropItem where
       <*> o .: "title"
       <*> o .: "sort"
       <*> o .: "highlights"
-      <*> o .: "collectionId"
+      <*> ((o .: "collection") >>= (.: "$id"))
   parseJSON _ = mzero
 
 instance ToJSON RaindropItem where

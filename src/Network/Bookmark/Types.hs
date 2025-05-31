@@ -121,7 +121,7 @@ instance FromJSON BookmarkItem where
       <*> o .: "title"
       <*> o .: "sort"
       <*> o .: "highlights"
-      <*> o .: "collectionId"
+      <*> ((o .: "collection") >>= (.: "$id"))
   parseJSON _ = mzero
 
 instance ToJSON BookmarkItem where

@@ -114,6 +114,7 @@ import Network.Bookmark.Types
     biTitle,
     biCreated,
     biLastUpdate,
+    biCollectionId,
   )
 import Network.Bookmark.Ui.State
   ( HocketState,
@@ -214,24 +215,40 @@ asyncCommandEventHandler es FetchItems = do
                 let dayBefore = lastTime - 86400
                     dateStr = formatPOSIXTime dayBefore
                 in Just ("lastUpdate:>" <> dateStr)
+            isUpdateFetch = isJust (s ^. hsLastUpdated)
+            collectionToFetch = if isUpdateFetch
+                                    then RaindropCollectionId "0" -- All items for updates
+                                    else RaindropCollectionId "-1" -- Unsorted for initial fetch
             suffix = maybe "" (\since -> " since: " <> formatPOSIXTime (since - 86400)) $ s ^. hsLastUpdated
         es `trigger` setStatusEvt (Just ("fetching" <> suffix))
-        eitherErrorBis <- retrieveItems (s ^. hsCredentials) searchParam
+        eitherErrorBis <- retrieveItems (s ^. hsCredentials) searchParam collectionToFetch
         case eitherErrorBis of
           Left e ->
             es `trigger` asyncActionFailedEvt (errorMessageFromException e)
           Right batches -> do
             es `trigger` setStatusEvt Nothing
             for_ batches $ \(BookmarkItemBatch ts bis _) -> do
-              es `trigger` fetchedItemsEvt ts bis
+              es `trigger` fetchedItemsEvt ts bis isUpdateFetch -- Pass the flag
     hsAsync ?= fetchAsync
-asyncCommandEventHandler _ (FetchedItems ts bis) = do
-  id %= insertItems bis
-  hsAsync .= Nothing
+asyncCommandEventHandler _ (FetchedItems ts bis wasAllCollectionsFetch) = do
+  if wasAllCollectionsFetch
+    then do
+      let itemsToPotentiallyAdd = filter (\item -> item ^. biCollectionId == -1) bis
+          itemIdsToRemove = map (view biId) $ filter (\item -> item ^. biCollectionId /= -1) bis
+      unless (null itemIdsToRemove) $
+        id %= removeItems itemIdsToRemove
+      id %= insertItems itemsToPotentiallyAdd
+    else
+      id %= insertItems bis
+
+  hsAsync .= Nothing -- Reset async status
+  -- Update hsLastUpdated, ensuring it only moves forward or sets if Nothing
   currentLastUpdated <- use hsLastUpdated
-  case currentLastUpdated of
-    Nothing -> hsLastUpdated .= Just ts
-    Just current -> when (ts >= current) $ hsLastUpdated .= Just ts
+  let newTimestampToConsider = if null bis then Nothing else Just ts
+  case (currentLastUpdated, newTimestampToConsider) of
+    (Nothing, Just newTs) -> hsLastUpdated .= Just newTs
+    (Just oldTs, Just newTs) -> when (newTs >= oldTs) $ hsLastUpdated .= Just newTs
+    _ -> pure () -- No change if new items are older or no new items
 asyncCommandEventHandler es (AsyncActionFailed err) = do
   hsAsync .= Nothing
   liftIO (es `trigger` setStatusEvt (Just ("failed" <> maybe "<no err>" (": " <>) err)))
@@ -316,6 +333,7 @@ hocketAttrMap =
   attrMap
     Vty.defAttr
     [ (attrName "list" <> attrName "selected" <> attrName "focused", boldBlackOnOrange),
+      (attrName "list" <> attrName "listSelected", Vty.defAttr `Vty.withStyle` Vty.bold),
       (attrName "list" <> attrName "unselectedItem", whiteFg),
       ( attrName "bar",
         Vty.defAttr `Vty.withBackColor` Vty.black `Vty.withForeColor` Vty.white
@@ -386,7 +404,7 @@ isFocused s name = Just name == focused s
 listDrawElement :: Bool -> BookmarkItem -> Widget Name
 listDrawElement sel e =
   ( if sel
-      then withAttr (attrName "list" <> attrName "selectedItem")
+      then withAttr (attrName "list" <> attrName "listSelected")
       else withAttr (attrName "list" <> attrName "unselectedItem")
   )
     (padRight Max (txtDisplay e))
@@ -412,10 +430,10 @@ whiteFg = Vty.defAttr `Vty.withForeColor` Vty.white
 hBar :: Text -> Widget Name
 hBar = withAttr (attrName "bar") . padRight Max . txt
 
-retrieveItems :: BookmarkCredentials -> Maybe Text -> IO (Either HttpException [BookmarkItemBatch])
-retrieveItems cred searchParam = do
+retrieveItems :: BookmarkCredentials -> Maybe Text -> RaindropCollectionId -> IO (Either HttpException [BookmarkItemBatch])
+retrieveItems cred searchParam collectionId = do
   tryHttpException $ unfoldrM (\currentPage -> do
-    (_, items) <- raindrop cred (RetrieveBookmarks currentPage (RaindropCollectionId "-1") searchParam)
+    (_, items) <- raindrop cred (RetrieveBookmarks currentPage collectionId searchParam)
 
     let mostRecentUpdate = if null items
                           then 0
