@@ -142,6 +142,6 @@ instance ToJSON BookmarkItem where
     , "title" .= _biTitle item
     , "sort" .= _biSort item
     , "highlights" .= _biHighlights item
-    , "collectionId" .= _biCollectionId item
+    , "collection" .= object ["$id" .= _biCollectionId item]
     , "important" .= _biImportant item
     ]

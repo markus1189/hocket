@@ -43,6 +43,7 @@ bookmarkItem1 = BookmarkItem (BookmarkItemId "1")
                          0
                          []
                          0
+                         False
 
 bookmarkItem2 :: BookmarkItem
 bookmarkItem2 = bookmarkItem1 {_biLastUpdate = read "2016-05-22 12:54:59 UTC", _biTitle = "newer title" }
@@ -130,7 +131,7 @@ testBookmarkItemRoundtrip = testCase "BookmarkItem JSON encode/decode roundtrip"
   let original = bookmarkItem1
   let encoded = A.encode original
   let decoded = A.eitherDecode encoded :: Either String BookmarkItem
-  
+
   case decoded of
     Left err -> assertFailure $ "JSON roundtrip failed: " ++ err
     Right item -> assertEqual "Roundtrip should preserve original item" original item
@@ -138,7 +139,7 @@ testBookmarkItemRoundtrip = testCase "BookmarkItem JSON encode/decode roundtrip"
 
 testBookmarkItemEdgeCases :: TestTree
 testBookmarkItemEdgeCases = testCase "BookmarkItem edge cases" $ do
-  let itemWithEmptyFields = BookmarkItem 
+  let itemWithEmptyFields = BookmarkItem
         (BookmarkItemId "999")
         ""  -- empty link
         ""  -- empty excerpt
@@ -153,11 +154,11 @@ testBookmarkItemEdgeCases = testCase "BookmarkItem edge cases" $ do
         0
         []  -- empty highlights
         0
-  
+        False
+
   let encoded = A.encode itemWithEmptyFields
   let decoded = A.eitherDecode encoded :: Either String BookmarkItem
-  
+
   case decoded of
     Left err -> assertFailure $ "Edge case roundtrip failed: " ++ err
     Right item -> assertEqual "Empty fields should roundtrip correctly" itemWithEmptyFields item
-
