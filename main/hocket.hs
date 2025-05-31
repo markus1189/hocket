@@ -115,6 +115,7 @@ import Network.Bookmark.Types
     biCreated,
     biLastUpdate,
     biCollectionId,
+    biImportant,
   )
 import Network.Bookmark.Ui.State
   ( HocketState,
@@ -457,6 +458,7 @@ tryHttpException = try @HttpException
 txtDisplay :: BookmarkItem -> Widget Name
 txtDisplay bit =
   txt (T.justifyRight 10 ' ' leftEdge)
+    <+> txt favoriteIndicator
     <+> txt
       ( fromMaybe
           "<empty>"
@@ -466,8 +468,8 @@ txtDisplay bit =
   where
     url = T.unpack (view biLink bit)
     added = view biCreated bit
-    leftEdge =
-      sformat (F.year % "-" <> F.month % "-" <> F.dayOfMonth) added <> ": "
+    favoriteIndicator = if view biImportant bit then "★" else " "
+    leftEdge = sformat (F.year % "-" <> F.month % "-" <> F.dayOfMonth) added <> ":"
     trimmedUrl = T.pack (trimURI url)
 
 horizontalUriLimit :: Int

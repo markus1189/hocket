@@ -30,6 +30,7 @@ module Network.Bookmark.Types
     biSort,
     biHighlights,
     biCollectionId,
+    biImportant,
     batchTS,
     batchItems,
     batchTotal,
@@ -42,7 +43,7 @@ import Data.Text (Text)
 import qualified Data.Text as Text
 import Numeric.Natural (Natural)
 import Control.Lens (makePrisms, makeLenses, (^.))
-import Data.Aeson (FromJSON(parseJSON), ToJSON(toJSON), Value(Object), object, (.:), (.=))
+import Data.Aeson (FromJSON(parseJSON), ToJSON(toJSON), Value(Object), object, (.:), (.=), (.:?), (.!=))
 import Data.Aeson.Types (Parser)
 import Control.Monad (mzero)
 import Data.Time.Format.ISO8601 (iso8601ParseM, iso8601Show)
@@ -85,7 +86,8 @@ data BookmarkItem = BookmarkItem
     _biTitle :: !Text,
     _biSort :: !Int,
     _biHighlights :: ![Text],
-    _biCollectionId :: !Int
+    _biCollectionId :: !Int,
+    _biImportant :: !Bool
   }
   deriving (Show, Eq)
 
@@ -122,6 +124,7 @@ instance FromJSON BookmarkItem where
       <*> o .: "sort"
       <*> o .: "highlights"
       <*> ((o .: "collection") >>= (.: "$id"))
+      <*> (o .:? "important" .!= False)
   parseJSON _ = mzero
 
 instance ToJSON BookmarkItem where
@@ -140,4 +143,5 @@ instance ToJSON BookmarkItem where
     , "sort" .= _biSort item
     , "highlights" .= _biHighlights item
     , "collectionId" .= _biCollectionId item
+    , "important" .= _biImportant item
     ]
