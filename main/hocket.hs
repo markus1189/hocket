@@ -242,8 +242,7 @@ asyncCommandEventHandler _ (FetchedItems ts bis wasAllCollectionsFetch) = do
     else
       id %= insertItems bis
 
-  hsAsync .= Nothing -- Reset async status
-  -- Update hsLastUpdated, ensuring it only moves forward or sets if Nothing
+  hsAsync .= Nothing
   currentLastUpdated <- use hsLastUpdated
   let newTimestampToConsider = if null bis then Nothing else Just ts
   case (currentLastUpdated, newTimestampToConsider) of
