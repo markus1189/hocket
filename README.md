@@ -1,102 +1,244 @@
-# Hocket #
+# Hocket
 
-Hocket - The Haskell [Raindrop.io](https://raindrop.io/) client
+A minimalistic terminal user interface for [Raindrop.io](https://raindrop.io/) written in Haskell.
 
 [![Build Status](https://travis-ci.org/markus1189/hocket.png?branch=master)](https://travis-ci.org/markus1189/hocket)
 
-## About ##
+## Overview
 
-Hocket is a minimalistic [Raindrop.io](https://raindrop.io/) client that works on the command line using [brick](https://github.com/jtdaugherty/brick), written in Haskell.
-
-It's designed to match a focused workflow with Raindrop.io, providing a clean terminal interface for managing your bookmarks.
-
-### Features ###
-
-- **View unread bookmark items** - Browse your unsorted bookmarks in a clean list
-- **Archive items** - Move items to a special archive collection (mark as read)
-- **Keyboard-driven interface** - Navigate efficiently without touching the mouse
-- **Real-time updates** - Fetch latest bookmarks from Raindrop.io
-- **Dual-pane view** - Separate views for unread items and items pending archive
-
-### Screenshots ###
+Hocket provides a keyboard-driven terminal interface for efficiently managing your Raindrop.io bookmarks. It's designed for users who prefer command-line tools and want to quickly process their bookmark collection without leaving the terminal.
 
 ![Hocket Interface](pics/hocket.png)
 
-The interface shows two main sections:
-- **Unread items** (top) - Your new bookmarks from Raindrop.io
-- **Items to archive** (bottom) - Items you've marked for archiving
+## Features
 
-### Keyboard Controls ###
+### Core Functionality
+- **Dual-pane interface** - View unread items (top) and pending archives (bottom)
+- **Real-time synchronization** - Fetch latest bookmarks from Raindrop.io
+- **Batch operations** - Archive multiple items at once
+- **Smart updates** - Only fetch items modified since last sync
+- **Favorite indicators** - Visual markers (★) for favorite bookmarks
+- **Rich item display** - Shows dates, titles, URLs, notes, and excerpts
 
-- `u` - Update/fetch latest items from Raindrop.io
-- `Space` - Browse selected item in your default browser
-- `Enter` - Browse item and mark for archiving
-- `d` - Mark item for archiving (without browsing)
-- `A` - Archive all pending items
-- `Tab` - Switch between unread and pending lists
-- `q` - Quit application
-- `↑/↓` or `j/k` - Navigate items in current list
+### Workflow Support
+- **Browser integration** - Open bookmarks in your default browser
+- **Archive management** - Move items to a designated archive collection
+- **Keyboard navigation** - Efficient Vi-style navigation
+- **Status tracking** - Visual feedback for all operations
 
-## Installation ##
+## Installation
 
-Hocket can be installed using `nix`:
+### Using Nix (Recommended)
 
 ```bash
-# Build from source
+# Build the project
 nix build
 
 # Run directly
 nix run
+
+# Install to your profile
+nix profile install
 ```
 
-## Authentication ##
+### Using Cabal
 
-Hocket requires a `config.dhall` file in the current directory to authenticate with Raindrop.io:
+```bash
+# Clone the repository
+git clone https://github.com/markus1189/hocket.git
+cd hocket
+
+# Build and install
+cabal build
+cabal install
+```
+
+## Configuration
+
+Create a `config.dhall` file in your working directory:
 
 ```dhall
 {
-  _raindropToken = "your-raindrop-test-token-here"
+  _raindropToken = "your-raindrop-test-token-here",
+  _archiveCollectionId = 12345
 }
 ```
 
-### How to get a Raindrop.io Test Token ###
+### Getting Your Raindrop.io Token
 
-1. Go to your Raindrop.io settings: https://app.raindrop.io/settings/integrations
-2. Click on **"+ Create new app"**
-3. Give it a name (e.g., "Hocket")
+1. Visit [Raindrop.io Settings → Integrations](https://app.raindrop.io/settings/integrations)
+2. Click **"+ Create new app"**
+3. Name your app (e.g., "Hocket")
 4. Click **"Create"**
-5. You'll see your app listed. Click on it
-6. Copy the **"Test token"** - this is what you'll use for `_raindropToken` in your `config.dhall`
+5. Click on your new app
+6. Copy the **"Test token"**
 
-**Note:** Keep your token secure and don't commit it to version control!
+### Finding Your Archive Collection ID
 
-## Usage ##
+1. Go to [Raindrop.io](https://app.raindrop.io)
+2. Create or navigate to your desired archive collection
+3. Note the collection ID from the URL (e.g., `app.raindrop.io/my/12345`)
 
-1. Create your `config.dhall` file with your Raindrop.io token
-2. Run `hocket` in the same directory
-3. Press `u` to fetch your latest bookmarks
-4. Use keyboard controls to navigate and manage your bookmarks
+**Security Note:** Keep your token secure and never commit it to version control.
 
-## Technical Details ##
+## Usage
 
-- **Language:** Haskell
-- **UI Framework:** [brick](https://github.com/jtdaugherty/brick) (terminal UI)
-- **API:** Raindrop.io REST API v1
-- **Configuration:** [Dhall](https://dhall-lang.org/) configuration language
+### Starting Hocket
 
-## Development Status ##
+```bash
+# Run from the directory containing config.dhall
+hocket
+```
 
-Hocket is functional but minimalistic, designed to fit a specific workflow. It focuses on the core use case of processing unread bookmarks efficiently.
+### Keyboard Controls
 
-**Current limitations:**
-- Only works with the "Unsorted" collection (ID: -1)
-- No support for tags, favorites, or other Raindrop.io features
-- Archive moves items to a hardcoded collection
+#### Navigation
+- `↑/↓` or `j/k` - Move up/down in current list
+- `Tab` - Switch between unread and pending lists
+- `q` - Quit application
 
-## Contributing ##
+#### Item Actions
+- `Space` - Open selected item in browser
+- `Enter` - Open item in browser AND mark for archiving
+- `d` - Mark item for archiving (without opening)
 
-Contributions are welcome! The codebase is designed to be simple and focused, but improvements and bug fixes are appreciated.
+#### Bulk Operations
+- `u` - Update/fetch latest items from Raindrop.io
+- `A` - Archive all pending items
 
-## License ##
+### Interface Layout
 
-BSD3 - see LICENSE file for details.
+```
+┌─ Hocket: (15|3) ────────────────────────────────────────┐
+│ 2025-01-15: ★ Important Article Title           reddit.com/r/... │
+│ 2025-01-14:   Regular Bookmark                  github.com/...   │
+│ 2025-01-13:   Another Item                      example.com/...  │
+├──────────────────────────────────────────────────────────────────┤
+│ 2025-01-12:   Item pending archive              news.ycombinator...│
+│ 2025-01-11: ★ Favorite pending archive          stackoverflow.com/│
+└─ NOTE: This is a sample note from the selected item ──────────────┘
+│                                                    Last: 14:32:18 │
+│ Status: fetching since: 2025-01-14                                │
+└────────────────────────────────────────────────────────────────────┘
+```
+
+#### Visual Elements
+- **★** - Indicates favorite bookmarks
+- **Date** - When the bookmark was created
+- **Title** - Bookmark title or URL if no title available
+- **Domain** - Truncated URL showing the domain and path
+- **Bottom pane** - Shows notes or excerpts for the selected item
+- **Status bar** - Last update time and current operation status
+
+## Technical Details
+
+### Architecture
+- **Language**: Haskell (GHC 9.6+)
+- **UI Framework**: [Brick](https://github.com/jtdaugherty/brick) (terminal UI library)
+- **HTTP Client**: [Wreq](http://www.serpentine.com/wreq/) for API communication
+- **Configuration**: [Dhall](https://dhall-lang.org/) functional configuration language
+- **Concurrency**: Async operations for non-blocking UI
+
+### API Integration
+- **Raindrop.io REST API v1** - Full integration with bookmark management
+- **Smart pagination** - Efficiently handles large bookmark collections  
+- **Rate limiting** - Respects API limits
+- **Error handling** - Graceful degradation on network issues
+
+### Data Management
+- **Local state** - In-memory bookmark cache with smart updates
+- **Conflict resolution** - Handles concurrent modifications
+- **Performance** - Optimized for collections with thousands of items
+
+## Development
+
+### Building from Source
+
+```bash
+# Install dependencies
+cabal update
+
+# Build the project
+cabal build
+
+# Run tests
+cabal test
+
+# Development build with warnings
+cabal build --ghc-options="-Wall -Werror"
+```
+
+### Project Structure
+
+```
+hocket/
+├── main/                   # Main application
+│   ├── hocket.hs          # Entry point and UI logic
+│   └── Events.hs          # Event system definitions
+├── src/Network/
+│   ├── Raindrop.hs        # API client implementation
+│   └── Bookmark/
+│       ├── Types.hs       # Data types and JSON instances
+│       └── Ui/
+│           ├── State.hs   # Application state management
+│           └── Widgets.hs # UI helper functions
+└── test/                  # Test suite
+```
+
+### Contributing
+
+Contributions are welcome! Please:
+
+1. Follow the existing code style (see `CONVENTIONS.md`)
+2. Add tests for new functionality
+3. Update documentation as needed
+4. Ensure `cabal test` passes
+
+#### Code Style Guidelines
+- Use `lens` for record access (avoid `_` prefixed accessors)
+- Prefer `wreq` for HTTP operations
+- Use `tasty` for testing
+- Follow Brick patterns for UI components
+
+## Limitations
+
+Current limitations that may be addressed in future versions:
+
+- **Single collection focus** - Primarily works with unsorted bookmarks
+- **Browser dependency** - Requires external browser for opening links
+- **Terminal only** - No GUI version available
+- **Limited search** - No built-in search functionality
+
+## Troubleshooting
+
+### Common Issues
+
+**"Authentication failed"**
+- Verify your Raindrop.io token in `config.dhall`
+- Ensure the token has not expired
+- Check your internet connection
+
+**"Collection not found"**
+- Verify the `archiveCollectionId` in your config
+- Ensure the collection exists and is accessible
+
+**"Items not appearing"**
+- Press `u` to fetch latest items
+- Check that items exist in your Raindrop.io unsorted collection
+- Verify your account has bookmarks
+
+### Getting Help
+
+- Check existing [GitHub Issues](https://github.com/markus1189/hocket/issues)
+- Review the `CONVENTIONS.md` file for development guidelines
+- Consult the [Brick documentation](https://github.com/jtdaugherty/brick/blob/master/docs/guide.rst) for UI-related questions
+
+## License
+
+BSD3 - See [LICENSE](LICENSE) file for details.
+
+## Acknowledgments
+
+- [Raindrop.io](https://raindrop.io/) for providing an excellent bookmark service with a great API
+- [Brick](https://github.com/jtdaugherty/brick) for making terminal UI development in Haskell approachable
+- The Haskell community for excellent libraries and tooling
