@@ -58,11 +58,11 @@ hocketStateTests = testGroup "HocketState insertItem/insertItems"
       let s = insertItem bookmarkItem1 testState
       in Map.lookup (_biId bookmarkItem1) (view hsContents s) @?= Just (Unread, bookmarkItem1)
 
-  , testCase "insertItem: updates with newer item, status becomes Unread" $
+  , testCase "insertItem: updates with newer item" $
       let stateWithOldItem = insertItem bookmarkItem1 testState
           stateWithOldItemPending = stateWithOldItem & hsContents . ix (_biId bookmarkItem1) . _1 .~ Pending
           stateAfterUpdate = insertItem bookmarkItem2 stateWithOldItemPending
-      in Map.lookup (_biId bookmarkItem1) (view hsContents stateAfterUpdate) @?= Just (Unread, bookmarkItem2)
+      in Map.lookup (_biId bookmarkItem1) (view hsContents stateAfterUpdate) @?= Just (Pending, bookmarkItem2)
 
   , testCase "insertItem: older item does not overwrite newer; status and data preserved" $
       let stateWithNewerItem = insertItem bookmarkItem2 testState
@@ -70,11 +70,11 @@ hocketStateTests = testGroup "HocketState insertItem/insertItems"
           stateAfterAttemptedUpdate = insertItem bookmarkItem1 stateWithNewerItemPending
       in Map.lookup (_biId bookmarkItem2) (view hsContents stateAfterAttemptedUpdate) @?= Just (Pending, bookmarkItem2)
 
-  , testCase "insertItem: item with same timestamp does overwrite; status and data updated" $
+  , testCase "insertItem: item with same timestamp does overwrite; status preserved, data updated" $
       let stateWithOriginalItem = insertItem bookmarkItem1 testState
           stateWithOriginalItemPending = stateWithOriginalItem & hsContents . ix (_biId bookmarkItem1) . _1 .~ Pending
           stateAfterAttemptedUpdate = insertItem bookmarkItem1_same_ts_diff_title stateWithOriginalItemPending
-      in Map.lookup (_biId bookmarkItem1) (view hsContents stateAfterAttemptedUpdate) @?= Just (Unread, bookmarkItem1_same_ts_diff_title)
+      in Map.lookup (_biId bookmarkItem1) (view hsContents stateAfterAttemptedUpdate) @?= Just (Pending, bookmarkItem1_same_ts_diff_title)
 
   , testCase "insertItems: inserting an item that is present overwrites if newer" $
       let s = insertItems [bookmarkItem1,bookmarkItem2] testState
@@ -118,33 +118,25 @@ raindropParsingTests = testGroup "Raindrop JSON Parsing"
                 Just stiftungTestItem -> assertEqual "Stiftung Warentest item excerpt" ("Stiftung Warentest: Testberichte zu Elektronik, Haushalt und Gesundheit sowie Finanzen, Versicherung und Steuern" :: Text) (_biExcerpt stiftungTestItem)
   ]
 
--- New test group for date/time parsing
 dateTimeParsingTests :: TestTree
 dateTimeParsingTests = testGroup "Date/Time Parsing" [testParseUTCTimeString]
 
 testParseUTCTimeString :: TestTree
 testParseUTCTimeString = testCase "parsing ISO8601 UTCTime string '2025-05-25T15:47:27.230Z'" $ do
   let timeString = "2025-05-25T15:47:27.230Z"
-  -- Attempt to parse the string
   let mParsedTime = iso8601ParseM timeString :: Maybe UTCTime
 
   case mParsedTime of
     Nothing -> assertFailure $ "Failed to parse ZonedTime string: " ++ timeString
     Just (UTCTime day diffTime) -> do
-      -- Check date components
       let (year, month, dayOfMonth) = toGregorian day
       assertEqual "Year component" 2025 year
       assertEqual "Month component" 5 month
       assertEqual "Day component" 25 dayOfMonth
 
-      -- Check time component (DiffTime, seconds since midnight)
-      -- 15h = 54000s; 47m = 2820s; Total = 54000 + 2820 + 27.230 = 56847.230s
       let expectedDiffTimeAsRational = 56847230 % 1000
       assertEqual "Time component (DiffTime as Rational)" expectedDiffTimeAsRational (toRational diffTime)
 
-      -- UTCTime is implicitly UTC, so no TimeZone checks are needed.
-
--- JSON Roundtrip Tests
 jsonRoundtripTests :: TestTree
 jsonRoundtripTests = testGroup "JSON Roundtrip"
   [ testBookmarkItemRoundtrip
