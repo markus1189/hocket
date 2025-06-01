@@ -75,6 +75,7 @@ executable hocket
                      , monad-loops
                      , mtl
                      , network-uri
+                     , optparse-applicative
                      , process
                      , text
                      , time

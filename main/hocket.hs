@@ -140,6 +140,21 @@ import Network.URI
     URIAuth (uriRegName),
     parseURI,
   )
+import Options.Applicative
+  ( CommandFields,
+    Mod,
+    Parser,
+    ParserInfo,
+    command,
+    execParser,
+    fullDesc,
+    header,
+    helper,
+    hsubparser,
+    info,
+    progDesc,
+    (<**>),
+  )
 import System.Process
   ( CreateProcess,
     createProcess,
@@ -150,6 +165,26 @@ import System.Process.Internals (StdStream (CreatePipe))
 import Text.Printf (printf)
 
 makeLensesFor [("std_err", "stdErr"), ("std_out", "stdOut")] ''CreateProcess
+
+data HocketCommand
+  = RunTUI
+  deriving (Show, Eq)
+
+tuiCommandParser :: Mod CommandFields HocketCommand
+tuiCommandParser =
+  command "tui" (info (pure RunTUI) (progDesc "Run the Hocket Terminal User Interface"))
+
+hocketCommandParser :: Parser HocketCommand
+hocketCommandParser = hsubparser tuiCommandParser
+
+opts :: ParserInfo HocketCommand
+opts =
+  info
+    (hocketCommandParser <**> helper)
+    ( fullDesc
+        <> progDesc "Hocket - A bookmark management tool"
+        <> header "hocket - Your command-line bookmark helper"
+    )
 
 trigger :: BChan HocketEvent -> HocketEvent -> IO ()
 trigger = writeBChan
@@ -219,8 +254,8 @@ asyncCommandEventHandler es FetchItems = do
             isUpdateFetch = isJust (s ^. hsLastUpdated)
             collectionToFetch =
               if isUpdateFetch
-                then RaindropCollectionId "0" -- All items for updates
-                else RaindropCollectionId "-1" -- Unsorted for initial fetch
+                then RaindropCollectionId "0"
+                else RaindropCollectionId "-1"
             suffix = maybe "" (\since -> " since: " <> formatPOSIXTime (since - 86400)) $ s ^. hsLastUpdated
         es `trigger` setStatusEvt (Just ("fetching" <> suffix))
         eitherErrorBis <- retrieveItems (s ^. hsCredentials) searchParam collectionToFetch
@@ -230,7 +265,7 @@ asyncCommandEventHandler es FetchItems = do
           Right batches -> do
             es `trigger` setStatusEvt Nothing
             for_ batches $ \(BookmarkItemBatch ts bis _) -> do
-              es `trigger` fetchedItemsEvt ts bis isUpdateFetch -- Pass the flag
+              es `trigger` fetchedItemsEvt ts bis isUpdateFetch
     hsAsync ?= fetchAsync
 asyncCommandEventHandler _ (FetchedItems ts bis wasAllCollectionsFetch) = do
   if wasAllCollectionsFetch
@@ -248,7 +283,7 @@ asyncCommandEventHandler _ (FetchedItems ts bis wasAllCollectionsFetch) = do
   case (currentLastUpdated, newTimestampToConsider) of
     (Nothing, Just newTs) -> hsLastUpdated .= Just newTs
     (Just oldTs, Just newTs) -> when (newTs >= oldTs) $ hsLastUpdated .= Just newTs
-    _ -> pure () -- No change if new items are older or no new items
+    _ -> pure ()
 asyncCommandEventHandler es (AsyncActionFailed err) = do
   hsAsync .= Nothing
   liftIO (es `trigger` setStatusEvt (Just ("failed" <> maybe "<no err>" (": " <>) err)))
@@ -301,8 +336,8 @@ myEventHandler es (VtyEvent e) = vtyEventHandler es e
 myEventHandler es (AppEvent e) = internalEventHandler es e
 myEventHandler _ _ = pure ()
 
-main :: IO ()
-main = do
+runTuiApp :: IO ()
+runTuiApp = do
   cred <- input auto "./config.dhall"
   events <- newBChan 10
   tz <- getCurrentTimeZone
@@ -315,6 +350,12 @@ main = do
         (app tz events)
         (initialState cred)
     )
+
+main :: IO ()
+main = do
+  cmd <- execParser opts
+  case cmd of
+    RunTUI -> runTuiApp
 
 app :: TimeZone -> BChan HocketEvent -> App HocketState HocketEvent Name
 app tz events =
@@ -348,11 +389,11 @@ getDisplayContent item =
       hasExcerpt = not (T.null excerptText)
       formattedNote = if hasNote then "NOTE " <> T.replace "\n" " " noteText else T.empty
       formattedExcerpt = if hasExcerpt then "EXCERPT " <> T.replace "\n" " " excerptText else T.empty
-  in case (hasNote, hasExcerpt) of
-       (True, True)   -> formattedNote <> " | " <> formattedExcerpt
-       (True, False)  -> formattedNote
-       (False, True)  -> formattedExcerpt
-       (False, False) -> " "
+   in case (hasNote, hasExcerpt) of
+        (True, True) -> formattedNote <> " | " <> formattedExcerpt
+        (True, False) -> formattedNote
+        (False, True) -> formattedExcerpt
+        (False, False) -> " "
 
 drawGui :: TimeZone -> HocketState -> [Widget Name]
 drawGui tz s = [w]

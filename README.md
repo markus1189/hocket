@@ -35,7 +35,7 @@ Hocket provides a keyboard-driven terminal interface for efficiently managing yo
 nix build
 
 # Run directly
-nix run
+nix run -- tui
 
 # Install to your profile
 nix profile install
@@ -84,10 +84,9 @@ Create a `config.dhall` file in your working directory:
 ## Usage
 
 ### Starting Hocket
-
 ```bash
 # Run from the directory containing config.dhall
-hocket
+hocket tui
 ```
 
 ### Keyboard Controls
