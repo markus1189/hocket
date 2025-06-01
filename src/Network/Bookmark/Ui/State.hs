@@ -104,7 +104,7 @@ insertItem bit s =
   s & hsContents %~ Map.insertWith newer (_biId bit) (Unread, bit)
   where
     newer :: (a, BookmarkItem) -> (a, BookmarkItem) -> (a, BookmarkItem)
-    newer bi1 bi2 = maximumBy (comparing (_biLastUpdate . snd)) [bi1, bi2]
+    newer newBi oldBi = maximumBy (comparing (_biLastUpdate . snd)) [oldBi, newBi]
 
 insertItems :: (Foldable f) => f BookmarkItem -> HocketState -> HocketState
 insertItems = flip (foldl' (flip insertItem))

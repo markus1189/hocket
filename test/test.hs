@@ -4,7 +4,7 @@ import           Test.Tasty
 import           Test.Tasty.QuickCheck as QC
 import           Test.Tasty.HUnit
 
-import           Control.Lens (view,_2)
+import           Control.Lens (view, _1, _2, ix)
 import           Control.Lens.Operators
 import           Data.List (find, head, last)
 import           Data.Map (Map)
@@ -48,17 +48,42 @@ bookmarkItem1 = BookmarkItem (BookmarkItemId "1")
 bookmarkItem2 :: BookmarkItem
 bookmarkItem2 = bookmarkItem1 {_biLastUpdate = read "2016-05-22 12:54:59 UTC", _biTitle = "newer title" }
 
+bookmarkItem1_same_ts_diff_title :: BookmarkItem
+bookmarkItem1_same_ts_diff_title = bookmarkItem1 { _biTitle = "title for same ts item" }
+
 testState = initialState (BookmarkCredentials (RaindropToken "") 0)
 
-hocketStateTests = testGroup "HocketState"
-  [ testCase "inserting items into the initial state" $
-      length (insertItem bookmarkItem1 testState ^. hsContents) @?= 1
-  , testCase "inserting an item that is present overwrites if newer" $
+hocketStateTests = testGroup "HocketState insertItem/insertItems"
+  [ testCase "insertItem: new item gets Unread status and correct data" $
+      let s = insertItem bookmarkItem1 testState
+      in Map.lookup (_biId bookmarkItem1) (view hsContents s) @?= Just (Unread, bookmarkItem1)
+
+  , testCase "insertItem: updates with newer item, status becomes Unread" $
+      let stateWithOldItem = insertItem bookmarkItem1 testState
+          stateWithOldItemPending = stateWithOldItem & hsContents . ix (_biId bookmarkItem1) . _1 .~ Pending
+          stateAfterUpdate = insertItem bookmarkItem2 stateWithOldItemPending
+      in Map.lookup (_biId bookmarkItem1) (view hsContents stateAfterUpdate) @?= Just (Unread, bookmarkItem2)
+
+  , testCase "insertItem: older item does not overwrite newer; status and data preserved" $
+      let stateWithNewerItem = insertItem bookmarkItem2 testState
+          stateWithNewerItemPending = stateWithNewerItem & hsContents . ix (_biId bookmarkItem2) . _1 .~ Pending
+          stateAfterAttemptedUpdate = insertItem bookmarkItem1 stateWithNewerItemPending
+      in Map.lookup (_biId bookmarkItem2) (view hsContents stateAfterAttemptedUpdate) @?= Just (Pending, bookmarkItem2)
+
+  , testCase "insertItem: item with same timestamp does overwrite; status and data updated" $
+      let stateWithOriginalItem = insertItem bookmarkItem1 testState
+          stateWithOriginalItemPending = stateWithOriginalItem & hsContents . ix (_biId bookmarkItem1) . _1 .~ Pending
+          stateAfterAttemptedUpdate = insertItem bookmarkItem1_same_ts_diff_title stateWithOriginalItemPending
+      in Map.lookup (_biId bookmarkItem1) (view hsContents stateAfterAttemptedUpdate) @?= Just (Unread, bookmarkItem1_same_ts_diff_title)
+
+  , testCase "insertItems: inserting an item that is present overwrites if newer" $
       let s = insertItems [bookmarkItem1,bookmarkItem2] testState
       in fmap (view (_2 . biTitle)) (Map.lookup (_biId bookmarkItem1) (view hsContents s)) @?= Just "newer title"
-  , testCase "inserting an item that is present overwrites if newer, insertion order does not matter" $
+  , testCase "insertItems: inserting an item that is present overwrites if newer, insertion order does not matter" $
       let s = insertItems [bookmarkItem2,bookmarkItem1] testState
       in fmap (view (_2 . biTitle)) (Map.lookup (_biId bookmarkItem1) (view hsContents s)) @?= Just "newer title"
+  , testCase "insertItems: basic insertion count" $
+      length (insertItems [bookmarkItem1] testState ^. hsContents) @?= 1
   ]
 
 
