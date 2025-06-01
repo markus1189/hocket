@@ -57,8 +57,8 @@ import Control.Lens.Operators
   )
 import Control.Monad (mfilter, unless, void, when)
 import Control.Monad.IO.Class (liftIO)
-import Control.Monad.State (MonadState)
 import Control.Monad.Loops (unfoldrM)
+import Control.Monad.State (MonadState)
 import qualified Data.CaseInsensitive as CI
 import Data.Foldable (for_)
 import Data.List (find, isPrefixOf)
@@ -67,12 +67,12 @@ import Data.Text (Text)
 import qualified Data.Text as T
 import qualified Data.Text.Encoding as T
 import Data.Time.Clock.POSIX (POSIXTime, posixSecondsToUTCTime, utcTimeToPOSIXSeconds)
+import Data.Time.Format (defaultTimeLocale, formatTime)
 import Data.Time.LocalTime
   ( TimeZone,
     getCurrentTimeZone,
     utcToLocalTime,
   )
-import Data.Time.Format (formatTime, defaultTimeLocale)
 import Dhall (auto, input)
 import Events
   ( AsyncCommand (..),
@@ -94,28 +94,22 @@ import Graphics.Vty (Event (EvKey), Key (KChar))
 import qualified Graphics.Vty as Vty
 import Graphics.Vty.Input.Events (Key (KEnter))
 import Graphics.Vty.Platform.Unix (mkVty)
-import Network.HTTP.Client
-  ( HttpException (HttpExceptionRequest),
-    HttpExceptionContent (StatusCodeException),
-    responseHeaders,
-    responseStatus,
-  )
 import Network.Bookmark.Types
   ( BookmarkCredentials,
     BookmarkItem,
     BookmarkItemBatch (..),
-    URL (..),
-    RaindropCollectionId (RaindropCollectionId),
     BookmarkRequest (BatchArchiveBookmarks, RetrieveBookmarks),
-    biId,
-    biLink,
-     biExcerpt,
-     biNote,
-    biTitle,
-    biCreated,
-    biLastUpdate,
+    RaindropCollectionId (RaindropCollectionId),
+    URL (..),
     biCollectionId,
+    biCreated,
+    biExcerpt,
+    biId,
     biImportant,
+    biLastUpdate,
+    biLink,
+    biNote,
+    biTitle,
   )
 import Network.Bookmark.Ui.State
   ( HocketState,
@@ -133,6 +127,12 @@ import Network.Bookmark.Ui.State
     removeItems,
     syncForRender,
     toggleStatus,
+  )
+import Network.HTTP.Client
+  ( HttpException (HttpExceptionRequest),
+    HttpExceptionContent (StatusCodeException),
+    responseHeaders,
+    responseStatus,
   )
 import Network.Raindrop (raindrop)
 import Network.URI
@@ -215,11 +215,12 @@ asyncCommandEventHandler es FetchItems = do
               Just lastTime ->
                 let dayBefore = lastTime - 86400
                     dateStr = formatPOSIXTime dayBefore
-                in Just ("lastUpdate:>" <> dateStr)
+                 in Just ("lastUpdate:>" <> dateStr)
             isUpdateFetch = isJust (s ^. hsLastUpdated)
-            collectionToFetch = if isUpdateFetch
-                                    then RaindropCollectionId "0" -- All items for updates
-                                    else RaindropCollectionId "-1" -- Unsorted for initial fetch
+            collectionToFetch =
+              if isUpdateFetch
+                then RaindropCollectionId "0" -- All items for updates
+                else RaindropCollectionId "-1" -- Unsorted for initial fetch
             suffix = maybe "" (\since -> " since: " <> formatPOSIXTime (since - 86400)) $ s ^. hsLastUpdated
         es `trigger` setStatusEvt (Just ("fetching" <> suffix))
         eitherErrorBis <- retrieveItems (s ^. hsCredentials) searchParam collectionToFetch
@@ -239,8 +240,7 @@ asyncCommandEventHandler _ (FetchedItems ts bis wasAllCollectionsFetch) = do
       unless (null itemIdsToRemove) $
         id %= removeItems itemIdsToRemove
       id %= insertItems itemsToPotentiallyAdd
-    else
-      id %= insertItems bis
+    else id %= insertItems bis
 
   hsAsync .= Nothing
   currentLastUpdated <- use hsLastUpdated
@@ -341,10 +341,18 @@ hocketAttrMap =
     ]
 
 getDisplayContent :: BookmarkItem -> Text
-getDisplayContent item
-  | not (T.null (item ^. biNote)) = "NOTE " <> T.replace "\n" " " (item ^. biNote)
-  | not (T.null (item ^. biExcerpt)) = "EXCERPT " <> T.replace "\n" " " (item ^. biExcerpt)
-  | otherwise = " "
+getDisplayContent item =
+  let noteText = item ^. biNote
+      excerptText = item ^. biExcerpt
+      hasNote = not (T.null noteText)
+      hasExcerpt = not (T.null excerptText)
+      formattedNote = if hasNote then "NOTE " <> T.replace "\n" " " noteText else T.empty
+      formattedExcerpt = if hasExcerpt then "EXCERPT " <> T.replace "\n" " " excerptText else T.empty
+  in case (hasNote, hasExcerpt) of
+       (True, True)   -> formattedNote <> " | " <> formattedExcerpt
+       (True, False)  -> formattedNote
+       (False, True)  -> formattedExcerpt
+       (False, False) -> " "
 
 drawGui :: TimeZone -> HocketState -> [Widget Name]
 drawGui tz s = [w]
@@ -356,6 +364,14 @@ drawGui tz s = [w]
                 <> uncurry (sformat (F.int % "|" % F.int)) (hsNumItems s)
                 <> ")"
             ),
+          hBorder,
+          hBar
+            ( maybe
+                " "
+                getDisplayContent
+                (focusedItem s)
+            ),
+          hBorder,
           L.renderList
             listDrawElement
             (isFocused s ItemListName)
@@ -366,12 +382,6 @@ drawGui tz s = [w]
               listDrawElement
               (isFocused s PendingListName)
               (s ^. pendingList),
-          hBar
-            ( maybe
-                " "
-                getDisplayContent
-                (focusedItem s)
-            ),
           hBar " "
             <+> withAttr
               (attrName "bar")
@@ -432,24 +442,29 @@ hBar = withAttr (attrName "bar") . padRight Max . txt
 
 retrieveItems :: BookmarkCredentials -> Maybe Text -> RaindropCollectionId -> IO (Either HttpException [BookmarkItemBatch])
 retrieveItems cred searchParam collectionId = do
-  tryHttpException $ unfoldrM (\currentPage -> do
-    (_, items) <- raindrop cred (RetrieveBookmarks currentPage collectionId searchParam)
+  tryHttpException $
+    unfoldrM
+      ( \currentPage -> do
+          (_, items) <- raindrop cred (RetrieveBookmarks currentPage collectionId searchParam)
 
-    let mostRecentUpdate = if null items
-                          then 0
-                          else maximum (map (utcTimeToPOSIXSeconds . view biLastUpdate) items)
+          let mostRecentUpdate =
+                if null items
+                  then 0
+                  else maximum (map (utcTimeToPOSIXSeconds . view biLastUpdate) items)
 
-    pure $ if length items == 0
-      then Nothing
-      else Just (BookmarkItemBatch mostRecentUpdate items (fromIntegral $ length items), currentPage + 1)
-    ) 0
+          pure $
+            if length items == 0
+              then Nothing
+              else Just (BookmarkItemBatch mostRecentUpdate items (fromIntegral $ length items), currentPage + 1)
+      )
+      0
 
 performArchive :: BookmarkCredentials -> [BookmarkItem] -> IO (Either HttpException [(BookmarkItem, Bool)])
 performArchive cred items = do
   tryHttpException $ do
     let itemIds = map (view biId) items
     success <- raindrop cred (BatchArchiveBookmarks itemIds)
-    pure $ map (, success) items
+    pure $ map (,success) items
 
 tryHttpException :: IO a -> IO (Either HttpException a)
 tryHttpException = try @HttpException
