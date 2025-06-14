@@ -94,7 +94,7 @@ data BookmarkItem = BookmarkItem
 makeLenses ''BookmarkItem
 
 data BookmarkRequest a where
-  AddBookmark :: Text -> BookmarkRequest (Maybe BookmarkItemId)
+  AddBookmark :: Text -> Maybe Text -> [Text] -> BookmarkRequest (Maybe BookmarkItemId)
   ArchiveBookmark :: BookmarkItemId -> BookmarkRequest Bool
   BatchArchiveBookmarks :: [BookmarkItemId] -> BookmarkRequest Bool
   RetrieveBookmarks :: Natural -> RaindropCollectionId -> Maybe Text -> BookmarkRequest (Natural, [BookmarkItem])

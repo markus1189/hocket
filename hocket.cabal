@@ -43,6 +43,7 @@ library
                      , network-uri
                      , old-locale
                      , process
+                     , retry
                      , sorted-list
                      , split
                      , text
@@ -77,6 +78,7 @@ executable hocket
                      , network-uri
                      , optparse-applicative
                      , process
+                     , retry
                      , text
                      , time
                      , transformers

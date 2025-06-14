@@ -1,6 +1,7 @@
 {-# LANGUAGE FlexibleContexts #-}
 {-# LANGUAGE OverloadedStrings #-}
 {-# LANGUAGE RankNTypes #-}
+{-# LANGUAGE ScopedTypeVariables #-}
 {-# LANGUAGE TemplateHaskell #-}
 {-# LANGUAGE TupleSections #-}
 {-# LANGUAGE TypeApplications #-}
@@ -40,8 +41,9 @@ import Brick.Widgets.List (handleListEvent, handleListEventVi)
 import qualified Brick.Widgets.List as L
 import Control.Applicative ((<|>))
 import Control.Concurrent.Async (async)
-import Control.Exception (SomeException)
+import Control.Exception (SomeException, catch)
 import Control.Exception.Base (try)
+import System.Exit (exitFailure)
 import Control.Lens (Each (each), makeLensesFor, view)
 import Control.Lens.Combinators (use)
 import Control.Lens.Operators
@@ -61,7 +63,7 @@ import Control.Monad.Loops (unfoldrM)
 import Control.Monad.State (MonadState)
 import qualified Data.CaseInsensitive as CI
 import Data.Foldable (for_)
-import Data.List (find, isPrefixOf)
+import Data.List (find, isPrefixOf, foldl')
 import Data.Maybe (fromMaybe, isJust, mapMaybe)
 import Data.Text (Text)
 import qualified Data.Text as T
@@ -98,9 +100,10 @@ import Network.Bookmark.Types
   ( BookmarkCredentials,
     BookmarkItem,
     BookmarkItemBatch (..),
-    BookmarkRequest (BatchArchiveBookmarks, RetrieveBookmarks),
+    BookmarkRequest (AddBookmark, BatchArchiveBookmarks, RetrieveBookmarks),
     RaindropCollectionId (RaindropCollectionId),
     URL (..),
+    _BookmarkItemId,
     biCollectionId,
     biCreated,
     biExcerpt,
@@ -111,6 +114,7 @@ import Network.Bookmark.Types
     biNote,
     biTitle,
   )
+import qualified Network.Raindrop as R
 import Network.Bookmark.Ui.State
   ( HocketState,
     Name (..),
@@ -145,14 +149,22 @@ import Options.Applicative
     Mod,
     Parser,
     ParserInfo,
+    argument,
     command,
     execParser,
     fullDesc,
     header,
+    help,
     helper,
     hsubparser,
     info,
+    long,
+    many,
+    metavar,
+    optional,
     progDesc,
+    str,
+    strOption,
     (<**>),
   )
 import System.Process
@@ -168,14 +180,24 @@ makeLensesFor [("std_err", "stdErr"), ("std_out", "stdOut")] ''CreateProcess
 
 data HocketCommand
   = RunTUI
+  | AddBookmarkCmd Text (Maybe Text) [Text]
   deriving (Show, Eq)
 
 tuiCommandParser :: Mod CommandFields HocketCommand
 tuiCommandParser =
   command "tui" (info (pure RunTUI) (progDesc "Run the Hocket Terminal User Interface"))
 
+addCommandParser :: Mod CommandFields HocketCommand
+addCommandParser =
+  command "add" (info addBookmarkParser (progDesc "Add a bookmark to Raindrop"))
+  where
+    addBookmarkParser = AddBookmarkCmd
+      <$> argument str (metavar "URL" <> help "URL to bookmark")
+      <*> optional (strOption (long "collection" <> help "Collection ID (defaults to -1 for unsorted)"))
+      <*> many (strOption (long "tag" <> help "Tags to add"))
+
 hocketCommandParser :: Parser HocketCommand
-hocketCommandParser = hsubparser tuiCommandParser
+hocketCommandParser = hsubparser (tuiCommandParser <> addCommandParser)
 
 opts :: ParserInfo HocketCommand
 opts =
@@ -351,11 +373,27 @@ runTuiApp = do
         (initialState cred)
     )
 
+runAddCommand :: Text -> Maybe Text -> [Text] -> IO ()
+runAddCommand url mCollection tags = do
+  putStrLn $ "Adding bookmark: " <> T.unpack url
+  cred <- input auto "./config.dhall" `catch` \(e :: SomeException) -> do
+    putStrLn $ "Error loading config: " <> show e
+    exitFailure
+  result <- (R.raindrop cred (AddBookmark url mCollection tags) `catch` \(e :: SomeException) -> do
+    putStrLn $ "Error adding bookmark: " <> show e
+    return Nothing)
+  case result of
+    Just bookmarkId -> putStrLn $ "Successfully added bookmark with ID: " <> T.unpack (bookmarkId ^. _BookmarkItemId)
+    Nothing -> do
+      putStrLn "Failed to add bookmark"
+      exitFailure
+
 main :: IO ()
 main = do
   cmd <- execParser opts
   case cmd of
     RunTUI -> runTuiApp
+    AddBookmarkCmd url mCollection tags -> runAddCommand url mCollection tags
 
 app :: TimeZone -> BChan HocketEvent -> App HocketState HocketEvent Name
 app tz events =

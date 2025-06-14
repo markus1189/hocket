@@ -20,6 +20,13 @@ Hocket provides a keyboard-driven terminal interface for efficiently managing yo
 - **Favorite indicators** - Visual markers (★) for favorite bookmarks
 - **Rich item display** - Shows dates, titles, URLs, notes, and excerpts
 
+### Command Line Interface
+- **Add bookmarks from CLI** - Add bookmarks directly from terminal
+- **Automatic metadata extraction** - Raindrop.io parses title and description automatically
+- **Collection targeting** - Specify which collection to add bookmarks to
+- **Tag support** - Add multiple tags when creating bookmarks
+- **Robust error handling** - Automatic retries with exponential backoff
+
 ### Workflow Support
 - **Browser integration** - Open bookmarks in your default browser
 - **Archive management** - Move items to a designated archive collection
@@ -83,11 +90,35 @@ Create a `config.dhall` file in your working directory:
 
 ## Usage
 
-### Starting Hocket
+### Commands
+
+#### Terminal User Interface
 ```bash
-# Run from the directory containing config.dhall
+# Run the interactive TUI from the directory containing config.dhall
 hocket tui
 ```
+
+#### Add Bookmarks from Command Line
+```bash
+# Add a bookmark to the unsorted collection
+hocket add https://example.com
+
+# Add a bookmark to a specific collection
+hocket add https://example.com --collection 12345
+
+# Add a bookmark with tags
+hocket add https://example.com --tag programming --tag tutorial
+
+# Add a bookmark with collection and tags
+hocket add https://example.com --collection 12345 --tag rust --tag cli
+```
+
+**Add Command Features:**
+- **Automatic metadata extraction** - Title, description, and other metadata are fetched automatically
+- **Default collection** - Uses unsorted collection (-1) if not specified
+- **Multiple tags** - Add multiple `--tag` flags for multiple tags
+- **Retry logic** - Automatically retries failed requests with exponential backoff
+- **Error handling** - Clear error messages for configuration and API issues
 
 ### Keyboard Controls
 
@@ -141,8 +172,9 @@ hocket tui
 ### API Integration
 - **Raindrop.io REST API v1** - Full integration with bookmark management
 - **Smart pagination** - Efficiently handles large bookmark collections  
-- **Rate limiting** - Respects API limits
+- **Rate limiting** - Respects API limits with exponential backoff retry logic
 - **Error handling** - Graceful degradation on network issues
+- **Automatic metadata parsing** - Uses Raindrop's `pleaseParse` feature for rich bookmark data
 
 ### Data Management
 - **Local state** - In-memory bookmark cache with smart updates

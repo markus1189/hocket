@@ -4,8 +4,10 @@
 
 module Network.Raindrop where
 
+import Control.Exception (SomeException, try)
 import Control.Lens ((&), (.~), (^?), view)
 import Control.Lens.Operators ((^.), (^..))
+import Control.Retry (RetryPolicy, RetryStatus, exponentialBackoff, limitRetries, retrying)
 import qualified Data.Aeson as A
 import Data.Aeson.Lens (AsJSON (_JSON), AsValue (_Bool), key, values, _Integral)
 import Data.Maybe (fromMaybe)
@@ -24,11 +26,30 @@ commonOpts (RaindropToken t) =
     & W.manager .~ Left (HCTLS.tlsManagerSettings {HC.managerResponseTimeout = HC.responseTimeoutDefault})
     & W.header "Authorization" .~ ["Bearer " <> TE.encodeUtf8 t]
 
+retryPolicy :: RetryPolicy
+retryPolicy = exponentialBackoff 100000 <> limitRetries 3
+
+shouldRetry :: RetryStatus -> Either SomeException a -> IO Bool
+shouldRetry _ (Left _) = return True
+shouldRetry _ (Right _) = return False
+
 raindrop :: BookmarkCredentials -> BookmarkRequest a -> IO a
-raindrop creds (AddBookmark link) = do
+raindrop creds (AddBookmark link mCollection tags) = do
   let rt = view raindropToken creds
-  resp <- W.postWith (commonOpts rt) "https://api.raindrop.io/rest/v1/raindrop" $ A.object ["link" A..= link, "pleaseParse" A..= A.object []]
-  pure (BookmarkItemId . T.pack . show <$> resp ^? W.responseBody . key "item" . key "_id" . _Integral @_ @Int)
+      collection = fromMaybe "-1" mCollection
+      payload = A.object
+        [ "link" A..= link
+        , "collection" A..= collection
+        , "tags" A..= tags
+        , "pleaseParse" A..= A.object []
+        ]
+  result <- retrying retryPolicy shouldRetry $ \_ -> do
+    try $ do
+      resp <- W.postWith (commonOpts rt) "https://api.raindrop.io/rest/v1/raindrop" payload
+      pure (BookmarkItemId . T.pack . show <$> resp ^? W.responseBody . key "item" . key "_id" . _Integral @_ @Int)
+  case result of
+    Left ex -> error $ "Failed to add bookmark after retries: " <> show ex
+    Right value -> pure value
 raindrop creds (ArchiveBookmark bid) = do
   let rt = view raindropToken creds
       archiveId = view archiveCollectionId creds
