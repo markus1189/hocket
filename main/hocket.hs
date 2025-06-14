@@ -376,9 +376,7 @@ hocketAttrMap =
     [ (attrName "list" <> attrName "selected" <> attrName "focused", boldBlackOnOrange),
       (attrName "list" <> attrName "listSelected", Vty.defAttr `Vty.withStyle` Vty.bold),
       (attrName "list" <> attrName "unselectedItem", whiteFg),
-      ( attrName "bar",
-        Vty.defAttr `Vty.withBackColor` Vty.black `Vty.withForeColor` Vty.white
-      )
+      (attrName "bar", Vty.defAttr `Vty.withBackColor` Vty.black `Vty.withForeColor` Vty.white)
     ]
 
 getDisplayContent :: BookmarkItem -> Text
@@ -551,9 +549,28 @@ focusedItem s = do
   list <- focusedList s
   snd <$> L.listSelectedElement list
 
+urlReplacements :: [(String, String)]
+urlReplacements =
+  [ ("m.imdb.", "imdb."),
+    ("m.aliexpress.", "aliexpress.")
+  ]
+
+replace :: String -> String -> String -> String
+replace old new = go
+  where
+    go [] = []
+    go s@(x : xs)
+      | old `isPrefixOf` s = new ++ go (drop (length old) s)
+      | otherwise = x : go xs
+
+-- AI? suggest how to add tests for this
+cleanUrl :: String -> String
+cleanUrl s = foldl' (\acc (old, new) -> replace old new acc) s urlReplacements
+
 browseItem :: String -> URL -> IO ()
 browseItem shellCmd (URL url) = do
-  let spec = shell $ T.unpack $ T.replace "m.aliexpress.us" "aliexpress.us" $ T.pack $ printf shellCmd url
+  let cleanedUrl = cleanUrl url
+      spec = shell $ printf shellCmd cleanedUrl
   (_, _, _, ph) <- createProcess $ spec & stdOut .~ CreatePipe & stdErr .~ CreatePipe
   void . waitForProcess $ ph
 
