@@ -415,6 +415,8 @@ hocketAttrMap =
     [ (attrName "list" <> attrName "selected" <> attrName "focused", boldBlackOnOrange),
       (attrName "list" <> attrName "listSelected", Vty.defAttr `Vty.withStyle` Vty.bold),
       (attrName "list" <> attrName "unselectedItem", whiteFg),
+      (attrName "list" <> attrName "flaggedItem", flaggedRedFg),
+      (attrName "list" <> attrName "flaggedSelected", flaggedRedSelectedFg),
       (attrName "bar", Vty.defAttr `Vty.withBackColor` Vty.black `Vty.withForeColor` Vty.white)
     ]
 
@@ -478,11 +480,13 @@ listDrawElementWithAction s sel e =
   let actionIndicator = case getPendingActionForItem (view biId e) s of
         ToBeArchived -> "A "
         None -> "  "
-  in ( if sel
-         then withAttr (attrName "list" <> attrName "listSelected")
-         else withAttr (attrName "list" <> attrName "unselectedItem")
-     )
-       (txt actionIndicator <+> padRight Max (txtDisplay e))
+      pendingAction = getPendingActionForItem (view biId e) s
+      attrName' = case (pendingAction, sel) of
+                   (ToBeArchived, True) -> attrName "list" <> attrName "flaggedSelected"
+                   (ToBeArchived, False) -> attrName "list" <> attrName "flaggedItem"
+                   (None, True) -> attrName "list" <> attrName "listSelected"
+                   (None, False) -> attrName "list" <> attrName "unselectedItem"
+  in withAttr attrName' (txt actionIndicator <+> padRight Max (txtDisplay e))
 
 orange :: Vty.Color
 orange = Vty.rgbColor 215 135 (0 :: Int)
@@ -500,8 +504,20 @@ black = Vty.rgbColor zero zero zero
   where
     zero = 0 :: Int
 
+flaggedRed :: Vty.Color
+flaggedRed = Vty.rgbColor (220 :: Int) (85 :: Int) (85 :: Int)
+
+flaggedRedDark :: Vty.Color
+flaggedRedDark = Vty.rgbColor (80 :: Int) (20 :: Int) (20 :: Int)
+
 whiteFg :: Vty.Attr
 whiteFg = Vty.defAttr `Vty.withForeColor` Vty.white
+
+flaggedRedFg :: Vty.Attr
+flaggedRedFg = Vty.defAttr `Vty.withForeColor` flaggedRed
+
+flaggedRedSelectedFg :: Vty.Attr
+flaggedRedSelectedFg = Vty.defAttr `Vty.withForeColor` flaggedRedDark `Vty.withBackColor` orange `Vty.withStyle` Vty.bold
 
 
 hBar :: Text -> Widget Name
