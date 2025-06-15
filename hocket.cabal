@@ -39,6 +39,7 @@ library
                      , lens-action
                      , lens-aeson
                      , microlens
+                     , monad-logger
                      , mtl
                      , network-uri
                      , old-locale
@@ -73,7 +74,9 @@ executable hocket
                      , lens-action
                      , lens-aeson
                      , microlens
+                     , monad-logger
                      , monad-loops
+                     , exceptions
                      , mtl
                      , network-uri
                      , optparse-applicative

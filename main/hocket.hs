@@ -41,7 +41,7 @@ import Brick.Widgets.List (handleListEvent, handleListEventVi)
 import qualified Brick.Widgets.List as L
 import Control.Applicative ((<|>))
 import Control.Concurrent.Async (async)
-import Control.Exception (SomeException, catch)
+import Control.Exception (SomeException)
 import Control.Exception.Base (try)
 import System.Exit (exitFailure)
 import Control.Lens (Each (each), makeLensesFor, view)
@@ -59,6 +59,8 @@ import Control.Lens.Operators
   )
 import Control.Monad (mfilter, unless, void, when)
 import Control.Monad.IO.Class (liftIO)
+import Control.Monad.Logger (logInfoN, logErrorN, runStdoutLoggingT)
+import qualified Control.Monad.Catch as Catch
 import Control.Monad.Loops (unfoldrM)
 import Control.Monad.State (MonadState)
 import qualified Data.CaseInsensitive as CI
@@ -375,18 +377,22 @@ runTuiApp = do
 
 runAddCommand :: Text -> Maybe Text -> [Text] -> IO ()
 runAddCommand url mCollection tags = do
-  putStrLn $ "Adding bookmark: " <> T.unpack url
-  cred <- input auto "./config.dhall" `catch` \(e :: SomeException) -> do
-    putStrLn $ "Error loading config: " <> show e
-    exitFailure
-  result <- (R.raindrop cred (AddBookmark url mCollection tags) `catch` \(e :: SomeException) -> do
-    putStrLn $ "Error adding bookmark: " <> show e
-    return Nothing)
-  case result of
-    Just bookmarkId -> putStrLn $ "Successfully added bookmark with ID: " <> T.unpack (bookmarkId ^. _BookmarkItemId)
-    Nothing -> do
-      putStrLn "Failed to add bookmark"
-      exitFailure
+  result <- runStdoutLoggingT $ do
+    logInfoN $ "Adding bookmark: " <> url
+    cred <- (liftIO $ input auto "./config.dhall") `Catch.catch` \(e :: SomeException) -> do
+      logErrorN $ "Error loading config: " <> T.pack (show e)
+      liftIO exitFailure
+    result <- (R.raindrop cred (AddBookmark url mCollection tags)) `Catch.catch` \(e :: SomeException) -> do
+      logErrorN $ "Error adding bookmark: " <> T.pack (show e)
+      return Nothing
+    case result of
+      Just bookmarkId -> do
+        logInfoN $ "Successfully added bookmark with ID: " <> (bookmarkId ^. _BookmarkItemId)
+        return True
+      Nothing -> do
+        logErrorN "Failed to add bookmark"
+        return False
+  if result then return () else exitFailure
 
 main :: IO ()
 main = do
@@ -520,6 +526,7 @@ hBar = withAttr (attrName "bar") . padRight Max . txt
 retrieveItems :: BookmarkCredentials -> Maybe Text -> RaindropCollectionId -> IO (Either HttpException [BookmarkItemBatch])
 retrieveItems cred searchParam collectionId = do
   tryHttpException $
+    runStdoutLoggingT $
     unfoldrM
       ( \currentPage -> do
           (_, items) <- raindrop cred (RetrieveBookmarks currentPage collectionId searchParam)
@@ -538,7 +545,7 @@ retrieveItems cred searchParam collectionId = do
 
 performArchive :: BookmarkCredentials -> [BookmarkItem] -> IO (Either HttpException [(BookmarkItem, Bool)])
 performArchive cred items = do
-  tryHttpException $ do
+  tryHttpException $ runStdoutLoggingT $ do
     let itemIds = map (view biId) items
     success <- raindrop cred (BatchArchiveBookmarks itemIds)
     pure $ map (,success) items
