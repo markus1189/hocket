@@ -4,7 +4,6 @@
 
 module Network.Bookmark.Ui.State
   ( HocketState,
-    pendingList,
     itemList,
     focusRing,
     hsNumItems,
@@ -19,8 +18,7 @@ module Network.Bookmark.Ui.State
     insertItems,
     removeItem,
     removeItems,
-    Status (..),
-    toggleStatus,
+    togglePendingAction,
     SortByUpdated,
     syncForRender,
   )
@@ -43,22 +41,18 @@ import qualified Data.SortedList as SL
 import Data.Text (Text)
 import Data.Time.Clock.POSIX (POSIXTime)
 import qualified Data.Vector as V
-import Data.Vector.Lens (toVectorOf)
 import Network.Bookmark.Types
 import Network.Bookmark.Ui.Widgets
 
-data Status = Pending | Unread deriving (Show, Eq, Ord)
-
-data Name = ItemListName | PendingListName deriving (Show, Eq, Ord)
+data Name = ItemListName deriving (Show, Eq, Ord)
 
 data HocketState = HocketState
   { _itemList :: !(List Name BookmarkItem),
-    _pendingList :: !(List Name BookmarkItem),
     _focusRing :: !(F.FocusRing Name),
     _hsLastUpdated :: !(Maybe POSIXTime),
     _hsAsync :: !(Maybe (Async ())),
     _hsStatus :: !(Maybe Text),
-    _hsContents :: !(Map BookmarkItemId (Status, BookmarkItem)),
+    _hsContents :: !(Map BookmarkItemId (PendingAction, BookmarkItem)),
     _hsCredentials :: !BookmarkCredentials
   }
 
@@ -72,7 +66,7 @@ instance Eq SortByUpdated where
 instance Ord SortByUpdated where
   compare (SBU bi1) (SBU bi2) = (compare `on` _biCreated) bi1 bi2
 
-partitionItems :: HocketState -> Map Status (SortedList SortByUpdated)
+partitionItems :: HocketState -> Map PendingAction (SortedList SortByUpdated)
 partitionItems =
   Map.fromListWith (<>)
     . over (mapped . _2) (SL.singleton . SBU)
@@ -81,8 +75,8 @@ partitionItems =
 
 hsNumItems :: HocketState -> (Int, Int)
 hsNumItems s =
-  ( length $ partitioned ^. at Unread . non (SL.toSortedList []),
-    length $ partitioned ^. at Pending . non (SL.toSortedList [])
+  ( length $ partitioned ^. at None . non (SL.toSortedList []),
+    length $ partitioned ^. at ToBeArchived . non (SL.toSortedList [])
   )
   where
     partitioned = partitionItems s
@@ -91,8 +85,7 @@ initialState :: BookmarkCredentials -> HocketState
 initialState cred =
   HocketState
     (L.list ItemListName V.empty 1)
-    (L.list PendingListName V.empty 1)
-    (F.focusRing [ItemListName, PendingListName])
+    (F.focusRing [ItemListName])
     Nothing
     Nothing
     Nothing
@@ -101,7 +94,7 @@ initialState cred =
 
 insertItem :: BookmarkItem -> HocketState -> HocketState
 insertItem bit s =
-  s & hsContents %~ Map.insertWith newer (_biId bit) (Unread, bit)
+  s & hsContents %~ Map.insertWith newer (_biId bit) (None, bit)
   where
     newer :: (a, BookmarkItem) -> (a, BookmarkItem) -> (a, BookmarkItem)
     newer newBi oldBi = (fst oldBi, maximumBy (comparing _biLastUpdate) (map snd [oldBi, newBi]))
@@ -115,25 +108,25 @@ removeItem bid s = s & hsContents . at bid .~ Nothing
 removeItems :: (Foldable f) => f BookmarkItemId -> HocketState -> HocketState
 removeItems = flip (foldl' (flip removeItem))
 
-toggleStatus :: BookmarkItemId -> HocketState -> HocketState
-toggleStatus bid = hsContents . ix bid . _1 %~ toggle
+togglePendingAction :: BookmarkItemId -> HocketState -> HocketState
+togglePendingAction bid = hsContents . ix bid . _1 %~ toggle
   where
-    toggle Unread = Pending
-    toggle Pending = Unread
+    toggle None = ToBeArchived
+    toggle ToBeArchived = None
 
 syncForRender :: HocketState -> HocketState
 syncForRender s =
   s
-    & itemList . L.listElementsL .~ sortedUnread
-    & itemList . L.listSelectedL .~ (view (itemList . L.listSelectedL) s <|> (sortedUnread ^? _head $> 0))
-    & pendingList . L.listElementsL .~ sortedPending
-    & pendingList . L.listSelectedL .~ (view (pendingList . L.listSelectedL) s <|> (sortedPending ^? _head $> 0))
+    & itemList . L.listElementsL .~ allSortedItems
+    & itemList . L.listSelectedL .~ (view (itemList . L.listSelectedL) s <|> (allSortedItems ^? _head $> 0))
     & itemList %~ adjustFocus
-    & pendingList %~ adjustFocus
   where
-    partitioned = partitionItems s
-    sortedUnread = toVectorOf (at Unread . each . to SL.reverse . to toList . each . to (\(Down (SBU x)) -> x)) partitioned
-    sortedPending = toVectorOf (at Pending . each . to SL.reverse . to toList . each . to (\(Down (SBU x)) -> x)) partitioned
+    allSortedItems = V.fromList $ 
+      map (\(Down (SBU x)) -> x) $ 
+      SL.fromSortedList $ 
+      SL.toSortedList $ 
+      map (Down . SBU . snd) $ 
+      Map.elems (s ^. hsContents)
 
 adjustFocus :: L.List n a -> L.List n a
 adjustFocus l =

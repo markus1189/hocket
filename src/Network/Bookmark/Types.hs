@@ -16,6 +16,7 @@ module Network.Bookmark.Types
     BookmarkCredentials (..),
     URL(..),
     BookmarkItemBatch(..),
+    PendingAction(..),
     biId,
     biLink,
     biExcerpt,
@@ -62,6 +63,8 @@ newtype RaindropCollectionId = RaindropCollectionId Text deriving (Show, Eq)
 makePrisms ''RaindropCollectionId
 
 newtype URL = URL String deriving (Show, Eq, Generic)
+
+data PendingAction = None | ToBeArchived deriving (Show, Eq, Ord)
 
 data BookmarkCredentials = BookmarkCredentials
   { _raindropToken :: RaindropToken,

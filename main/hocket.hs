@@ -29,7 +29,6 @@ import Brick
     padRight,
     txt,
     vBox,
-    vLimit,
     withAttr,
     zoom,
     (<+>),
@@ -44,7 +43,7 @@ import Control.Concurrent.Async (async)
 import Control.Exception (SomeException)
 import Control.Exception.Base (try)
 import System.Exit (exitFailure)
-import Control.Lens (Each (each), makeLensesFor, view)
+import Control.Lens (makeLensesFor, view, at)
 import Control.Lens.Combinators (use)
 import Control.Lens.Operators
   ( (%=),
@@ -54,7 +53,6 @@ import Control.Lens.Operators
     (<&>),
     (?=),
     (^.),
-    (^..),
     (^?),
   )
 import Control.Monad (mfilter, unless, void, when)
@@ -66,6 +64,7 @@ import Control.Monad.State (MonadState)
 import qualified Data.CaseInsensitive as CI
 import Data.Foldable (for_)
 import Data.List (find, isPrefixOf, foldl')
+import qualified Data.Map as Map
 import Data.Maybe (fromMaybe, isJust, mapMaybe)
 import Data.Text (Text)
 import qualified Data.Text as T
@@ -102,9 +101,11 @@ import Network.Bookmark.Types
   ( BookmarkCredentials,
     BookmarkItem,
     BookmarkItemBatch (..),
+    BookmarkItemId,
     BookmarkRequest (AddBookmark, BatchArchiveBookmarks, RetrieveBookmarks),
     RaindropCollectionId (RaindropCollectionId),
     URL (..),
+    PendingAction (..),
     _BookmarkItemId,
     biCollectionId,
     biCreated,
@@ -122,6 +123,7 @@ import Network.Bookmark.Ui.State
     Name (..),
     focusRing,
     hsAsync,
+    hsContents,
     hsCredentials,
     hsLastUpdated,
     hsNumItems,
@@ -129,10 +131,9 @@ import Network.Bookmark.Ui.State
     initialState,
     insertItems,
     itemList,
-    pendingList,
     removeItems,
     syncForRender,
-    toggleStatus,
+    togglePendingAction,
   )
 import Network.HTTP.Client
   ( HttpException (HttpExceptionRequest),
@@ -236,14 +237,8 @@ vtyEventHandler es (EvKey (KChar 'd') []) = do
   liftIO . for_ (focusedItem s) $ \bit ->
     es `trigger` shiftItemEvt (view biId bit)
 vtyEventHandler _ (EvKey (KChar 'q') []) = halt
-vtyEventHandler _ (EvKey (KChar '\t') []) = focusRing %= Focus.focusNext
 vtyEventHandler _ e = do
-  s <- use id
-  case focused s of
-    Just ItemListName -> zoom itemList (handleListEventVi handleListEvent e)
-    Just PendingListName ->
-      zoom pendingList (handleListEventVi handleListEvent e)
-    _ -> pure ()
+  zoom itemList (handleListEventVi handleListEvent e)
 
 internalEventHandler ::
   BChan HocketEvent ->
@@ -320,7 +315,7 @@ asyncCommandEventHandler es ArchiveItems = do
         liftIO . async $ do
           es `trigger` setStatusEvt (Just "archiving")
           eitherErrorResults <-
-            performArchive (s ^. hsCredentials) (s ^.. pendingList . L.listElementsL . each)
+            performArchive (s ^. hsCredentials) (getItemsWithPendingAction ToBeArchived s)
           case eitherErrorResults of
             Left e ->
               es `trigger` asyncActionFailedEvt (errorMessageFromException e)
@@ -343,7 +338,7 @@ uiCommandEventHandler ::
   BChan HocketEvent ->
   UiCommand ->
   EventM Name HocketState ()
-uiCommandEventHandler _ (ShiftItem bid) = id %= toggleStatus bid
+uiCommandEventHandler _ (ShiftItem bid) = id %= togglePendingAction bid
 uiCommandEventHandler _ (RemoveItems bis) = id %= removeItems bis
 uiCommandEventHandler _ (SetStatus t) = hsStatus .= t
 uiCommandEventHandler es (BrowseItem bit) = do
@@ -456,15 +451,9 @@ drawGui tz s = [w]
             ),
           hBorder,
           L.renderList
-            listDrawElement
-            (isFocused s ItemListName)
+            (listDrawElementWithAction s)
+            True
             (s ^. itemList),
-          hBorder,
-          vLimit 10 $
-            L.renderList
-              listDrawElement
-              (isFocused s PendingListName)
-              (s ^. pendingList),
           hBar " "
             <+> withAttr
               (attrName "bar")
@@ -481,29 +470,23 @@ drawGui tz s = [w]
           txt (fromMaybe " " (s ^. hsStatus))
         ]
 
-focused :: HocketState -> Maybe Name
-focused = Focus.focusGetCurrent . view focusRing
-
 focusedList :: HocketState -> Maybe (L.List Name BookmarkItem)
-focusedList s =
-  case focused s of
-    Just ItemListName -> s ^? itemList
-    Just PendingListName -> s ^? pendingList
-    _ -> Nothing
+focusedList s = s ^? itemList
 
-isFocused :: HocketState -> Name -> Bool
-isFocused s name = Just name == focused s
-
-listDrawElement :: Bool -> BookmarkItem -> Widget Name
-listDrawElement sel e =
-  ( if sel
-      then withAttr (attrName "list" <> attrName "listSelected")
-      else withAttr (attrName "list" <> attrName "unselectedItem")
-  )
-    (padRight Max (txtDisplay e))
+listDrawElementWithAction :: HocketState -> Bool -> BookmarkItem -> Widget Name
+listDrawElementWithAction s sel e =
+  let actionIndicator = case getPendingActionForItem (view biId e) s of
+        ToBeArchived -> "A "
+        None -> "  "
+  in ( if sel
+         then withAttr (attrName "list" <> attrName "listSelected")
+         else withAttr (attrName "list" <> attrName "unselectedItem")
+     )
+       (txt actionIndicator <+> padRight Max (txtDisplay e))
 
 orange :: Vty.Color
 orange = Vty.rgbColor 215 135 (0 :: Int)
+
 
 boldBlackOnOrange :: Vty.Attr
 boldBlackOnOrange =
@@ -519,6 +502,7 @@ black = Vty.rgbColor zero zero zero
 
 whiteFg :: Vty.Attr
 whiteFg = Vty.defAttr `Vty.withForeColor` Vty.white
+
 
 hBar :: Text -> Widget Name
 hBar = withAttr (attrName "bar") . padRight Max . txt
@@ -593,6 +577,16 @@ focusedItem :: HocketState -> Maybe BookmarkItem
 focusedItem s = do
   list <- focusedList s
   snd <$> L.listSelectedElement list
+
+getPendingActionForItem :: BookmarkItemId -> HocketState -> PendingAction
+getPendingActionForItem bid s =
+  case s ^. hsContents . at bid of
+    Just (action, _) -> action
+    Nothing -> None
+
+getItemsWithPendingAction :: PendingAction -> HocketState -> [BookmarkItem]
+getItemsWithPendingAction targetAction s =
+  [ item | (action, item) <- Map.elems (s ^. hsContents), action == targetAction ]
 
 urlReplacements :: [(String, String)]
 urlReplacements =

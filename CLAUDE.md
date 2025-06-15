@@ -31,7 +31,7 @@ Hocket is a terminal-based bookmark manager for Raindrop.io built with Haskell a
 
 ### Architecture Patterns
 - **Event-driven async operations** - UI remains responsive during network calls using BChan and async
-- **Dual-pane interface** - Top pane shows unread items, bottom shows items pending archive
+- **Single-pane interface with action flags** - Items display pending action indicators instead of being moved to separate panes
 - **Lens-based state management** - Uses lens library for clean record access and updates
 - **Smart synchronization** - Only fetches items modified since last update to minimize API calls
 

@@ -54,27 +54,27 @@ bookmarkItem1_same_ts_diff_title = bookmarkItem1 { _biTitle = "title for same ts
 testState = initialState (BookmarkCredentials (RaindropToken "") 0)
 
 hocketStateTests = testGroup "HocketState insertItem/insertItems"
-  [ testCase "insertItem: new item gets Unread status and correct data" $
+  [ testCase "insertItem: new item gets None status and correct data" $
       let s = insertItem bookmarkItem1 testState
-      in Map.lookup (_biId bookmarkItem1) (view hsContents s) @?= Just (Unread, bookmarkItem1)
+      in Map.lookup (_biId bookmarkItem1) (view hsContents s) @?= Just (None, bookmarkItem1)
 
   , testCase "insertItem: updates with newer item" $
       let stateWithOldItem = insertItem bookmarkItem1 testState
-          stateWithOldItemPending = stateWithOldItem & hsContents . ix (_biId bookmarkItem1) . _1 .~ Pending
+          stateWithOldItemPending = stateWithOldItem & hsContents . ix (_biId bookmarkItem1) . _1 .~ ToBeArchived
           stateAfterUpdate = insertItem bookmarkItem2 stateWithOldItemPending
-      in Map.lookup (_biId bookmarkItem1) (view hsContents stateAfterUpdate) @?= Just (Pending, bookmarkItem2)
+      in Map.lookup (_biId bookmarkItem1) (view hsContents stateAfterUpdate) @?= Just (ToBeArchived, bookmarkItem2)
 
   , testCase "insertItem: older item does not overwrite newer; status and data preserved" $
       let stateWithNewerItem = insertItem bookmarkItem2 testState
-          stateWithNewerItemPending = stateWithNewerItem & hsContents . ix (_biId bookmarkItem2) . _1 .~ Pending
+          stateWithNewerItemPending = stateWithNewerItem & hsContents . ix (_biId bookmarkItem2) . _1 .~ ToBeArchived
           stateAfterAttemptedUpdate = insertItem bookmarkItem1 stateWithNewerItemPending
-      in Map.lookup (_biId bookmarkItem2) (view hsContents stateAfterAttemptedUpdate) @?= Just (Pending, bookmarkItem2)
+      in Map.lookup (_biId bookmarkItem2) (view hsContents stateAfterAttemptedUpdate) @?= Just (ToBeArchived, bookmarkItem2)
 
   , testCase "insertItem: item with same timestamp does overwrite; status preserved, data updated" $
       let stateWithOriginalItem = insertItem bookmarkItem1 testState
-          stateWithOriginalItemPending = stateWithOriginalItem & hsContents . ix (_biId bookmarkItem1) . _1 .~ Pending
+          stateWithOriginalItemPending = stateWithOriginalItem & hsContents . ix (_biId bookmarkItem1) . _1 .~ ToBeArchived
           stateAfterAttemptedUpdate = insertItem bookmarkItem1_same_ts_diff_title stateWithOriginalItemPending
-      in Map.lookup (_biId bookmarkItem1) (view hsContents stateAfterAttemptedUpdate) @?= Just (Pending, bookmarkItem1_same_ts_diff_title)
+      in Map.lookup (_biId bookmarkItem1) (view hsContents stateAfterAttemptedUpdate) @?= Just (ToBeArchived, bookmarkItem1_same_ts_diff_title)
 
   , testCase "insertItems: inserting an item that is present overwrites if newer" $
       let s = insertItems [bookmarkItem1,bookmarkItem2] testState
