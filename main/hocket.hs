@@ -42,8 +42,7 @@ import Control.Applicative ((<|>))
 import Control.Concurrent.Async (async)
 import Control.Exception (SomeException)
 import Control.Exception.Base (try)
-import System.Exit (exitFailure)
-import Control.Lens (makeLensesFor, view, at)
+import Control.Lens (at, makeLensesFor, view)
 import Control.Lens.Combinators (use)
 import Control.Lens.Operators
   ( (%=),
@@ -56,14 +55,14 @@ import Control.Lens.Operators
     (^?),
   )
 import Control.Monad (mfilter, unless, void, when)
-import Control.Monad.IO.Class (liftIO)
-import Control.Monad.Logger (logInfoN, logErrorN, runStdoutLoggingT)
 import qualified Control.Monad.Catch as Catch
+import Control.Monad.IO.Class (liftIO)
+import Control.Monad.Logger (logErrorN, logInfoN, runStdoutLoggingT)
 import Control.Monad.Loops (unfoldrM)
 import Control.Monad.State (MonadState)
 import qualified Data.CaseInsensitive as CI
 import Data.Foldable (for_)
-import Data.List (find, isPrefixOf, foldl')
+import Data.List (find, foldl', isPrefixOf)
 import qualified Data.Map as Map
 import Data.Maybe (fromMaybe, isJust, mapMaybe)
 import Data.Text (Text)
@@ -103,10 +102,9 @@ import Network.Bookmark.Types
     BookmarkItemBatch (..),
     BookmarkItemId,
     BookmarkRequest (AddBookmark, BatchArchiveBookmarks, RetrieveBookmarks),
+    PendingAction (..),
     RaindropCollectionId (RaindropCollectionId),
     URL (..),
-    PendingAction (..),
-    _BookmarkItemId,
     biCollectionId,
     biCreated,
     biExcerpt,
@@ -116,8 +114,8 @@ import Network.Bookmark.Types
     biLink,
     biNote,
     biTitle,
+    _BookmarkItemId,
   )
-import qualified Network.Raindrop as R
 import Network.Bookmark.Ui.State
   ( HocketState,
     Name (..),
@@ -142,6 +140,7 @@ import Network.HTTP.Client
     responseStatus,
   )
 import Network.Raindrop (raindrop)
+import qualified Network.Raindrop as R
 import Network.URI
   ( URI (uriAuthority, uriPath, uriQuery),
     URIAuth (uriRegName),
@@ -170,6 +169,7 @@ import Options.Applicative
     strOption,
     (<**>),
   )
+import System.Exit (exitFailure)
 import System.Process
   ( CreateProcess,
     createProcess,
@@ -183,7 +183,7 @@ makeLensesFor [("std_err", "stdErr"), ("std_out", "stdOut")] ''CreateProcess
 
 data HocketCommand
   = RunTUI
-  | AddBookmarkCmd Text (Maybe Text) [Text]
+  | AddBookmarkCmd !Text !(Maybe Text) ![Text]
   deriving (Show, Eq)
 
 tuiCommandParser :: Mod CommandFields HocketCommand
@@ -194,10 +194,11 @@ addCommandParser :: Mod CommandFields HocketCommand
 addCommandParser =
   command "add" (info addBookmarkParser (progDesc "Add a bookmark to Raindrop"))
   where
-    addBookmarkParser = AddBookmarkCmd
-      <$> argument str (metavar "URL" <> help "URL to bookmark")
-      <*> optional (strOption (long "collection" <> help "Collection ID (defaults to -1 for unsorted)"))
-      <*> many (strOption (long "tag" <> help "Tags to add"))
+    addBookmarkParser =
+      AddBookmarkCmd
+        <$> argument str (metavar "URL" <> help "URL to bookmark")
+        <*> optional (strOption (long "collection" <> help "Collection ID (defaults to -1 for unsorted)"))
+        <*> many (strOption (long "tag" <> help "Tags to add"))
 
 hocketCommandParser :: Parser HocketCommand
 hocketCommandParser = hsubparser (tuiCommandParser <> addCommandParser)
@@ -226,13 +227,13 @@ vtyEventHandler es (EvKey KEnter []) = do
   liftIO . for_ (focusedItem s) $ \bit -> do
     es `trigger` browseItemEvt bit
     es `trigger` shiftItemEvt (view biId bit)
-vtyEventHandler es (EvKey (KChar 'u') []) = do
+vtyEventHandler es (EvKey (KChar 'U') []) = do
   liftIO $ es `trigger` fetchItemsEvt
   pure ()
 vtyEventHandler es (EvKey (KChar 'A') []) = do
   liftIO $ es `trigger` archiveItemsEvt
   pure ()
-vtyEventHandler es (EvKey (KChar 'd') []) = do
+vtyEventHandler es (EvKey (KChar 'm') []) = do
   s <- use id
   liftIO . for_ (focusedItem s) $ \bit ->
     es `trigger` shiftItemEvt (view biId bit)
@@ -374,12 +375,14 @@ runAddCommand :: Text -> Maybe Text -> [Text] -> IO ()
 runAddCommand url mCollection tags = do
   result <- runStdoutLoggingT $ do
     logInfoN $ "Adding bookmark: " <> url
-    cred <- (liftIO $ input auto "./config.dhall") `Catch.catch` \(e :: SomeException) -> do
-      logErrorN $ "Error loading config: " <> T.pack (show e)
-      liftIO exitFailure
-    result <- (R.raindrop cred (AddBookmark url mCollection tags)) `Catch.catch` \(e :: SomeException) -> do
-      logErrorN $ "Error adding bookmark: " <> T.pack (show e)
-      return Nothing
+    cred <-
+      liftIO (input auto "./config.dhall") `Catch.catch` \(e :: SomeException) -> do
+        logErrorN $ "Error loading config: " <> T.pack (show e)
+        liftIO exitFailure
+    result <-
+      R.raindrop cred (AddBookmark url mCollection tags) `Catch.catch` \(e :: SomeException) -> do
+        logErrorN $ "Error adding bookmark: " <> T.pack (show e)
+        return Nothing
     case result of
       Just bookmarkId -> do
         logInfoN $ "Successfully added bookmark with ID: " <> (bookmarkId ^. _BookmarkItemId)
@@ -387,7 +390,7 @@ runAddCommand url mCollection tags = do
       Nothing -> do
         logErrorN "Failed to add bookmark"
         return False
-  if result then return () else exitFailure
+  unless result exitFailure
 
 main :: IO ()
 main = do
@@ -482,15 +485,14 @@ listDrawElementWithAction s sel e =
         None -> "  "
       pendingAction = getPendingActionForItem (view biId e) s
       attrName' = case (pendingAction, sel) of
-                   (ToBeArchived, True) -> attrName "list" <> attrName "flaggedSelected"
-                   (ToBeArchived, False) -> attrName "list" <> attrName "flaggedItem"
-                   (None, True) -> attrName "list" <> attrName "listSelected"
-                   (None, False) -> attrName "list" <> attrName "unselectedItem"
-  in withAttr attrName' (txt actionIndicator <+> padRight Max (txtDisplay e))
+        (ToBeArchived, True) -> attrName "list" <> attrName "flaggedSelected"
+        (ToBeArchived, False) -> attrName "list" <> attrName "flaggedItem"
+        (None, True) -> attrName "list" <> attrName "listSelected"
+        (None, False) -> attrName "list" <> attrName "unselectedItem"
+   in withAttr attrName' (txt actionIndicator <+> padRight Max (txtDisplay e))
 
 orange :: Vty.Color
 orange = Vty.rgbColor 215 135 (0 :: Int)
-
 
 boldBlackOnOrange :: Vty.Attr
 boldBlackOnOrange =
@@ -519,7 +521,6 @@ flaggedRedFg = Vty.defAttr `Vty.withForeColor` flaggedRed
 flaggedRedSelectedFg :: Vty.Attr
 flaggedRedSelectedFg = Vty.defAttr `Vty.withForeColor` flaggedRedDark `Vty.withBackColor` orange `Vty.withStyle` Vty.bold
 
-
 hBar :: Text -> Widget Name
 hBar = withAttr (attrName "bar") . padRight Max . txt
 
@@ -527,21 +528,21 @@ retrieveItems :: BookmarkCredentials -> Maybe Text -> RaindropCollectionId -> IO
 retrieveItems cred searchParam collectionId = do
   tryHttpException $
     runStdoutLoggingT $
-    unfoldrM
-      ( \currentPage -> do
-          (_, items) <- raindrop cred (RetrieveBookmarks currentPage collectionId searchParam)
+      unfoldrM
+        ( \currentPage -> do
+            (_, items) <- raindrop cred (RetrieveBookmarks currentPage collectionId searchParam)
 
-          let mostRecentUpdate =
-                if null items
-                  then 0
-                  else maximum (map (utcTimeToPOSIXSeconds . view biLastUpdate) items)
+            let mostRecentUpdate =
+                  if null items
+                    then 0
+                    else maximum (map (utcTimeToPOSIXSeconds . view biLastUpdate) items)
 
-          pure $
-            if length items == 0
-              then Nothing
-              else Just (BookmarkItemBatch mostRecentUpdate items (fromIntegral $ length items), currentPage + 1)
-      )
-      0
+            pure $
+              if length items == 0
+                then Nothing
+                else Just (BookmarkItemBatch mostRecentUpdate items (fromIntegral $ length items), currentPage + 1)
+        )
+        0
 
 performArchive :: BookmarkCredentials -> [BookmarkItem] -> IO (Either HttpException [(BookmarkItem, Bool)])
 performArchive cred items = do
@@ -602,7 +603,7 @@ getPendingActionForItem bid s =
 
 getItemsWithPendingAction :: PendingAction -> HocketState -> [BookmarkItem]
 getItemsWithPendingAction targetAction s =
-  [ item | (action, item) <- Map.elems (s ^. hsContents), action == targetAction ]
+  [item | (action, item) <- Map.elems (s ^. hsContents), action == targetAction]
 
 urlReplacements :: [(String, String)]
 urlReplacements =
