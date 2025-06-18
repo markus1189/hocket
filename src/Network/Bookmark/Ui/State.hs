@@ -82,7 +82,7 @@ hsNumItems s =
     partitioned = partitionItems s
 
 initialState :: BookmarkCredentials -> HocketState
-initialState cred =
+initialState =
   HocketState
     (L.list ItemListName V.empty 1)
     (F.focusRing [ItemListName])
@@ -90,7 +90,6 @@ initialState cred =
     Nothing
     Nothing
     Map.empty
-    cred
 
 insertItem :: BookmarkItem -> HocketState -> HocketState
 insertItem bit s =

@@ -538,7 +538,7 @@ retrieveItems cred searchParam collectionId = do
                     else maximum (map (utcTimeToPOSIXSeconds . view biLastUpdate) items)
 
             pure $
-              if length items == 0
+              if null items
                 then Nothing
                 else Just (BookmarkItemBatch mostRecentUpdate items (fromIntegral $ length items), currentPage + 1)
         )

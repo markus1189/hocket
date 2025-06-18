@@ -8,9 +8,10 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 - `nix build` - Build the project
 - `nix run -- tui` - Run the TUI application directly
 - `nix develop` - Enter development shell with all dependencies
+- `hlint` - Run linter
 
 ### Using Cabal
-- `cabal build` - Build the project  
+- `cabal build` - Build the project
 - `cabal test` - Run the test suite
 - `cabal build --ghc-options="-Wall -Werror"` - Development build with warnings
 
@@ -41,7 +42,7 @@ Hocket is a terminal-based bookmark manager for Raindrop.io built with Haskell a
 
 ### Dependencies
 - **brick** - Terminal user interface framework
-- **wreq** - HTTP client for API communication  
+- **wreq** - HTTP client for API communication
 - **lens** - Functional record access and manipulation
 - **dhall** - Configuration language
 - **aeson** - JSON parsing and serialization

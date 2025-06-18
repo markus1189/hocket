@@ -112,8 +112,8 @@ makeLenses ''BookmarkItemBatch
 
 instance FromJSON BookmarkItem where
   parseJSON (Object o) =
-    BookmarkItem
-      <$> (BookmarkItemId . Text.pack . show <$> (o .: "_id" :: Parser Int))
+    (BookmarkItem . BookmarkItemId . Text.pack . show
+       <$> (o .: "_id" :: Parser Int))
       <*> o .: "link"
       <*> o .: "excerpt"
       <*> o .: "note"

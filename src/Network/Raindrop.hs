@@ -8,7 +8,7 @@ import Control.Exception (SomeException, try)
 import Control.Lens ((&), (.~), (^?), view)
 import Control.Lens.Operators ((^.), (^..))
 import Control.Monad.Logger (MonadLogger, logErrorN)
-import Control.Monad.IO.Class (MonadIO)
+import Control.Monad.IO.Class (MonadIO, liftIO)
 import Control.Retry (RetryPolicy, RetryStatus, exponentialBackoff, limitRetries, retrying)
 import qualified Data.Aeson as A
 import Data.Aeson.Lens (AsJSON (_JSON), AsValue (_Bool), key, values, _Integral)
@@ -19,7 +19,6 @@ import Network.Bookmark.Types (BookmarkCredentials, BookmarkItemId (..), Bookmar
 import qualified Network.HTTP.Client as HC
 import qualified Network.HTTP.Client.TLS as HCTLS (tlsManagerSettings)
 import Network.Wreq (param)
-import Control.Monad.IO.Class (liftIO)
 import qualified Network.Wreq as W
 import Numeric.Natural (Natural)
 
