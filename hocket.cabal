@@ -21,8 +21,7 @@ library
                      , Network.Bookmark.Types
                      , Network.Bookmark.Ui.State
                      , Network.Bookmark.Ui.Widgets
-  Build-depends:       ConfigFile
-                     , aeson
+  Build-depends:       aeson
                      , async
                      , attoparsec
                      , base
