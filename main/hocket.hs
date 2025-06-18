@@ -339,7 +339,9 @@ uiCommandEventHandler ::
   BChan HocketEvent ->
   UiCommand ->
   EventM Name HocketState ()
-uiCommandEventHandler _ (ShiftItem bid) = id %= togglePendingAction bid
+uiCommandEventHandler _ (ShiftItem bid) = do
+  id %= togglePendingAction bid
+  itemList %= L.listMoveDown
 uiCommandEventHandler _ (RemoveItems bis) = id %= removeItems bis
 uiCommandEventHandler _ (SetStatus t) = hsStatus .= t
 uiCommandEventHandler es (BrowseItem bit) = do
