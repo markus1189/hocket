@@ -123,7 +123,7 @@ hocket add https://example.com --collection 12345 --tag rust --tag cli
 
 #### Navigation
 - `↑/↓` or `j/k` - Move up/down in the list
-- `J/K` - Jump to next/previous item with different flag status
+- `J/K` - Jump to next/previous flagged item (skip unflagged items)
 - `q` - Quit application
 
 #### Item Actions
@@ -134,8 +134,9 @@ hocket add https://example.com --collection 12345 --tag rust --tag cli
 - `m` - Toggle archive flag on selected item
 
 #### Bulk Operations
-- `U` - Update/fetch latest items from Raindrop.io
-- `A` - Archive all pending items
+- `r` - Refresh/fetch latest items from Raindrop.io
+- `U` - Clear all flags from all items
+- `A` - Archive all flagged items
 
 ### Interface Layout
 
@@ -256,7 +257,7 @@ Current limitations that may be addressed in future versions:
 - Ensure the collection exists and is accessible
 
 **"Items not appearing"**
-- Press `u` to fetch latest items
+- Press `r` to refresh/fetch latest items
 - Check that items exist in your Raindrop.io unsorted collection
 - Verify your account has bookmarks
 
