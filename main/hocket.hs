@@ -233,7 +233,7 @@ vtyEventHandler es (EvKey KEnter []) = do
 vtyEventHandler es (EvKey (KChar 'r') []) = do
   liftIO $ es `trigger` fetchItemsEvt
   pure ()
-vtyEventHandler es (EvKey (KChar 'A') []) = do
+vtyEventHandler es (EvKey (KChar 'R') []) = do
   liftIO $ es `trigger` archiveItemsEvt
   pure ()
 vtyEventHandler es (EvKey (KChar 'a') []) = do

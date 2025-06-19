@@ -136,7 +136,7 @@ hocket add https://example.com --collection 12345 --tag rust --tag cli
 #### Bulk Operations
 - `r` - Refresh/fetch latest items from Raindrop.io
 - `U` - Clear all flags from all items
-- `A` - Archive all flagged items
+- `R` - Archive all flagged items
 
 ### Interface Layout
 
