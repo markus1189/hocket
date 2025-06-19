@@ -84,6 +84,7 @@ executable hocket
                      , text
                      , time
                      , transformers
+                     , vector
                      , vty-unix
                      , vty
 

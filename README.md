@@ -124,6 +124,7 @@ hocket add https://example.com --collection 12345 --tag rust --tag cli
 
 #### Navigation
 - `↑/↓` or `j/k` - Move up/down in current list
+- `J/K` - Jump to next/previous item with different flag
 - `Tab` - Switch between unread and pending lists
 - `q` - Quit application
 

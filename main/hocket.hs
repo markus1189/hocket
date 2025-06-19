@@ -62,12 +62,13 @@ import Control.Monad.Loops (unfoldrM)
 import Control.Monad.State (MonadState)
 import qualified Data.CaseInsensitive as CI
 import Data.Foldable (for_)
-import Data.List (find, foldl', isPrefixOf)
+import Data.List (find, findIndex, foldl', isPrefixOf)
 import qualified Data.Map as Map
 import Data.Maybe (fromMaybe, isJust, mapMaybe)
 import Data.Text (Text)
 import qualified Data.Text as T
 import qualified Data.Text.Encoding as T
+import qualified Data.Vector as V
 import Data.Time.Clock.POSIX (POSIXTime, posixSecondsToUTCTime, utcTimeToPOSIXSeconds)
 import Data.Time.Format (defaultTimeLocale, formatTime)
 import Data.Time.LocalTime
@@ -247,6 +248,16 @@ vtyEventHandler es (EvKey (KChar 'm') []) = do
   s <- use id
   liftIO . for_ (focusedItem s) $ \bit ->
     es `trigger` shiftItemEvt (view biId bit)
+vtyEventHandler _ (EvKey (KChar 'J') []) = do
+  s <- use id
+  case findNextDifferentFlag s of
+    Just newIdx -> itemList %= L.listMoveTo newIdx
+    Nothing -> pure ()
+vtyEventHandler _ (EvKey (KChar 'K') []) = do
+  s <- use id  
+  case findPrevDifferentFlag s of
+    Just newIdx -> itemList %= L.listMoveTo newIdx
+    Nothing -> pure ()
 vtyEventHandler _ (EvKey (KChar 'q') []) = halt
 vtyEventHandler _ e = do
   zoom itemList (handleListEventVi handleListEvent e)
@@ -616,6 +627,32 @@ getPendingActionForItem bid s =
 getItemsWithPendingAction :: PendingAction -> HocketState -> [BookmarkItem]
 getItemsWithPendingAction targetAction s =
   [item | (action, item) <- Map.elems (s ^. hsContents), action == targetAction]
+
+-- Find next item with different flag from current selection
+findNextDifferentFlag :: HocketState -> Maybe Int
+findNextDifferentFlag s = do
+  currentItem <- focusedItem s
+  let currentFlag = getPendingActionForItem (view biId currentItem) s
+  list <- focusedList s
+  currentIdx <- view L.listSelectedL list
+  let items = V.toList $ view L.listElementsL list
+      remainingItems = drop (currentIdx + 1) items
+  case findIndex (\item -> getPendingActionForItem (view biId item) s /= currentFlag) remainingItems of
+    Just relativeIdx -> Just (currentIdx + 1 + relativeIdx)
+    Nothing -> Nothing
+
+-- Find previous item with different flag from current selection  
+findPrevDifferentFlag :: HocketState -> Maybe Int
+findPrevDifferentFlag s = do
+  currentItem <- focusedItem s
+  let currentFlag = getPendingActionForItem (view biId currentItem) s
+  list <- focusedList s
+  currentIdx <- view L.listSelectedL list
+  let items = V.toList $ view L.listElementsL list
+      precedingItems = reverse $ take currentIdx items
+  case findIndex (\item -> getPendingActionForItem (view biId item) s /= currentFlag) precedingItems of
+    Just relativeIdx -> Just (currentIdx - 1 - relativeIdx)
+    Nothing -> Nothing
 
 urlReplacements :: [(String, String)]
 urlReplacements =
