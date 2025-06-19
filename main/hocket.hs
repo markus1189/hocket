@@ -233,6 +233,16 @@ vtyEventHandler es (EvKey (KChar 'U') []) = do
 vtyEventHandler es (EvKey (KChar 'A') []) = do
   liftIO $ es `trigger` archiveItemsEvt
   pure ()
+vtyEventHandler es (EvKey (KChar 'a') []) = do
+  s <- use id
+  liftIO . for_ (focusedItem s) $ \bit ->
+    unless (getPendingActionForItem (view biId bit) s == ToBeArchived) $
+      es `trigger` shiftItemEvt (view biId bit)
+vtyEventHandler es (EvKey (KChar 'u') []) = do
+  s <- use id
+  liftIO . for_ (focusedItem s) $ \bit ->
+    when (getPendingActionForItem (view biId bit) s == ToBeArchived) $
+      es `trigger` shiftItemEvt (view biId bit)
 vtyEventHandler es (EvKey (KChar 'm') []) = do
   s <- use id
   liftIO . for_ (focusedItem s) $ \bit ->
