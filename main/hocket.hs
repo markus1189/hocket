@@ -471,11 +471,12 @@ drawGui tz s = [w]
   where
     w =
       vBox
-        [ hBar
+        [ hBarWithHints
             ( "Hocket: ("
                 <> uncurry (sformat (F.int % "|" % F.int)) (hsNumItems s)
                 <> ")"
-            ),
+            )
+            "spc:Browse ent:Browse+flag r:Refresh R:Archive a:Flag u:Unflag m:Toggle J/K:Jump U:Unflag all q:Quit",
           hBorder,
           hBar
             ( maybe
@@ -552,6 +553,10 @@ flaggedRedSelectedFg = Vty.defAttr `Vty.withForeColor` flaggedRedDark `Vty.withB
 
 hBar :: Text -> Widget Name
 hBar = withAttr (attrName "bar") . padRight Max . txt
+
+hBarWithHints :: Text -> Text -> Widget Name
+hBarWithHints leftText rightText = 
+  withAttr (attrName "bar") (txt leftText <+> padLeft Max (txt rightText))
 
 retrieveItems :: BookmarkCredentials -> Maybe Text -> RaindropCollectionId -> IO (Either HttpException [BookmarkItemBatch])
 retrieveItems cred searchParam collectionId = do
