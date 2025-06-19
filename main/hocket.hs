@@ -85,6 +85,7 @@ import Events
     archivedItemsEvt,
     asyncActionFailedEvt,
     browseItemEvt,
+    clearAllFlagsEvt,
     fetchItemsEvt,
     fetchedItemsEvt,
     setStatusEvt,
@@ -120,6 +121,7 @@ import Network.Bookmark.Types
 import Network.Bookmark.Ui.State
   ( HocketState,
     Name (..),
+    clearAllFlags,
     focusRing,
     hsAsync,
     hsContents,
@@ -228,7 +230,7 @@ vtyEventHandler es (EvKey KEnter []) = do
   liftIO . for_ (focusedItem s) $ \bit -> do
     es `trigger` browseItemEvt bit
     es `trigger` shiftItemEvt (view biId bit)
-vtyEventHandler es (EvKey (KChar 'U') []) = do
+vtyEventHandler es (EvKey (KChar 'r') []) = do
   liftIO $ es `trigger` fetchItemsEvt
   pure ()
 vtyEventHandler es (EvKey (KChar 'A') []) = do
@@ -258,6 +260,9 @@ vtyEventHandler _ (EvKey (KChar 'K') []) = do
   case findPrevDifferentFlag s of
     Just newIdx -> itemList %= L.listMoveTo newIdx
     Nothing -> pure ()
+vtyEventHandler es (EvKey (KChar 'U') []) = do
+  liftIO $ es `trigger` clearAllFlagsEvt
+  pure ()
 vtyEventHandler _ (EvKey (KChar 'q') []) = halt
 vtyEventHandler _ e = do
   zoom itemList (handleListEventVi handleListEvent e)
@@ -365,6 +370,7 @@ uiCommandEventHandler _ (ShiftItem bid) = do
   itemList %= L.listMoveDown
 uiCommandEventHandler _ (RemoveItems bis) = id %= removeItems bis
 uiCommandEventHandler _ (SetStatus t) = hsStatus .= t
+uiCommandEventHandler _ ClearAllFlags = id %= clearAllFlags
 uiCommandEventHandler es (BrowseItem bit) = do
   res <- liftIO . try @SomeException $ browseItem "firefox '%s'" (URL . T.unpack $ view biLink bit)
   case res of

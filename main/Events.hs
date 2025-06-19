@@ -10,6 +10,7 @@ module Events (HocketEvent(..)
               ,removeItemsEvt
               ,setStatusEvt
               ,browseItemEvt
+              ,clearAllFlagsEvt
               ) where
 
 import           Data.Set (Set)
@@ -33,6 +34,7 @@ data UiCommand = ShiftItem !BookmarkItemId
                | RemoveItems !(Set BookmarkItemId)
                | SetStatus !(Maybe Text)
                | BrowseItem !BookmarkItem
+               | ClearAllFlags
                deriving (Show,Eq)
 
 fetchItemsEvt :: HocketEvent
@@ -61,3 +63,6 @@ setStatusEvt mstatus= HocketUi (SetStatus mstatus)
 
 browseItemEvt :: BookmarkItem -> HocketEvent
 browseItemEvt bit = HocketUi (BrowseItem bit)
+
+clearAllFlagsEvt :: HocketEvent
+clearAllFlagsEvt = HocketUi ClearAllFlags
