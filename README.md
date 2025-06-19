@@ -2,7 +2,6 @@
 
 A minimalistic terminal user interface for [Raindrop.io](https://raindrop.io/) written in Haskell.
 
-[![Build Status](https://travis-ci.org/markus1189/hocket.png?branch=master)](https://travis-ci.org/markus1189/hocket)
 
 ## Overview
 
@@ -13,7 +12,7 @@ Hocket provides a keyboard-driven terminal interface for efficiently managing yo
 ## Features
 
 ### Core Functionality
-- **Dual-pane interface** - View unread items (top) and pending archives (bottom)
+- **Single-pane interface with action flags** - View all items with visual indicators for pending actions
 - **Real-time synchronization** - Fetch latest bookmarks from Raindrop.io
 - **Batch operations** - Archive multiple items at once
 - **Smart updates** - Only fetch items modified since last sync
@@ -123,9 +122,8 @@ hocket add https://example.com --collection 12345 --tag rust --tag cli
 ### Keyboard Controls
 
 #### Navigation
-- `↑/↓` or `j/k` - Move up/down in current list
-- `J/K` - Jump to next/previous item with different flag
-- `Tab` - Switch between unread and pending lists
+- `↑/↓` or `j/k` - Move up/down in the list
+- `J/K` - Jump to next/previous item with different flag status
 - `q` - Quit application
 
 #### Item Actions
@@ -143,12 +141,12 @@ hocket add https://example.com --collection 12345 --tag rust --tag cli
 
 ```
 ┌─ Hocket: (15|3) ────────────────────────────────────────┐
-│ 2025-01-15: ★ Important Article Title           reddit.com/r/... │
-│ 2025-01-14:   Regular Bookmark                  github.com/...   │
-│ 2025-01-13:   Another Item                      example.com/...  │
+│   2025-01-15: ★ Important Article Title         reddit.com/r/... │
+│   2025-01-14:   Regular Bookmark                github.com/...   │
+│ A 2025-01-13:   Item flagged for archive        example.com/...  │
+│   2025-01-12:   Another Item                    news.ycombinator...│
+│ A 2025-01-11: ★ Favorite flagged for archive    stackoverflow.com/│
 ├──────────────────────────────────────────────────────────────────┤
-│ 2025-01-12:   Item pending archive              news.ycombinator...│
-│ 2025-01-11: ★ Favorite pending archive          stackoverflow.com/│
 └─ NOTE: This is a sample note from the selected item ──────────────┘
 │                                                    Last: 14:32:18 │
 │ Status: fetching since: 2025-01-14                                │
@@ -156,11 +154,12 @@ hocket add https://example.com --collection 12345 --tag rust --tag cli
 ```
 
 #### Visual Elements
+- **A** - Flag indicating item is pending archive action
 - **★** - Indicates favorite bookmarks
 - **Date** - When the bookmark was created
 - **Title** - Bookmark title or URL if no title available
 - **Domain** - Truncated URL showing the domain and path
-- **Bottom pane** - Shows notes or excerpts for the selected item
+- **Bottom section** - Shows notes or excerpts for the selected item
 - **Status bar** - Last update time and current operation status
 
 ## Technical Details
