@@ -252,12 +252,12 @@ vtyEventHandler es (EvKey (KChar 'm') []) = do
     es `trigger` shiftItemEvt (view biId bit)
 vtyEventHandler _ (EvKey (KChar 'J') []) = do
   s <- use id
-  case findNextDifferentFlag s of
+  case findNextFlaggedItem s of
     Just newIdx -> itemList %= L.listMoveTo newIdx
     Nothing -> pure ()
 vtyEventHandler _ (EvKey (KChar 'K') []) = do
   s <- use id  
-  case findPrevDifferentFlag s of
+  case findPrevFlaggedItem s of
     Just newIdx -> itemList %= L.listMoveTo newIdx
     Nothing -> pure ()
 vtyEventHandler es (EvKey (KChar 'U') []) = do
@@ -634,29 +634,26 @@ getItemsWithPendingAction :: PendingAction -> HocketState -> [BookmarkItem]
 getItemsWithPendingAction targetAction s =
   [item | (action, item) <- Map.elems (s ^. hsContents), action == targetAction]
 
--- Find next item with different flag from current selection
-findNextDifferentFlag :: HocketState -> Maybe Int
-findNextDifferentFlag s = do
-  currentItem <- focusedItem s
-  let currentFlag = getPendingActionForItem (view biId currentItem) s
+
+-- Find next flagged item
+findNextFlaggedItem :: HocketState -> Maybe Int
+findNextFlaggedItem s = do
   list <- focusedList s
   currentIdx <- view L.listSelectedL list
   let items = V.toList $ view L.listElementsL list
       remainingItems = drop (currentIdx + 1) items
-  case findIndex (\item -> getPendingActionForItem (view biId item) s /= currentFlag) remainingItems of
+  case findIndex (\item -> getPendingActionForItem (view biId item) s == ToBeArchived) remainingItems of
     Just relativeIdx -> Just (currentIdx + 1 + relativeIdx)
     Nothing -> Nothing
 
--- Find previous item with different flag from current selection  
-findPrevDifferentFlag :: HocketState -> Maybe Int
-findPrevDifferentFlag s = do
-  currentItem <- focusedItem s
-  let currentFlag = getPendingActionForItem (view biId currentItem) s
+-- Find previous flagged item
+findPrevFlaggedItem :: HocketState -> Maybe Int
+findPrevFlaggedItem s = do
   list <- focusedList s
   currentIdx <- view L.listSelectedL list
   let items = V.toList $ view L.listElementsL list
       precedingItems = reverse $ take currentIdx items
-  case findIndex (\item -> getPendingActionForItem (view biId item) s /= currentFlag) precedingItems of
+  case findIndex (\item -> getPendingActionForItem (view biId item) s == ToBeArchived) precedingItems of
     Just relativeIdx -> Just (currentIdx - 1 - relativeIdx)
     Nothing -> Nothing
 
