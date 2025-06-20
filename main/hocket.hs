@@ -68,7 +68,6 @@ import Data.Maybe (fromMaybe, isJust, mapMaybe)
 import Data.Text (Text)
 import qualified Data.Text as T
 import qualified Data.Text.Encoding as T
-import qualified Data.Vector as V
 import Data.Time.Clock.POSIX (POSIXTime, posixSecondsToUTCTime, utcTimeToPOSIXSeconds)
 import Data.Time.Format (defaultTimeLocale, formatTime)
 import Data.Time.LocalTime
@@ -76,6 +75,7 @@ import Data.Time.LocalTime
     getCurrentTimeZone,
     utcToLocalTime,
   )
+import qualified Data.Vector as V
 import Dhall (auto, input)
 import Events
   ( AsyncCommand (..),
@@ -258,7 +258,7 @@ vtyEventHandler _ (EvKey (KChar 'J') []) = do
     Just newIdx -> itemList %= L.listMoveTo newIdx
     Nothing -> pure ()
 vtyEventHandler _ (EvKey (KChar 'K') []) = do
-  s <- use id  
+  s <- use id
   case findPrevFlaggedItem s of
     Just newIdx -> itemList %= L.listMoveTo newIdx
     Nothing -> pure ()
@@ -561,7 +561,7 @@ hBar :: Text -> Widget Name
 hBar = withAttr (attrName "bar") . padRight Max . txt
 
 hBarWithHints :: Text -> Text -> Widget Name
-hBarWithHints leftText rightText = 
+hBarWithHints leftText rightText =
   withAttr (attrName "bar") (txt leftText <+> padLeft Max (txt rightText))
 
 retrieveItems :: BookmarkCredentials -> Maybe Text -> RaindropCollectionId -> IO (Either HttpException [BookmarkItemBatch])
@@ -644,7 +644,6 @@ getPendingActionForItem bid s =
 getItemsWithPendingAction :: PendingAction -> HocketState -> [BookmarkItem]
 getItemsWithPendingAction targetAction s =
   [item | (action, item) <- Map.elems (s ^. hsContents), action == targetAction]
-
 
 -- Find next flagged item
 findNextFlaggedItem :: HocketState -> Maybe Int

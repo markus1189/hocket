@@ -5,17 +5,17 @@
 module Network.Raindrop where
 
 import Control.Exception (SomeException, try)
-import Control.Lens ((&), (.~), (^?), view)
+import Control.Lens (view, (&), (.~), (^?))
 import Control.Lens.Operators ((^.), (^..))
-import Control.Monad.Logger (MonadLogger, logErrorN)
 import Control.Monad.IO.Class (MonadIO, liftIO)
+import Control.Monad.Logger (MonadLogger, logErrorN)
 import Control.Retry (RetryPolicy, RetryStatus, exponentialBackoff, limitRetries, retrying)
 import qualified Data.Aeson as A
 import Data.Aeson.Lens (AsJSON (_JSON), AsValue (_Bool), key, values, _Integral)
 import Data.Maybe (fromMaybe)
 import qualified Data.Text as T
 import qualified Data.Text.Encoding as TE
-import Network.Bookmark.Types (BookmarkCredentials, BookmarkItemId (..), BookmarkRequest (..), RaindropCollectionId (RaindropCollectionId), RaindropToken (..), _BookmarkItemId, raindropToken, archiveCollectionId)
+import Network.Bookmark.Types (BookmarkCredentials, BookmarkItemId (..), BookmarkRequest (..), RaindropCollectionId (RaindropCollectionId), RaindropToken (..), archiveCollectionId, raindropToken, _BookmarkItemId)
 import qualified Network.HTTP.Client as HC
 import qualified Network.HTTP.Client.TLS as HCTLS (tlsManagerSettings)
 import Network.Wreq (param)
@@ -39,12 +39,13 @@ raindrop :: (MonadIO m, MonadLogger m) => BookmarkCredentials -> BookmarkRequest
 raindrop creds (AddBookmark link mCollection tags) = do
   let rt = view raindropToken creds
       collection = fromMaybe "-1" mCollection
-      payload = A.object
-        [ "link" A..= link
-        , "collection" A..= collection
-        , "tags" A..= tags
-        , "pleaseParse" A..= A.object []
-        ]
+      payload =
+        A.object
+          [ "link" A..= link,
+            "collection" A..= collection,
+            "tags" A..= tags,
+            "pleaseParse" A..= A.object []
+          ]
   result <- liftIO $ retrying retryPolicy shouldRetry $ \_ -> do
     try $ do
       resp <- W.postWith (commonOpts rt) "https://api.raindrop.io/rest/v1/raindrop" payload
@@ -58,26 +59,28 @@ raindrop creds (ArchiveBookmark bid) = do
   let rt = view raindropToken creds
       archiveId = view archiveCollectionId creds
   resp <-
-    liftIO $ W.putWith (commonOpts rt) ("https://api.raindrop.io/rest/v1/raindrop/" <> T.unpack (bid ^. _BookmarkItemId)) $
-      A.object
-        [ "collection" A..= A.object ["$id" A..= archiveId]
-        ]
+    liftIO $
+      W.putWith (commonOpts rt) ("https://api.raindrop.io/rest/v1/raindrop/" <> T.unpack (bid ^. _BookmarkItemId)) $
+        A.object
+          [ "collection" A..= A.object ["$id" A..= archiveId]
+          ]
   pure ((== Just True) $ resp ^? W.responseBody . key "result" . _Bool)
 raindrop creds (BatchArchiveBookmarks bids) = do
   let rt = view raindropToken creds
       archiveId = view archiveCollectionId creds
-      payload = A.object 
-        [ "ids" A..= map (^. _BookmarkItemId) bids
-        , "collection" A..= A.object ["$id" A..= archiveId]
-        ]
+      payload =
+        A.object
+          [ "ids" A..= map (^. _BookmarkItemId) bids,
+            "collection" A..= A.object ["$id" A..= archiveId]
+          ]
   resp <- liftIO $ W.putWith (commonOpts rt) "https://api.raindrop.io/rest/v1/raindrops/-1" payload
   pure ((== Just True) $ resp ^? W.responseBody . key "result" . _Bool)
 raindrop creds (RetrieveBookmarks page (RaindropCollectionId cid) mSearchParam) = do
   let rt = view raindropToken creds
       baseOpts = commonOpts rt & param "page" .~ [T.pack $ show page] & param "perpage" .~ ["50"]
       opts = case mSearchParam of
-               Nothing -> baseOpts
-               Just searchParam -> baseOpts & param "search" .~ [searchParam]
+        Nothing -> baseOpts
+        Just searchParam -> baseOpts & param "search" .~ [searchParam]
   resp <- liftIO $ W.getWith opts ("https://api.raindrop.io/rest/v1/raindrops/" <> T.unpack cid)
   let count = resp ^? W.responseBody . key "count" . _Integral @_ @Natural
   pure (fromMaybe 0 count, resp ^.. W.responseBody . key "items" . values . _JSON)

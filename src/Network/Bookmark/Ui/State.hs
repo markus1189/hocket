@@ -131,12 +131,13 @@ syncForRender s =
     & itemList . L.listSelectedL .~ (view (itemList . L.listSelectedL) s <|> (allSortedItems ^? _head $> 0))
     & itemList %~ adjustFocus
   where
-    allSortedItems = V.fromList $ 
-      map (\(Down (SBU x)) -> x) $ 
-      SL.fromSortedList $ 
-      SL.toSortedList $ 
-      map (Down . SBU . snd) $ 
-      Map.elems (s ^. hsContents)
+    allSortedItems =
+      V.fromList $
+        map (\(Down (SBU x)) -> x) $
+          SL.fromSortedList $
+            SL.toSortedList $
+              map (Down . SBU . snd) $
+                Map.elems (s ^. hsContents)
 
 adjustFocus :: L.List n a -> L.List n a
 adjustFocus l =
