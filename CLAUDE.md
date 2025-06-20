@@ -57,3 +57,4 @@ Hocket is a terminal-based bookmark manager for Raindrop.io built with Haskell a
 - Follow Brick TUI patterns for UI components
 - Run `cabal test` after implementing changes
 - Use `rg` (ripgrep) for searching the codebase
+- Update README when you change keybindings
