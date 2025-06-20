@@ -248,10 +248,6 @@ vtyEventHandler es (EvKey (KChar 'u') []) = do
   liftIO . for_ (focusedItem s) $ \bit ->
     when (getPendingActionForItem (view biId bit) s == ToBeArchived) $
       es `trigger` shiftItemEvt (view biId bit)
-vtyEventHandler es (EvKey (KChar 'm') []) = do
-  s <- use id
-  liftIO . for_ (focusedItem s) $ \bit ->
-    es `trigger` shiftItemEvt (view biId bit)
 vtyEventHandler _ (EvKey (KChar 'J') []) = do
   s <- use id
   case findNextFlaggedItem s of
@@ -482,7 +478,7 @@ drawGui tz s = [w]
                 <> uncurry (sformat (F.int % "|" % F.int)) (hsNumItems s)
                 <> ")"
             )
-            "spc:Browse ent:Browse+flag r:Refresh X:Execute Flags a:Flag u:Unflag m:Toggle J/K:Jump U:Unflag all A:Archive all q:Quit",
+            "spc:Browse ent:Browse+flag r:Refresh X:Execute Flags a:Flag u:Unflag J/K:Jump U:Unflag all A:Archive all q:Quit",
           hBorder,
           hBar
             ( maybe

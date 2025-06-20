@@ -131,7 +131,6 @@ hocket add https://example.com --collection 12345 --tag rust --tag cli
 - `Enter` - Open item in browser AND mark for archiving
 - `a` - Flag selected item for archiving
 - `u` - Remove archive flag from selected item
-- `m` - Toggle archive flag on selected item
 
 #### Bulk Operations
 - `r` - Refresh/fetch latest items from Raindrop.io
