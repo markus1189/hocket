@@ -235,7 +235,7 @@ vtyEventHandler es (EvKey KEnter []) = do
 vtyEventHandler es (EvKey (KChar 'r') []) = do
   liftIO $ es `trigger` fetchItemsEvt
   pure ()
-vtyEventHandler es (EvKey (KChar 'R') []) = do
+vtyEventHandler es (EvKey (KChar 'X') []) = do
   liftIO $ es `trigger` archiveItemsEvt
   pure ()
 vtyEventHandler es (EvKey (KChar 'a') []) = do
@@ -482,7 +482,7 @@ drawGui tz s = [w]
                 <> uncurry (sformat (F.int % "|" % F.int)) (hsNumItems s)
                 <> ")"
             )
-            "spc:Browse ent:Browse+flag r:Refresh R:Archive a:Flag u:Unflag m:Toggle J/K:Jump U:Unflag all A:Archive all q:Quit",
+            "spc:Browse ent:Browse+flag r:Refresh X:Execute Flags a:Flag u:Unflag m:Toggle J/K:Jump U:Unflag all A:Archive all q:Quit",
           hBorder,
           hBar
             ( maybe
