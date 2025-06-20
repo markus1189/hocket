@@ -88,6 +88,7 @@ import Events
     clearAllFlagsEvt,
     fetchItemsEvt,
     fetchedItemsEvt,
+    setAllFlagsToArchiveEvt,
     setStatusEvt,
     shiftItemEvt,
   )
@@ -133,6 +134,7 @@ import Network.Bookmark.Ui.State
     insertItems,
     itemList,
     removeItems,
+    setAllFlagsToArchive,
     syncForRender,
     togglePendingAction,
   )
@@ -263,6 +265,9 @@ vtyEventHandler _ (EvKey (KChar 'K') []) = do
 vtyEventHandler es (EvKey (KChar 'U') []) = do
   liftIO $ es `trigger` clearAllFlagsEvt
   pure ()
+vtyEventHandler es (EvKey (KChar 'A') []) = do
+  liftIO $ es `trigger` setAllFlagsToArchiveEvt
+  pure ()
 vtyEventHandler _ (EvKey (KChar 'q') []) = halt
 vtyEventHandler _ e = do
   zoom itemList (handleListEventVi handleListEvent e)
@@ -371,6 +376,7 @@ uiCommandEventHandler _ (ShiftItem bid) = do
 uiCommandEventHandler _ (RemoveItems bis) = id %= removeItems bis
 uiCommandEventHandler _ (SetStatus t) = hsStatus .= t
 uiCommandEventHandler _ ClearAllFlags = id %= clearAllFlags
+uiCommandEventHandler _ SetAllFlagsToArchive = id %= setAllFlagsToArchive
 uiCommandEventHandler es (BrowseItem bit) = do
   res <- liftIO . try @SomeException $ browseItem "firefox '%s'" (URL . T.unpack $ view biLink bit)
   case res of
@@ -476,7 +482,7 @@ drawGui tz s = [w]
                 <> uncurry (sformat (F.int % "|" % F.int)) (hsNumItems s)
                 <> ")"
             )
-            "spc:Browse ent:Browse+flag r:Refresh R:Archive a:Flag u:Unflag m:Toggle J/K:Jump U:Unflag all q:Quit",
+            "spc:Browse ent:Browse+flag r:Refresh R:Archive a:Flag u:Unflag m:Toggle J/K:Jump U:Unflag all A:Archive all q:Quit",
           hBorder,
           hBar
             ( maybe

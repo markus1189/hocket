@@ -20,6 +20,7 @@ module Network.Bookmark.Ui.State
     removeItems,
     togglePendingAction,
     clearAllFlags,
+    setAllFlagsToArchive,
     SortByUpdated,
     syncForRender,
   )
@@ -114,8 +115,14 @@ togglePendingAction bid = hsContents . ix bid . _1 %~ toggle
     toggle None = ToBeArchived
     toggle ToBeArchived = None
 
+setAllFlags :: PendingAction -> HocketState -> HocketState
+setAllFlags action = hsContents . mapped . _1 .~ action
+
 clearAllFlags :: HocketState -> HocketState
-clearAllFlags = hsContents . mapped . _1 .~ None
+clearAllFlags = setAllFlags None
+
+setAllFlagsToArchive :: HocketState -> HocketState
+setAllFlagsToArchive = setAllFlags ToBeArchived
 
 syncForRender :: HocketState -> HocketState
 syncForRender s =

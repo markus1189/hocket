@@ -11,6 +11,7 @@ module Events (HocketEvent(..)
               ,setStatusEvt
               ,browseItemEvt
               ,clearAllFlagsEvt
+              ,setAllFlagsToArchiveEvt
               ) where
 
 import           Data.Set (Set)
@@ -35,6 +36,7 @@ data UiCommand = ShiftItem !BookmarkItemId
                | SetStatus !(Maybe Text)
                | BrowseItem !BookmarkItem
                | ClearAllFlags
+               | SetAllFlagsToArchive
                deriving (Show,Eq)
 
 fetchItemsEvt :: HocketEvent
@@ -66,3 +68,6 @@ browseItemEvt bit = HocketUi (BrowseItem bit)
 
 clearAllFlagsEvt :: HocketEvent
 clearAllFlagsEvt = HocketUi ClearAllFlags
+
+setAllFlagsToArchiveEvt :: HocketEvent
+setAllFlagsToArchiveEvt = HocketUi SetAllFlagsToArchive
