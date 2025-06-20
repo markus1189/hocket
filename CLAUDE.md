@@ -9,6 +9,7 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 - `nix run -- tui` - Run the TUI application directly
 - `nix develop` - Enter development shell with all dependencies
 - `hlint` - Run linter
+- Use `ormolu -i` to format haskell files in-place, do this before committing
 
 ### Using Cabal
 - `cabal build` - Build the project
