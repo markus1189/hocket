@@ -88,7 +88,6 @@ import Events
     clearAllFlagsEvt,
     fetchItemsEvt,
     fetchedItemsEvt,
-    setAllFlagsToArchiveEvt,
     setStatusEvt,
     shiftItemEvt,
   )
