@@ -262,7 +262,7 @@ vtyEventHandler _ (EvKey (KChar 'K') []) = do
 vtyEventHandler es (EvKey (KChar 'U') []) = do
   liftIO $ es `trigger` clearAllFlagsEvt
   pure ()
-vtyEventHandler es (EvKey (KChar 's') []) = do
+vtyEventHandler es (EvKey (KChar 'S') []) = do
   liftIO $ es `trigger` toggleRemindersEvt
   pure ()
 vtyEventHandler _ (EvKey (KChar 'q') []) = halt
