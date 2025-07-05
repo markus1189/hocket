@@ -458,14 +458,23 @@ hocketAttrMap =
       (attrName "bar", Vty.defAttr `Vty.withBackColor` Vty.black `Vty.withForeColor` Vty.white)
     ]
 
+cleanUnicodeText :: Text -> Text
+cleanUnicodeText = T.filter isValidChar
+  where
+    isValidChar c = case c of
+      '\t' -> True
+      '\n' -> True
+      '\r' -> True
+      _ -> c >= ' ' && c <= '\DEL'
+
 getDisplayContent :: BookmarkItem -> Text
 getDisplayContent item =
   let noteText = item ^. biNote
       excerptText = item ^. biExcerpt
       hasNote = not (T.null noteText)
       hasExcerpt = not (T.null excerptText)
-      formattedNote = if hasNote then "NOTE " <> T.replace "\n" " " noteText else T.empty
-      formattedExcerpt = if hasExcerpt then "EXCERPT " <> T.replace "\n" " " excerptText else T.empty
+      formattedNote = if hasNote then "NOTE " <> T.replace "\n" " " (cleanUnicodeText noteText) else T.empty
+      formattedExcerpt = if hasExcerpt then "EXCERPT " <> T.replace "\n" " " (cleanUnicodeText excerptText) else T.empty
    in case (hasNote, hasExcerpt) of
         (True, True) -> formattedNote <> " | " <> formattedExcerpt
         (True, False) -> formattedNote
@@ -597,7 +606,7 @@ txtDisplay bit =
   txt (T.justifyRight 10 ' ' leftEdge)
     <+> txt favoriteIndicator
     <+> txt
-      ( fromMaybe
+      ( cleanUnicodeText $ fromMaybe
           "<empty>"
           (find (not . T.null) [view biTitle bit, T.pack url])
       )
