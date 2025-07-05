@@ -44,6 +44,7 @@ bookmarkItem1 =
     []
     0
     False
+    Nothing
 
 bookmarkItem2 :: BookmarkItem
 bookmarkItem2 = bookmarkItem1 {_biLastUpdate = read "2016-05-22 12:54:59 UTC", _biTitle = "newer title"}
@@ -115,6 +116,16 @@ raindropParsingTests =
                 case maybeStiftungTestItem of
                   Nothing -> assertFailure $ "Item with ID " ++ show stiftungTestItemId ++ " not found."
                   Just stiftungTestItem -> assertEqual "Stiftung Warentest item excerpt" ("Stiftung Warentest: Testberichte zu Elektronik, Haushalt und Gesundheit sowie Finanzen, Versicherung und Steuern" :: Text) (_biExcerpt stiftungTestItem)
+
+                -- Verify specific item has reminder date
+                let reminderItemId = BookmarkItemId "1076430230"
+                let maybeReminderItem = find (\item -> _biId item == reminderItemId) items
+                case maybeReminderItem of
+                  Nothing -> assertFailure $ "Item with ID " ++ show reminderItemId ++ " not found."
+                  Just reminderItem -> do
+                    case _biReminder reminderItem of
+                      Nothing -> assertFailure "Expected item to have a reminder, but found Nothing"
+                      Just reminderTime -> assertEqual "Reminder date should match expected value" (read "2025-07-11 14:48:19.217 UTC") reminderTime
     ]
 
 dateTimeParsingTests :: TestTree
@@ -173,6 +184,7 @@ testBookmarkItemEdgeCases = testCase "BookmarkItem edge cases" $ do
           [] -- empty highlights
           0
           False
+          Nothing -- no reminder
 
   let encoded = A.encode itemWithEmptyFields
   let decoded = A.eitherDecode encoded :: Either String BookmarkItem

@@ -32,6 +32,7 @@ module Network.Bookmark.Types
     biHighlights,
     biCollectionId,
     biImportant,
+    biReminder,
     batchTS,
     batchItems,
     batchTotal,
@@ -40,6 +41,7 @@ module Network.Bookmark.Types
   )
 where
 
+import Control.Applicative ((<|>))
 import Control.Lens (makeLenses, makePrisms, (^.))
 import Control.Monad (mzero)
 import Data.Aeson (FromJSON (parseJSON), ToJSON (toJSON), Value (Object), object, (.!=), (.:), (.:?), (.=))
@@ -94,7 +96,8 @@ data BookmarkItem = BookmarkItem
     _biSort :: !Int,
     _biHighlights :: ![Text],
     _biCollectionId :: !Int,
-    _biImportant :: !Bool
+    _biImportant :: !Bool,
+    _biReminder :: !(Maybe UTCTime)
   }
   deriving (Show, Eq)
 
@@ -134,6 +137,15 @@ instance FromJSON BookmarkItem where
       <*> o .: "highlights"
       <*> ((o .: "collection") >>= (.: "$id"))
       <*> (o .:? "important" .!= False)
+      <*> ((do
+          reminderObj <- o .:? "reminder"
+          case reminderObj of
+            Nothing -> return Nothing
+            Just remObj -> do
+              dateStr <- remObj .: "date"
+              reminderTime <- iso8601ParseM (Text.unpack dateStr)
+              return (Just reminderTime)
+          ) <|> pure Nothing)
   parseJSON _ = mzero
 
 instance ToJSON BookmarkItem where
@@ -153,5 +165,8 @@ instance ToJSON BookmarkItem where
         "sort" .= _biSort item,
         "highlights" .= _biHighlights item,
         "collection" .= object ["$id" .= _biCollectionId item],
-        "important" .= _biImportant item
+        "important" .= _biImportant item,
+        "reminder" .= case _biReminder item of
+          Nothing -> Nothing
+          Just reminderTime -> Just (object ["date" .= (Text.pack . iso8601Show $ reminderTime)])
       ]

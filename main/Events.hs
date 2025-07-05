@@ -13,6 +13,7 @@ module Events
     browseItemEvt,
     clearAllFlagsEvt,
     setAllFlagsToArchiveEvt,
+    toggleRemindersEvt,
   )
 where
 
@@ -41,6 +42,7 @@ data UiCommand
   | BrowseItem !BookmarkItem
   | ClearAllFlags
   | SetAllFlagsToArchive
+  | ToggleReminders
   deriving (Show, Eq)
 
 fetchItemsEvt :: HocketEvent
@@ -75,3 +77,6 @@ clearAllFlagsEvt = HocketUi ClearAllFlags
 
 setAllFlagsToArchiveEvt :: HocketEvent
 setAllFlagsToArchiveEvt = HocketUi SetAllFlagsToArchive
+
+toggleRemindersEvt :: HocketEvent
+toggleRemindersEvt = HocketUi ToggleReminders

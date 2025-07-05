@@ -13,6 +13,7 @@ module Network.Bookmark.Ui.State
     hsAsync,
     hsStatus,
     hsCredentials,
+    hsShowFutureReminders,
     initialState,
     insertItem,
     insertItems,
@@ -21,6 +22,7 @@ module Network.Bookmark.Ui.State
     togglePendingAction,
     clearAllFlags,
     setAllFlagsToArchive,
+    toggleShowFutureReminders,
     SortByUpdated,
     syncForRender,
   )
@@ -37,6 +39,7 @@ import Data.Function (on)
 import Data.Functor (($>))
 import Data.Map (Map)
 import qualified Data.Map as Map
+import Data.Maybe (isJust)
 import Data.Ord (Down (..), comparing)
 import Data.SortedList (SortedList)
 import qualified Data.SortedList as SL
@@ -55,7 +58,8 @@ data HocketState = HocketState
     _hsAsync :: !(Maybe (Async ())),
     _hsStatus :: !(Maybe Text),
     _hsContents :: !(Map BookmarkItemId (PendingAction, BookmarkItem)),
-    _hsCredentials :: !BookmarkCredentials
+    _hsCredentials :: !BookmarkCredentials,
+    _hsShowFutureReminders :: !Bool
   }
 
 makeLenses ''HocketState
@@ -75,16 +79,19 @@ partitionItems =
     . toList
     . view hsContents
 
-hsNumItems :: HocketState -> (Int, Int)
+hsNumItems :: HocketState -> (Int, Int, Int)
 hsNumItems s =
   ( length $ partitioned ^. at None . non (SL.toSortedList []),
-    length $ partitioned ^. at ToBeArchived . non (SL.toSortedList [])
+    length $ partitioned ^. at ToBeArchived . non (SL.toSortedList []),
+    if s ^. hsShowFutureReminders
+      then 0
+      else length $ filter (isJust . view biReminder . snd) $ Map.elems (s ^. hsContents)
   )
   where
     partitioned = partitionItems s
 
 initialState :: BookmarkCredentials -> HocketState
-initialState =
+initialState creds =
   HocketState
     (L.list ItemListName V.empty 1)
     (F.focusRing [ItemListName])
@@ -92,6 +99,8 @@ initialState =
     Nothing
     Nothing
     Map.empty
+    creds
+    False
 
 insertItem :: BookmarkItem -> HocketState -> HocketState
 insertItem bit s =
@@ -124,6 +133,9 @@ clearAllFlags = setAllFlags None
 setAllFlagsToArchive :: HocketState -> HocketState
 setAllFlagsToArchive = setAllFlags ToBeArchived
 
+toggleShowFutureReminders :: HocketState -> HocketState
+toggleShowFutureReminders s = s & hsShowFutureReminders %~ not
+
 syncForRender :: HocketState -> HocketState
 syncForRender s =
   s
@@ -137,7 +149,17 @@ syncForRender s =
           SL.fromSortedList $
             SL.toSortedList $
               map (Down . SBU . snd) $
-                Map.elems (s ^. hsContents)
+                filteredContents
+    filteredContents =
+      if s ^. hsShowFutureReminders
+        then Map.elems (s ^. hsContents)
+        else filter (not . hasFutureReminder . snd) (Map.elems (s ^. hsContents))
+
+    hasFutureReminder :: BookmarkItem -> Bool
+    hasFutureReminder item =
+      case view biReminder item of
+        Nothing -> False
+        Just _reminderTime -> True
 
 adjustFocus :: L.List n a -> L.List n a
 adjustFocus l =

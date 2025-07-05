@@ -90,6 +90,7 @@ import Events
     fetchedItemsEvt,
     setStatusEvt,
     shiftItemEvt,
+    toggleRemindersEvt,
   )
 import Formatting (sformat, (%))
 import qualified Formatting as F
@@ -136,6 +137,7 @@ import Network.Bookmark.Ui.State
     setAllFlagsToArchive,
     syncForRender,
     togglePendingAction,
+    toggleShowFutureReminders,
   )
 import Network.HTTP.Client
   ( HttpException (HttpExceptionRequest),
@@ -260,6 +262,9 @@ vtyEventHandler _ (EvKey (KChar 'K') []) = do
 vtyEventHandler es (EvKey (KChar 'U') []) = do
   liftIO $ es `trigger` clearAllFlagsEvt
   pure ()
+vtyEventHandler es (EvKey (KChar 's') []) = do
+  liftIO $ es `trigger` toggleRemindersEvt
+  pure ()
 vtyEventHandler _ (EvKey (KChar 'q') []) = halt
 vtyEventHandler _ e = do
   zoom itemList (handleListEventVi handleListEvent e)
@@ -333,8 +338,8 @@ asyncCommandEventHandler es (AsyncActionFailed err) = do
 asyncCommandEventHandler es ArchiveItems = do
   s <- use id
   case hsNumItems s of
-    (_, 0) -> pure ()
-    (_, _) -> do
+    (_, 0, _) -> pure ()
+    (_, _, _) -> do
       archiveAsync <-
         liftIO . async $ do
           es `trigger` setStatusEvt (Just "archiving")
@@ -369,6 +374,9 @@ uiCommandEventHandler _ (RemoveItems bis) = id %= removeItems bis
 uiCommandEventHandler _ (SetStatus t) = hsStatus .= t
 uiCommandEventHandler _ ClearAllFlags = id %= clearAllFlags
 uiCommandEventHandler _ SetAllFlagsToArchive = id %= setAllFlagsToArchive
+uiCommandEventHandler _ ToggleReminders = do
+  id %= toggleShowFutureReminders
+  id %= syncForRender
 uiCommandEventHandler es (BrowseItem bit) = do
   res <- liftIO . try @SomeException $ browseItem "firefox '%s'" (URL . T.unpack $ view biLink bit)
   case res of
@@ -470,11 +478,9 @@ drawGui tz s = [w]
     w =
       vBox
         [ hBarWithHints
-            ( "Hocket: ("
-                <> uncurry (sformat (F.int % "|" % F.int)) (hsNumItems s)
-                <> ")"
+            ( "Hocket: " <> (\(a, b, c) -> sformat ("(" % F.int % "|" % F.int % ") (" % F.int % ")") a b c) (hsNumItems s)
             )
-            "spc:Browse ent:Browse+flag r:Refresh X:Execute Flags a:Flag u:Unflag J/K:Jump U:Unflag all q:Quit",
+            "spc:Browse ent:Browse+flag r:Refresh s:Toggle future reminders X:Execute Flags a:Flag u:Unflag J/K:Jump U:Unflag all q:Quit",
           hBorder,
           hBar
             ( maybe
