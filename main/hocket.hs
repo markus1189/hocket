@@ -487,7 +487,13 @@ drawGui tz s = [w]
     w =
       vBox
         [ hBarWithHints
-            ( "Hocket: " <> (\(a, b, c) -> sformat ("(" % F.int % "|" % F.int % ") (" % F.int % ")") a b c) (hsNumItems s)
+            ( "Hocket: "
+                <> ( \(a, b, c) ->
+                       let base = sformat ("(" % F.int % "|" % F.int % ")") a b
+                           reminderPart = if c > 0 then sformat (" (" % F.int % ")") c else ""
+                        in base <> reminderPart
+                   )
+                  (hsNumItems s)
             )
             "spc:Browse ent:Browse+flag r:Refresh s:Toggle future reminders X:Execute Flags a:Flag u:Unflag J/K:Jump U:Unflag all q:Quit",
           hBorder,
@@ -606,9 +612,10 @@ txtDisplay bit =
   txt (T.justifyRight 10 ' ' leftEdge)
     <+> txt favoriteIndicator
     <+> txt
-      ( cleanUnicodeText $ fromMaybe
-          "<empty>"
-          (find (not . T.null) [view biTitle bit, T.pack url])
+      ( cleanUnicodeText $
+          fromMaybe
+            "<empty>"
+            (find (not . T.null) [view biTitle bit, T.pack url])
       )
     <+> padLeft Max (hLimit horizontalUriLimit (txt trimmedUrl))
   where
