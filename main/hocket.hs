@@ -504,6 +504,8 @@ hocketAttrMap =
       (attrName "list" <> attrName "flaggedSelected", flaggedRedSelectedFg),
       (attrName "list" <> attrName "reminderItem", reminderBlueFg),
       (attrName "list" <> attrName "reminderSelected", reminderBlueSelectedFg),
+      (attrName "list" <> attrName "favoriteItem", favoriteYellowFg),
+      (attrName "list" <> attrName "favoriteSelected", favoriteYellowSelectedFg),
       (attrName "bar", Vty.defAttr `Vty.withBackColor` Vty.black `Vty.withForeColor` Vty.white)
     ]
 
@@ -592,13 +594,16 @@ listDrawElementWithAction s sel e =
         None -> "  "
       pendingAction = getPendingActionForItem (view biId e) s
       hasReminder = isJust (view biReminder e)
-      attrName' = case (pendingAction, hasReminder, sel) of
-        (ToBeArchived, _, True) -> attrName "list" <> attrName "flaggedSelected"
-        (ToBeArchived, _, False) -> attrName "list" <> attrName "flaggedItem"
-        (None, True, True) -> attrName "list" <> attrName "reminderSelected"
-        (None, True, False) -> attrName "list" <> attrName "reminderItem"
-        (None, False, True) -> attrName "list" <> attrName "listSelected"
-        (None, False, False) -> attrName "list" <> attrName "unselectedItem"
+      isFavorite = view biImportant e
+      attrName' = case (pendingAction, hasReminder, isFavorite, sel) of
+        (ToBeArchived, _, _, True) -> attrName "list" <> attrName "flaggedSelected"
+        (ToBeArchived, _, _, False) -> attrName "list" <> attrName "flaggedItem"
+        (None, True, _, True) -> attrName "list" <> attrName "reminderSelected"
+        (None, True, _, False) -> attrName "list" <> attrName "reminderItem"
+        (None, False, True, True) -> attrName "list" <> attrName "favoriteSelected"
+        (None, False, True, False) -> attrName "list" <> attrName "favoriteItem"
+        (None, False, False, True) -> attrName "list" <> attrName "listSelected"
+        (None, False, False, False) -> attrName "list" <> attrName "unselectedItem"
    in withAttr attrName' (txt actionIndicator <+> padRight Max (txtDisplay e))
 
 orange :: Vty.Color
@@ -628,6 +633,12 @@ reminderBlue = Vty.rgbColor (100 :: Int) (150 :: Int) (200 :: Int)
 reminderBlueDark :: Vty.Color
 reminderBlueDark = Vty.rgbColor (50 :: Int) (75 :: Int) (100 :: Int)
 
+favoriteYellow :: Vty.Color
+favoriteYellow = Vty.rgbColor (200 :: Int) (180 :: Int) (100 :: Int)
+
+favoriteYellowDark :: Vty.Color
+favoriteYellowDark = Vty.rgbColor (150 :: Int) (135 :: Int) (75 :: Int)
+
 whiteFg :: Vty.Attr
 whiteFg = Vty.defAttr `Vty.withForeColor` Vty.white
 
@@ -642,6 +653,12 @@ reminderBlueFg = Vty.defAttr `Vty.withForeColor` reminderBlue
 
 reminderBlueSelectedFg :: Vty.Attr
 reminderBlueSelectedFg = Vty.defAttr `Vty.withForeColor` reminderBlueDark `Vty.withBackColor` orange `Vty.withStyle` Vty.bold
+
+favoriteYellowFg :: Vty.Attr
+favoriteYellowFg = Vty.defAttr `Vty.withForeColor` favoriteYellow
+
+favoriteYellowSelectedFg :: Vty.Attr
+favoriteYellowSelectedFg = Vty.defAttr `Vty.withForeColor` favoriteYellowDark `Vty.withBackColor` orange `Vty.withStyle` Vty.bold
 
 hBar :: Text -> Widget Name
 hBar = withAttr (attrName "bar") . padRight Max . txt
