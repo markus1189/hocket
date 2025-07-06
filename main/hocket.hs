@@ -116,6 +116,7 @@ import Network.Bookmark.Types
     biLastUpdate,
     biLink,
     biNote,
+    biReminder,
     biTitle,
     _BookmarkItemId,
   )
@@ -175,7 +176,10 @@ import Options.Applicative
     strOption,
     (<**>),
   )
+import System.Directory (XdgDirectory (..), createDirectoryIfMissing, doesFileExist, getXdgDirectory)
 import System.Exit (exitFailure)
+import System.FilePath ((</>))
+import System.IO (hPutStrLn, stderr)
 import System.Process
   ( CreateProcess,
     createProcess,
@@ -391,9 +395,50 @@ myEventHandler es (VtyEvent e) = vtyEventHandler es e
 myEventHandler es (AppEvent e) = internalEventHandler es e
 myEventHandler _ _ = pure ()
 
+getConfigPath :: IO FilePath
+getConfigPath = do
+  xdgConfigDir <- getXdgDirectory XdgConfig "hocket"
+  let xdgConfigPath = xdgConfigDir </> "config.dhall"
+      legacyConfigPath = "./config.dhall"
+
+  legacyExists <- doesFileExist legacyConfigPath
+  xdgExists <- doesFileExist xdgConfigPath
+
+  case (legacyExists, xdgExists) of
+    (True, False) -> do
+      hPutStrLn stderr $ "Warning: Using legacy config location: " <> legacyConfigPath
+      hPutStrLn stderr $ "Consider moving config to: " <> xdgConfigPath
+      return legacyConfigPath
+    (False, True) -> return xdgConfigPath
+    (True, True) -> do
+      hPutStrLn stderr $ "Warning: Found config in both locations, using XDG: " <> xdgConfigPath
+      return xdgConfigPath
+    (False, False) -> do
+      createDirectoryIfMissing True xdgConfigDir
+      return xdgConfigPath
+
+ensureSchemaFile :: IO ()
+ensureSchemaFile = do
+  xdgConfigDir <- getXdgDirectory XdgConfig "hocket"
+  let xdgSchemaPath = xdgConfigDir </> "schema.dhall"
+      legacySchemaPath = "./schema.dhall"
+
+  xdgSchemaExists <- doesFileExist xdgSchemaPath
+  legacySchemaExists <- doesFileExist legacySchemaPath
+
+  unless xdgSchemaExists $ do
+    createDirectoryIfMissing True xdgConfigDir
+    if legacySchemaExists
+      then do
+        legacyContent <- readFile legacySchemaPath
+        writeFile xdgSchemaPath legacyContent
+      else writeFile xdgSchemaPath "{ _raindropToken : Text, _archiveCollectionId : Natural }\n"
+
 runTuiApp :: IO ()
 runTuiApp = do
-  cred <- input auto "./config.dhall"
+  ensureSchemaFile
+  configPath <- getConfigPath
+  cred <- input auto (T.pack configPath)
   events <- newBChan 10
   tz <- getCurrentTimeZone
   vty <- mkVty Vty.defaultConfig
@@ -410,8 +455,10 @@ runAddCommand :: Text -> Maybe Text -> [Text] -> IO ()
 runAddCommand url mCollection tags = do
   result <- runStdoutLoggingT $ do
     logInfoN $ "Adding bookmark: " <> url
+    liftIO ensureSchemaFile
+    configPath <- liftIO getConfigPath
     cred <-
-      liftIO (input auto "./config.dhall") `Catch.catch` \(e :: SomeException) -> do
+      liftIO (input auto (T.pack configPath)) `Catch.catch` \(e :: SomeException) -> do
         logErrorN $ "Error loading config: " <> T.pack (show e)
         liftIO exitFailure
     result <-
@@ -455,6 +502,8 @@ hocketAttrMap =
       (attrName "list" <> attrName "unselectedItem", whiteFg),
       (attrName "list" <> attrName "flaggedItem", flaggedRedFg),
       (attrName "list" <> attrName "flaggedSelected", flaggedRedSelectedFg),
+      (attrName "list" <> attrName "reminderItem", reminderBlueFg),
+      (attrName "list" <> attrName "reminderSelected", reminderBlueSelectedFg),
       (attrName "bar", Vty.defAttr `Vty.withBackColor` Vty.black `Vty.withForeColor` Vty.white)
     ]
 
@@ -471,15 +520,24 @@ getDisplayContent :: BookmarkItem -> Text
 getDisplayContent item =
   let noteText = item ^. biNote
       excerptText = item ^. biExcerpt
+      reminderDate = item ^. biReminder
       hasNote = not (T.null noteText)
       hasExcerpt = not (T.null excerptText)
+      hasReminder = isJust reminderDate
       formattedNote = if hasNote then "NOTE " <> T.replace "\n" " " (cleanUnicodeText noteText) else T.empty
+      formattedReminder = case reminderDate of
+        Just reminder -> "REMINDER " <> T.pack (formatTime defaultTimeLocale "%Y-%m-%d" reminder) <> " "
+        Nothing -> T.empty
       formattedExcerpt = if hasExcerpt then "EXCERPT " <> T.replace "\n" " " (cleanUnicodeText excerptText) else T.empty
-   in case (hasNote, hasExcerpt) of
-        (True, True) -> formattedNote <> " | " <> formattedExcerpt
-        (True, False) -> formattedNote
-        (False, True) -> formattedExcerpt
-        (False, False) -> " "
+   in case (hasNote, hasReminder, hasExcerpt) of
+        (True, True, True) -> formattedNote <> " | " <> formattedReminder <> formattedExcerpt
+        (True, True, False) -> formattedNote <> " | " <> formattedReminder
+        (True, False, True) -> formattedNote <> " | " <> formattedExcerpt
+        (True, False, False) -> formattedNote
+        (False, True, True) -> formattedReminder <> formattedExcerpt
+        (False, True, False) -> formattedReminder
+        (False, False, True) -> formattedExcerpt
+        (False, False, False) -> " "
 
 drawGui :: TimeZone -> HocketState -> [Widget Name]
 drawGui tz s = [w]
@@ -533,11 +591,14 @@ listDrawElementWithAction s sel e =
         ToBeArchived -> "A "
         None -> "  "
       pendingAction = getPendingActionForItem (view biId e) s
-      attrName' = case (pendingAction, sel) of
-        (ToBeArchived, True) -> attrName "list" <> attrName "flaggedSelected"
-        (ToBeArchived, False) -> attrName "list" <> attrName "flaggedItem"
-        (None, True) -> attrName "list" <> attrName "listSelected"
-        (None, False) -> attrName "list" <> attrName "unselectedItem"
+      hasReminder = isJust (view biReminder e)
+      attrName' = case (pendingAction, hasReminder, sel) of
+        (ToBeArchived, _, True) -> attrName "list" <> attrName "flaggedSelected"
+        (ToBeArchived, _, False) -> attrName "list" <> attrName "flaggedItem"
+        (None, True, True) -> attrName "list" <> attrName "reminderSelected"
+        (None, True, False) -> attrName "list" <> attrName "reminderItem"
+        (None, False, True) -> attrName "list" <> attrName "listSelected"
+        (None, False, False) -> attrName "list" <> attrName "unselectedItem"
    in withAttr attrName' (txt actionIndicator <+> padRight Max (txtDisplay e))
 
 orange :: Vty.Color
@@ -561,6 +622,12 @@ flaggedRed = Vty.rgbColor (220 :: Int) (85 :: Int) (85 :: Int)
 flaggedRedDark :: Vty.Color
 flaggedRedDark = Vty.rgbColor (80 :: Int) (20 :: Int) (20 :: Int)
 
+reminderBlue :: Vty.Color
+reminderBlue = Vty.rgbColor (100 :: Int) (150 :: Int) (200 :: Int)
+
+reminderBlueDark :: Vty.Color
+reminderBlueDark = Vty.rgbColor (50 :: Int) (75 :: Int) (100 :: Int)
+
 whiteFg :: Vty.Attr
 whiteFg = Vty.defAttr `Vty.withForeColor` Vty.white
 
@@ -569,6 +636,12 @@ flaggedRedFg = Vty.defAttr `Vty.withForeColor` flaggedRed
 
 flaggedRedSelectedFg :: Vty.Attr
 flaggedRedSelectedFg = Vty.defAttr `Vty.withForeColor` flaggedRedDark `Vty.withBackColor` orange `Vty.withStyle` Vty.bold
+
+reminderBlueFg :: Vty.Attr
+reminderBlueFg = Vty.defAttr `Vty.withForeColor` reminderBlue
+
+reminderBlueSelectedFg :: Vty.Attr
+reminderBlueSelectedFg = Vty.defAttr `Vty.withForeColor` reminderBlueDark `Vty.withBackColor` orange `Vty.withStyle` Vty.bold
 
 hBar :: Text -> Widget Name
 hBar = withAttr (attrName "bar") . padRight Max . txt
@@ -621,8 +694,11 @@ txtDisplay bit =
   where
     url = T.unpack (view biLink bit)
     added = view biCreated bit
+    reminderDate = view biReminder bit
     favoriteIndicator = if view biImportant bit then "★" else " "
-    leftEdge = sformat (F.year % "-" <> F.month % "-" <> F.dayOfMonth) added <> ":"
+    leftEdge = case reminderDate of
+      Just reminder -> T.pack (formatTime defaultTimeLocale "%Y-%m-%d" reminder <> ":")
+      Nothing -> T.pack (formatTime defaultTimeLocale "%Y-%m-%d" added <> ":")
     trimmedUrl = T.pack (trimURI url)
 
 horizontalUriLimit :: Int

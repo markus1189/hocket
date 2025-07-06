@@ -30,6 +30,7 @@ library
                      , containers
                      , data-default
                      , dhall
+                     , directory
                      , formatting
                      , http-client
                      , http-client-tls
@@ -66,6 +67,8 @@ executable hocket
                      , containers
                      , data-default
                      , dhall
+                     , directory
+                     , filepath
                      , formatting
                      , hocket
                      , http-client

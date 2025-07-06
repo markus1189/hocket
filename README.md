@@ -61,14 +61,35 @@ cabal install
 
 ## Configuration
 
-Create a `config.dhall` file in your working directory:
+### XDG Base Directory Support
+
+Hocket follows the XDG Base Directory Specification for configuration files:
+
+**Current config location**: `~/.config/hocket/config.dhall`
+
+Create your configuration file:
 
 ```dhall
 {
   _raindropToken = "your-raindrop-test-token-here",
   _archiveCollectionId = 12345
 }
+: ./schema.dhall
 ```
+
+### Legacy Support
+
+For backward compatibility, Hocket will still use `./config.dhall` if it exists in your working directory. However, you'll see a warning message encouraging migration to the XDG location.
+
+### Migration from Legacy Config
+
+If you have an existing `config.dhall` in your working directory:
+
+1. Create the XDG config directory: `mkdir -p ~/.config/hocket`
+2. Move your config: `mv ./config.dhall ~/.config/hocket/config.dhall`
+3. Move the schema: `mv ./schema.dhall ~/.config/hocket/schema.dhall`
+
+The application will automatically create the schema file if it doesn't exist.
 
 ### Getting Your Raindrop.io Token
 
@@ -93,7 +114,7 @@ Create a `config.dhall` file in your working directory:
 
 #### Terminal User Interface
 ```bash
-# Run the interactive TUI from the directory containing config.dhall
+# Run the interactive TUI (config is loaded from ~/.config/hocket/config.dhall)
 hocket tui
 ```
 
@@ -136,6 +157,7 @@ hocket add https://example.com --collection 12345 --tag rust --tag cli
 - `r` - Refresh/fetch latest items from Raindrop.io
 - `U` - Clear all flags from all items
 - `X` - Execute archive operation on all flagged items
+- `S` - Toggle showing/hiding items with reminders
 
 ### Interface Layout
 
@@ -144,10 +166,10 @@ hocket add https://example.com --collection 12345 --tag rust --tag cli
 │   2025-01-15: ★ Important Article Title         reddit.com/r/... │
 │   2025-01-14:   Regular Bookmark                github.com/...   │
 │ A 2025-01-13:   Item flagged for archive        example.com/...  │
-│   2025-01-12:   Another Item                    news.ycombinator...│
+│   2025-01-12:   Item with reminder               news.ycombinator...│
 │ A 2025-01-11: ★ Favorite flagged for archive    stackoverflow.com/│
 ├──────────────────────────────────────────────────────────────────┤
-└─ NOTE: This is a sample note from the selected item ──────────────┘
+└─ REMINDER 2025-01-12 EXCERPT: This is a sample excerpt ──────────┘
 │                                                    Last: 14:32:18 │
 │ Status: fetching since: 2025-01-14                                │
 └────────────────────────────────────────────────────────────────────┘
@@ -156,10 +178,10 @@ hocket add https://example.com --collection 12345 --tag rust --tag cli
 #### Visual Elements
 - **A** - Flag indicating item is pending archive action
 - **★** - Indicates favorite bookmarks
-- **Date** - When the bookmark was created
+- **Date** - When the bookmark was created (shows reminder date when present)
 - **Title** - Bookmark title or URL if no title available
 - **Domain** - Truncated URL showing the domain and path
-- **Bottom section** - Shows notes or excerpts for the selected item
+- **Bottom section** - Shows notes, reminder dates, and excerpts for the selected item
 - **Status bar** - Last update time and current operation status
 
 ## Technical Details
@@ -247,7 +269,7 @@ Current limitations that may be addressed in future versions:
 ### Common Issues
 
 **"Authentication failed"**
-- Verify your Raindrop.io token in `config.dhall`
+- Verify your Raindrop.io token in `~/.config/hocket/config.dhall`
 - Ensure the token has not expired
 - Check your internet connection
 
