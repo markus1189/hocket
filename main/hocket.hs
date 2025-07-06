@@ -624,20 +624,11 @@ black = Vty.rgbColor zero zero zero
 flaggedRed :: Vty.Color
 flaggedRed = Vty.rgbColor (220 :: Int) (85 :: Int) (85 :: Int)
 
-flaggedRedDark :: Vty.Color
-flaggedRedDark = Vty.rgbColor (80 :: Int) (20 :: Int) (20 :: Int)
-
 reminderBlue :: Vty.Color
 reminderBlue = Vty.rgbColor (100 :: Int) (150 :: Int) (200 :: Int)
 
-reminderBlueDark :: Vty.Color
-reminderBlueDark = Vty.rgbColor (50 :: Int) (75 :: Int) (100 :: Int)
-
 favoriteYellow :: Vty.Color
 favoriteYellow = Vty.rgbColor (200 :: Int) (180 :: Int) (100 :: Int)
-
-favoriteYellowDark :: Vty.Color
-favoriteYellowDark = Vty.rgbColor (150 :: Int) (135 :: Int) (75 :: Int)
 
 whiteFg :: Vty.Attr
 whiteFg = Vty.defAttr `Vty.withForeColor` Vty.white
@@ -646,19 +637,19 @@ flaggedRedFg :: Vty.Attr
 flaggedRedFg = Vty.defAttr `Vty.withForeColor` flaggedRed
 
 flaggedRedSelectedFg :: Vty.Attr
-flaggedRedSelectedFg = Vty.defAttr `Vty.withForeColor` flaggedRedDark `Vty.withBackColor` orange `Vty.withStyle` Vty.bold
+flaggedRedSelectedFg = boldBlackOnOrange
 
 reminderBlueFg :: Vty.Attr
 reminderBlueFg = Vty.defAttr `Vty.withForeColor` reminderBlue
 
 reminderBlueSelectedFg :: Vty.Attr
-reminderBlueSelectedFg = Vty.defAttr `Vty.withForeColor` reminderBlueDark `Vty.withBackColor` orange `Vty.withStyle` Vty.bold
+reminderBlueSelectedFg = boldBlackOnOrange
 
 favoriteYellowFg :: Vty.Attr
 favoriteYellowFg = Vty.defAttr `Vty.withForeColor` favoriteYellow
 
 favoriteYellowSelectedFg :: Vty.Attr
-favoriteYellowSelectedFg = Vty.defAttr `Vty.withForeColor` favoriteYellowDark `Vty.withBackColor` orange `Vty.withStyle` Vty.bold
+favoriteYellowSelectedFg = boldBlackOnOrange
 
 hBar :: Text -> Widget Name
 hBar = withAttr (attrName "bar") . padRight Max . txt
