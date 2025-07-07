@@ -44,6 +44,7 @@ import Data.Ord (Down (..), comparing)
 import Data.SortedList (SortedList)
 import qualified Data.SortedList as SL
 import Data.Text (Text)
+import Data.Time (UTCTime)
 import Data.Time.Clock.POSIX (POSIXTime)
 import qualified Data.Vector as V
 import Network.Bookmark.Types
@@ -67,10 +68,15 @@ makeLenses ''HocketState
 newtype SortByUpdated = SBU BookmarkItem
 
 instance Eq SortByUpdated where
-  SBU bi1 == SBU bi2 = ((==) `on` _biCreated) bi1 bi2
+  SBU bi1 == SBU bi2 = ((==) `on` getSortDate) bi1 bi2
 
 instance Ord SortByUpdated where
-  compare (SBU bi1) (SBU bi2) = (compare `on` _biCreated) bi1 bi2
+  compare (SBU bi1) (SBU bi2) = (compare `on` getSortDate) bi1 bi2
+
+getSortDate :: BookmarkItem -> UTCTime
+getSortDate item = case _biReminder item of
+  Just reminderDate -> reminderDate
+  Nothing -> _biCreated item
 
 partitionItems :: HocketState -> Map PendingAction (SortedList SortByUpdated)
 partitionItems =
