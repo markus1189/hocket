@@ -68,11 +68,16 @@ import Data.Maybe (fromMaybe, isJust, mapMaybe)
 import Data.Text (Text)
 import qualified Data.Text as T
 import qualified Data.Text.Encoding as T
+import Data.Time (UTCTime, addDays, getCurrentTime)
 import Data.Time.Clock.POSIX (POSIXTime, posixSecondsToUTCTime, utcTimeToPOSIXSeconds)
 import Data.Time.Format (defaultTimeLocale, formatTime)
 import Data.Time.LocalTime
-  ( TimeZone,
+  ( LocalTime (LocalTime),
+    TimeOfDay (TimeOfDay),
+    TimeZone,
     getCurrentTimeZone,
+    localDay,
+    localTimeToUTC,
     utcToLocalTime,
   )
 import qualified Data.Vector as V
@@ -88,8 +93,13 @@ import Events
     clearAllFlagsEvt,
     fetchItemsEvt,
     fetchedItemsEvt,
+    remindersRemovedEvt,
+    remindersSetEvt,
+    removeRemindersEvt,
+    setRemindersEvt,
     setStatusEvt,
     shiftItemEvt,
+    shiftItemReminderEvt,
     toggleRemindersEvt,
   )
 import Formatting (sformat, (%))
@@ -104,7 +114,7 @@ import Network.Bookmark.Types
     BookmarkItem,
     BookmarkItemBatch (..),
     BookmarkItemId,
-    BookmarkRequest (AddBookmark, BatchArchiveBookmarks, RetrieveBookmarks),
+    BookmarkRequest (AddBookmark, BatchArchiveBookmarks, RemoveReminder, RetrieveBookmarks, SetReminder),
     PendingAction (..),
     RaindropCollectionId (RaindropCollectionId),
     URL (..),
@@ -124,6 +134,7 @@ import Network.Bookmark.Ui.State
   ( HocketState,
     Name (..),
     clearAllFlags,
+    clearFlagsForItems,
     focusRing,
     hsAsync,
     hsContents,
@@ -135,10 +146,13 @@ import Network.Bookmark.Ui.State
     insertItems,
     itemList,
     removeItems,
+    removeReminderFromItems,
     setAllFlagsToArchive,
     syncForRender,
     togglePendingAction,
+    togglePendingActionToReminder,
     toggleShowFutureReminders,
+    updateItemsWithReminder,
   )
 import Network.HTTP.Client
   ( HttpException (HttpExceptionRequest),
@@ -242,17 +256,27 @@ vtyEventHandler es (EvKey (KChar 'r') []) = do
   pure ()
 vtyEventHandler es (EvKey (KChar 'X') []) = do
   liftIO $ es `trigger` archiveItemsEvt
+  liftIO $ es `trigger` setRemindersEvt
+  liftIO $ es `trigger` removeRemindersEvt
   pure ()
 vtyEventHandler es (EvKey (KChar 'a') []) = do
   s <- use id
   liftIO . for_ (focusedItem s) $ \bit ->
     unless (getPendingActionForItem (view biId bit) s == ToBeArchived) $
       es `trigger` shiftItemEvt (view biId bit)
-vtyEventHandler es (EvKey (KChar 'u') []) = do
+vtyEventHandler es (EvKey (KChar 's') []) = do
   s <- use id
   liftIO . for_ (focusedItem s) $ \bit ->
-    when (getPendingActionForItem (view biId bit) s == ToBeArchived) $
+    unless (getPendingActionForItem (view biId bit) s == ToBeReminded) $
+      es `trigger` shiftItemReminderEvt (view biId bit)
+vtyEventHandler es (EvKey (KChar 'u') []) = do
+  s <- use id
+  liftIO . for_ (focusedItem s) $ \bit -> do
+    let action = getPendingActionForItem (view biId bit) s
+    when (action == ToBeArchived) $
       es `trigger` shiftItemEvt (view biId bit)
+    when (action == ToBeReminded || action == ReminderToBeRemoved) $
+      es `trigger` shiftItemReminderEvt (view biId bit)
 vtyEventHandler _ (EvKey (KChar 'J') []) = do
   s <- use id
   case findNextFlaggedItem s of
@@ -287,6 +311,16 @@ unlessAsyncRunning act = do
 
 formatPOSIXTime :: POSIXTime -> Text
 formatPOSIXTime t = T.pack $ formatTime defaultTimeLocale "%Y-%m-%d" (posixSecondsToUTCTime t)
+
+nextDayAt7AM :: IO UTCTime
+nextDayAt7AM = do
+  tz <- getCurrentTimeZone
+  now <- getCurrentTime
+  let localNow = utcToLocalTime tz now
+      tomorrow = addDays 1 (localDay localNow)
+      sevenAM = TimeOfDay 7 0 0
+      tomorrowAt7AM = LocalTime tomorrow sevenAM
+  pure $ localTimeToUTC tz tomorrowAt7AM
 
 asyncCommandEventHandler ::
   BChan HocketEvent ->
@@ -342,8 +376,8 @@ asyncCommandEventHandler es (AsyncActionFailed err) = do
 asyncCommandEventHandler es ArchiveItems = do
   s <- use id
   case hsNumItems s of
-    (_, 0, _) -> pure ()
-    (_, _, _) -> do
+    (_, 0, _, _, _) -> pure ()
+    (_, _, _, _, _) -> do
       archiveAsync <-
         liftIO . async $ do
           es `trigger` setStatusEvt (Just "archiving")
@@ -366,6 +400,64 @@ asyncCommandEventHandler es ArchiveItems = do
 asyncCommandEventHandler _ (ArchivedItems bis) = do
   id %= removeItems bis
   hsAsync .= Nothing
+asyncCommandEventHandler es SetReminders = do
+  s <- use id
+  case hsNumItems s of
+    (_, _, 0, _, _) -> pure ()
+    (_, _, _, _, _) -> do
+      reminderAsync <-
+        liftIO . async $ do
+          es `trigger` setStatusEvt (Just "setting reminders")
+          reminderTime <- nextDayAt7AM
+          eitherErrorResults <-
+            performSetReminders (s ^. hsCredentials) (getItemsWithPendingAction ToBeReminded s) reminderTime
+          case eitherErrorResults of
+            Left e ->
+              es `trigger` asyncActionFailedEvt (errorMessageFromException e)
+            Right results -> do
+              es
+                `trigger` remindersSetEvt
+                  ( mapMaybe
+                      ( \(bit, successful) ->
+                          mfilter (const successful) (Just (view biId bit))
+                      )
+                      results
+                  )
+                  reminderTime
+              es `trigger` setStatusEvt Nothing
+      hsAsync ?= reminderAsync
+asyncCommandEventHandler _ (RemindersSet bis reminderTime) = do
+  id %= updateItemsWithReminder bis reminderTime
+  id %= clearFlagsForItems ToBeReminded bis
+  hsAsync .= Nothing
+asyncCommandEventHandler es RemoveReminders = do
+  s <- use id
+  case hsNumItems s of
+    (_, _, _, 0, _) -> pure ()
+    (_, _, _, _, _) -> do
+      removeAsync <-
+        liftIO . async $ do
+          es `trigger` setStatusEvt (Just "removing reminders")
+          eitherErrorResults <-
+            performRemoveReminders (s ^. hsCredentials) (getItemsWithPendingAction ReminderToBeRemoved s)
+          case eitherErrorResults of
+            Left e ->
+              es `trigger` asyncActionFailedEvt (errorMessageFromException e)
+            Right results -> do
+              es
+                `trigger` remindersRemovedEvt
+                  ( mapMaybe
+                      ( \(bit, successful) ->
+                          mfilter (const successful) (Just (view biId bit))
+                      )
+                      results
+                  )
+              es `trigger` setStatusEvt Nothing
+      hsAsync ?= removeAsync
+asyncCommandEventHandler _ (RemindersRemoved bis) = do
+  id %= removeReminderFromItems bis
+  id %= clearFlagsForItems ReminderToBeRemoved bis
+  hsAsync .= Nothing
 
 uiCommandEventHandler ::
   BChan HocketEvent ->
@@ -373,6 +465,9 @@ uiCommandEventHandler ::
   EventM Name HocketState ()
 uiCommandEventHandler _ (ShiftItem bid) = do
   id %= togglePendingAction bid
+  itemList %= L.listMoveDown
+uiCommandEventHandler _ (ShiftItemReminder bid) = do
+  id %= togglePendingActionToReminder bid
   itemList %= L.listMoveDown
 uiCommandEventHandler _ (RemoveItems bis) = id %= removeItems bis
 uiCommandEventHandler _ (SetStatus t) = hsStatus .= t
@@ -504,6 +599,10 @@ hocketAttrMap =
       (attrName "list" <> attrName "flaggedSelected", flaggedRedSelectedFg),
       (attrName "list" <> attrName "reminderItem", reminderBlueFg),
       (attrName "list" <> attrName "reminderSelected", reminderBlueSelectedFg),
+      (attrName "list" <> attrName "reminderFlaggedItem", reminderFlaggedFg),
+      (attrName "list" <> attrName "reminderFlaggedSelected", reminderFlaggedSelectedFg),
+      (attrName "list" <> attrName "reminderRemovalItem", reminderRemovalFg),
+      (attrName "list" <> attrName "reminderRemovalSelected", reminderRemovalSelectedFg),
       (attrName "list" <> attrName "favoriteItem", favoriteYellowFg),
       (attrName "list" <> attrName "favoriteSelected", favoriteYellowSelectedFg),
       (attrName "bar", Vty.defAttr `Vty.withBackColor` Vty.black `Vty.withForeColor` Vty.white)
@@ -548,14 +647,14 @@ drawGui tz s = [w]
       vBox
         [ hBarWithHints
             ( "Hocket: "
-                <> ( \(a, b, c) ->
-                       let base = sformat ("(" % F.int % "|" % F.int % ")") a b
-                           reminderPart = if c > 0 then sformat (" (" % F.int % ")") c else ""
+                <> ( \(a, b, c, d, e) ->
+                       let base = sformat ("(" % F.int % "|" % F.int % "|" % F.int % "|" % F.int % ")") a b c d
+                           reminderPart = if e > 0 then sformat (" (" % F.int % ")") e else ""
                         in base <> reminderPart
                    )
                   (hsNumItems s)
             )
-            "spc:Browse ent:Browse+flag r:Refresh s:Toggle future reminders X:Execute Flags a:Flag u:Unflag J/K:Jump U:Unflag all q:Quit",
+            "spc:Browse ent:Browse+flag r:Refresh S:Toggle future reminders X:Execute Flags a:Archive flag s:Reminder flag u:Unflag J/K:Jump U:Unflag all q:Quit",
           hBorder,
           hBar
             ( maybe
@@ -591,6 +690,8 @@ listDrawElementWithAction :: HocketState -> Bool -> BookmarkItem -> Widget Name
 listDrawElementWithAction s sel e =
   let actionIndicator = case getPendingActionForItem (view biId e) s of
         ToBeArchived -> "A "
+        ToBeReminded -> "R "
+        ReminderToBeRemoved -> "r "
         None -> "  "
       pendingAction = getPendingActionForItem (view biId e) s
       hasReminder = isJust (view biReminder e)
@@ -598,6 +699,10 @@ listDrawElementWithAction s sel e =
       attrName' = case (pendingAction, hasReminder, isFavorite, sel) of
         (ToBeArchived, _, _, True) -> attrName "list" <> attrName "flaggedSelected"
         (ToBeArchived, _, _, False) -> attrName "list" <> attrName "flaggedItem"
+        (ToBeReminded, _, _, True) -> attrName "list" <> attrName "reminderFlaggedSelected"
+        (ToBeReminded, _, _, False) -> attrName "list" <> attrName "reminderFlaggedItem"
+        (ReminderToBeRemoved, _, _, True) -> attrName "list" <> attrName "reminderRemovalSelected"
+        (ReminderToBeRemoved, _, _, False) -> attrName "list" <> attrName "reminderRemovalItem"
         (None, True, _, True) -> attrName "list" <> attrName "reminderSelected"
         (None, True, _, False) -> attrName "list" <> attrName "reminderItem"
         (None, False, True, True) -> attrName "list" <> attrName "favoriteSelected"
@@ -645,6 +750,18 @@ reminderBlueFg = Vty.defAttr `Vty.withForeColor` reminderBlue
 reminderBlueSelectedFg :: Vty.Attr
 reminderBlueSelectedFg = boldBlackOnOrange
 
+reminderFlaggedFg :: Vty.Attr
+reminderFlaggedFg = Vty.defAttr `Vty.withForeColor` reminderBlue
+
+reminderFlaggedSelectedFg :: Vty.Attr
+reminderFlaggedSelectedFg = boldBlackOnOrange
+
+reminderRemovalFg :: Vty.Attr
+reminderRemovalFg = Vty.defAttr `Vty.withForeColor` Vty.red
+
+reminderRemovalSelectedFg :: Vty.Attr
+reminderRemovalSelectedFg = boldBlackOnOrange
+
 favoriteYellowFg :: Vty.Attr
 favoriteYellowFg = Vty.defAttr `Vty.withForeColor` favoriteYellow
 
@@ -684,6 +801,30 @@ performArchive cred items = do
     let itemIds = map (view biId) items
     success <- raindrop cred (BatchArchiveBookmarks itemIds)
     pure $ map (,success) items
+
+performSetReminders :: BookmarkCredentials -> [BookmarkItem] -> UTCTime -> IO (Either HttpException [(BookmarkItem, Bool)])
+performSetReminders cred items reminderTime = do
+  tryHttpException $ runStdoutLoggingT $ do
+    results <-
+      traverse
+        ( \item -> do
+            success <- raindrop cred (SetReminder (view biId item) reminderTime)
+            pure (item, success)
+        )
+        items
+    pure results
+
+performRemoveReminders :: BookmarkCredentials -> [BookmarkItem] -> IO (Either HttpException [(BookmarkItem, Bool)])
+performRemoveReminders cred items = do
+  tryHttpException $ runStdoutLoggingT $ do
+    results <-
+      traverse
+        ( \item -> do
+            success <- raindrop cred (RemoveReminder (view biId item))
+            pure (item, success)
+        )
+        items
+    pure results
 
 tryHttpException :: IO a -> IO (Either HttpException a)
 tryHttpException = try @HttpException
@@ -750,7 +891,7 @@ findNextFlaggedItem s = do
   currentIdx <- view L.listSelectedL list
   let items = V.toList $ view L.listElementsL list
       remainingItems = drop (currentIdx + 1) items
-  case findIndex (\item -> getPendingActionForItem (view biId item) s == ToBeArchived) remainingItems of
+  case findIndex (\item -> let action = getPendingActionForItem (view biId item) s in action == ToBeArchived || action == ToBeReminded || action == ReminderToBeRemoved) remainingItems of
     Just relativeIdx -> Just (currentIdx + 1 + relativeIdx)
     Nothing -> Nothing
 
@@ -761,7 +902,7 @@ findPrevFlaggedItem s = do
   currentIdx <- view L.listSelectedL list
   let items = V.toList $ view L.listElementsL list
       precedingItems = reverse $ take currentIdx items
-  case findIndex (\item -> getPendingActionForItem (view biId item) s == ToBeArchived) precedingItems of
+  case findIndex (\item -> let action = getPendingActionForItem (view biId item) s in action == ToBeArchived || action == ToBeReminded || action == ReminderToBeRemoved) precedingItems of
     Just relativeIdx -> Just (currentIdx - 1 - relativeIdx)
     Nothing -> Nothing
 
@@ -779,7 +920,6 @@ replace old new = go
       | old `isPrefixOf` s = new ++ go (drop (length old) s)
       | otherwise = x : go xs
 
--- AI? suggest how to add tests for this
 cleanUrl :: String -> String
 cleanUrl s = foldl' (\acc (old, new) -> replace old new acc) s urlReplacements
 

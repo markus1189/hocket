@@ -15,6 +15,7 @@ import Data.Aeson.Lens (AsJSON (_JSON), AsValue (_Bool), key, values, _Integral)
 import Data.Maybe (fromMaybe)
 import qualified Data.Text as T
 import qualified Data.Text.Encoding as TE
+import Data.Time.Format (defaultTimeLocale, formatTime)
 import Network.Bookmark.Types (BookmarkCredentials, BookmarkItemId (..), BookmarkRequest (..), RaindropCollectionId (RaindropCollectionId), RaindropToken (..), archiveCollectionId, raindropToken, _BookmarkItemId)
 import qualified Network.HTTP.Client as HC
 import qualified Network.HTTP.Client.TLS as HCTLS (tlsManagerSettings)
@@ -74,6 +75,25 @@ raindrop creds (BatchArchiveBookmarks bids) = do
             "collection" A..= A.object ["$id" A..= archiveId]
           ]
   resp <- liftIO $ W.putWith (commonOpts rt) "https://api.raindrop.io/rest/v1/raindrops/-1" payload
+  pure ((== Just True) $ resp ^? W.responseBody . key "result" . _Bool)
+raindrop creds (SetReminder bid reminderTime) = do
+  let rt = view raindropToken creds
+      formattedTime = T.pack $ formatTime defaultTimeLocale "%Y-%m-%dT%H:%M:%S.%03qZ" reminderTime
+  resp <-
+    liftIO $
+      W.putWith (commonOpts rt) ("https://api.raindrop.io/rest/v1/raindrop/" <> T.unpack (bid ^. _BookmarkItemId)) $
+        A.object
+          [ "reminder" A..= A.object ["date" A..= formattedTime]
+          ]
+  pure ((== Just True) $ resp ^? W.responseBody . key "result" . _Bool)
+raindrop creds (RemoveReminder bid) = do
+  let rt = view raindropToken creds
+  resp <-
+    liftIO $
+      W.putWith (commonOpts rt) ("https://api.raindrop.io/rest/v1/raindrop/" <> T.unpack (bid ^. _BookmarkItemId)) $
+        A.object
+          [ "reminder" A..= A.Null
+          ]
   pure ((== Just True) $ resp ^? W.responseBody . key "result" . _Bool)
 raindrop creds (RetrieveBookmarks page (RaindropCollectionId cid) mSearchParam) = do
   let rt = view raindropToken creds

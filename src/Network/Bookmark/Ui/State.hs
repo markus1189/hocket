@@ -20,9 +20,13 @@ module Network.Bookmark.Ui.State
     removeItem,
     removeItems,
     togglePendingAction,
+    togglePendingActionToReminder,
     clearAllFlags,
+    clearFlagsForItems,
     setAllFlagsToArchive,
     toggleShowFutureReminders,
+    updateItemsWithReminder,
+    removeReminderFromItems,
     SortByUpdated,
     syncForRender,
   )
@@ -85,10 +89,12 @@ partitionItems =
     . toList
     . view hsContents
 
-hsNumItems :: HocketState -> (Int, Int, Int)
+hsNumItems :: HocketState -> (Int, Int, Int, Int, Int)
 hsNumItems s =
   ( length $ partitioned ^. at None . non (SL.toSortedList []),
     length $ partitioned ^. at ToBeArchived . non (SL.toSortedList []),
+    length $ partitioned ^. at ToBeReminded . non (SL.toSortedList []),
+    length $ partitioned ^. at ReminderToBeRemoved . non (SL.toSortedList []),
     if s ^. hsShowFutureReminders
       then 0
       else length $ filter (isJust . view biReminder . snd) $ Map.elems (s ^. hsContents)
@@ -129,6 +135,21 @@ togglePendingAction bid = hsContents . ix bid . _1 %~ toggle
   where
     toggle None = ToBeArchived
     toggle ToBeArchived = None
+    toggle ToBeReminded = None
+    toggle ReminderToBeRemoved = None
+
+togglePendingActionToReminder :: BookmarkItemId -> HocketState -> HocketState
+togglePendingActionToReminder bid s =
+  case s ^. hsContents . at bid of
+    Just (currentAction, item) ->
+      let hasExistingReminder = isJust (item ^. biReminder)
+          newAction = case currentAction of
+            None -> if hasExistingReminder then ReminderToBeRemoved else ToBeReminded
+            ToBeReminded -> None
+            ReminderToBeRemoved -> None
+            ToBeArchived -> if hasExistingReminder then ReminderToBeRemoved else ToBeReminded
+       in s & hsContents . at bid ?~ (newAction, item)
+    Nothing -> s
 
 setAllFlags :: PendingAction -> HocketState -> HocketState
 setAllFlags action = hsContents . mapped . _1 .~ action
@@ -136,11 +157,48 @@ setAllFlags action = hsContents . mapped . _1 .~ action
 clearAllFlags :: HocketState -> HocketState
 clearAllFlags = setAllFlags None
 
+clearFlagsForItems :: PendingAction -> [BookmarkItemId] -> HocketState -> HocketState
+clearFlagsForItems targetAction bids s =
+  foldl'
+    ( \st bid ->
+        case st ^. hsContents . at bid of
+          Just (action, item) | action == targetAction -> st & hsContents . at bid ?~ (None, item)
+          _ -> st
+    )
+    s
+    bids
+
 setAllFlagsToArchive :: HocketState -> HocketState
 setAllFlagsToArchive = setAllFlags ToBeArchived
 
 toggleShowFutureReminders :: HocketState -> HocketState
 toggleShowFutureReminders s = s & hsShowFutureReminders %~ not
+
+updateItemsWithReminder :: [BookmarkItemId] -> UTCTime -> HocketState -> HocketState
+updateItemsWithReminder bids reminderTime s =
+  foldl'
+    ( \st bid ->
+        case st ^. hsContents . at bid of
+          Just (action, item) -> 
+            let updatedItem = item & biReminder ?~ reminderTime
+            in st & hsContents . at bid ?~ (action, updatedItem)
+          Nothing -> st
+    )
+    s
+    bids
+
+removeReminderFromItems :: [BookmarkItemId] -> HocketState -> HocketState
+removeReminderFromItems bids s =
+  foldl'
+    ( \st bid ->
+        case st ^. hsContents . at bid of
+          Just (action, item) -> 
+            let updatedItem = item & biReminder .~ Nothing
+            in st & hsContents . at bid ?~ (action, updatedItem)
+          Nothing -> st
+    )
+    s
+    bids
 
 syncForRender :: HocketState -> HocketState
 syncForRender s =
@@ -154,7 +212,8 @@ syncForRender s =
         map (\(Down (SBU x)) -> x) $
           SL.fromSortedList $
             SL.toSortedList $
-              map (Down . SBU . snd) $
+              map
+                (Down . SBU . snd)
                 filteredContents
     filteredContents =
       if s ^. hsShowFutureReminders

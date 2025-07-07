@@ -69,7 +69,7 @@ makePrisms ''RaindropCollectionId
 
 newtype URL = URL String deriving (Show, Eq, Generic)
 
-data PendingAction = None | ToBeArchived deriving (Show, Eq, Ord)
+data PendingAction = None | ToBeArchived | ToBeReminded | ReminderToBeRemoved deriving (Show, Eq, Ord)
 
 data BookmarkCredentials = BookmarkCredentials
   { _raindropToken :: RaindropToken,
@@ -107,6 +107,8 @@ data BookmarkRequest a where
   AddBookmark :: Text -> Maybe Text -> [Text] -> BookmarkRequest (Maybe BookmarkItemId)
   ArchiveBookmark :: BookmarkItemId -> BookmarkRequest Bool
   BatchArchiveBookmarks :: [BookmarkItemId] -> BookmarkRequest Bool
+  SetReminder :: BookmarkItemId -> UTCTime -> BookmarkRequest Bool
+  RemoveReminder :: BookmarkItemId -> BookmarkRequest Bool
   RetrieveBookmarks :: Natural -> RaindropCollectionId -> Maybe Text -> BookmarkRequest (Natural, [BookmarkItem])
 
 data BookmarkItemBatch = BookmarkItemBatch
@@ -137,15 +139,17 @@ instance FromJSON BookmarkItem where
       <*> o .: "highlights"
       <*> ((o .: "collection") >>= (.: "$id"))
       <*> (o .:? "important" .!= False)
-      <*> ((do
-          reminderObj <- o .:? "reminder"
-          case reminderObj of
-            Nothing -> return Nothing
-            Just remObj -> do
-              dateStr <- remObj .: "date"
-              reminderTime <- iso8601ParseM (Text.unpack dateStr)
-              return (Just reminderTime)
-          ) <|> pure Nothing)
+      <*> ( ( do
+                reminderObj <- o .:? "reminder"
+                case reminderObj of
+                  Nothing -> return Nothing
+                  Just remObj -> do
+                    dateStr <- remObj .: "date"
+                    reminderTime <- iso8601ParseM (Text.unpack dateStr)
+                    return (Just reminderTime)
+            )
+              <|> pure Nothing
+          )
   parseJSON _ = mzero
 
 instance ToJSON BookmarkItem where

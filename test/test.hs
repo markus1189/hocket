@@ -185,7 +185,6 @@ testBookmarkItemEdgeCases = testCase "BookmarkItem edge cases" $ do
           0
           False
           Nothing -- no reminder
-
   let encoded = A.encode itemWithEmptyFields
   let decoded = A.eitherDecode encoded :: Either String BookmarkItem
 

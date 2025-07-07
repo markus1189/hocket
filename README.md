@@ -14,10 +14,11 @@ Hocket provides a keyboard-driven terminal interface for efficiently managing yo
 ### Core Functionality
 - **Single-pane interface with action flags** - View all items with visual indicators for pending actions
 - **Real-time synchronization** - Fetch latest bookmarks from Raindrop.io
-- **Batch operations** - Archive multiple items at once
+- **Batch operations** - Archive multiple items and manage reminders at once
+- **Smart reminder management** - Set and remove reminders with intelligent toggling
 - **Smart updates** - Only fetch items modified since last sync
 - **Favorite indicators** - Visual markers (★) for favorite bookmarks
-- **Rich item display** - Shows dates, titles, URLs, notes, and excerpts
+- **Rich item display** - Shows dates, titles, URLs, notes, excerpts, and reminder dates
 
 ### Command Line Interface
 - **Add bookmarks from CLI** - Add bookmarks directly from terminal
@@ -29,6 +30,7 @@ Hocket provides a keyboard-driven terminal interface for efficiently managing yo
 ### Workflow Support
 - **Browser integration** - Open bookmarks in your default browser
 - **Archive management** - Move items to a designated archive collection
+- **Reminder scheduling** - Set reminders for next day at 7:00 AM in your local timezone
 - **Keyboard navigation** - Efficient Vi-style navigation
 - **Status tracking** - Visual feedback for all operations
 
@@ -151,38 +153,86 @@ hocket add https://example.com --collection 12345 --tag rust --tag cli
 - `Space` - Open selected item in browser
 - `Enter` - Open item in browser AND mark for archiving
 - `a` - Flag selected item for archiving
-- `u` - Remove archive flag from selected item
+- `s` - Smart reminder toggle: flag for reminder setting (unscheduled items) or removal (scheduled items)
+- `u` - Remove flags from selected item (archive, reminder, or removal flags)
 
 #### Bulk Operations
 - `r` - Refresh/fetch latest items from Raindrop.io
 - `U` - Clear all flags from all items
-- `X` - Execute archive operation on all flagged items
-- `S` - Toggle showing/hiding items with reminders
+- `X` - Execute all flagged operations (archive items, set reminders, remove reminders)
+- `S` - Toggle showing/hiding items with future reminders
 
 ### Interface Layout
 
 ```
-┌─ Hocket: (15|3) ────────────────────────────────────────┐
+┌─ Hocket: (15|2|1|1) (3) ───────────────────────────────────────────┐
 │   2025-01-15: ★ Important Article Title         reddit.com/r/... │
 │   2025-01-14:   Regular Bookmark                github.com/...   │
 │ A 2025-01-13:   Item flagged for archive        example.com/...  │
-│   2025-01-12:   Item with reminder               news.ycombinator...│
-│ A 2025-01-11: ★ Favorite flagged for archive    stackoverflow.com/│
+│ R 2025-01-12:   Item flagged for reminder       example.com/...  │
+│ r 2025-01-11:   Item flagged to remove reminder news.ycombinator...│
+│   2025-01-10:   Item with existing reminder     stackoverflow.com/│
 ├──────────────────────────────────────────────────────────────────┤
 └─ REMINDER 2025-01-12 EXCERPT: This is a sample excerpt ──────────┘
 │                                                    Last: 14:32:18 │
-│ Status: fetching since: 2025-01-14                                │
+│ Status: setting reminders                                         │
 └────────────────────────────────────────────────────────────────────┘
 ```
 
 #### Visual Elements
 - **A** - Flag indicating item is pending archive action
+- **R** - Flag indicating item is pending reminder setting (blue color)
+- **r** - Flag indicating item is pending reminder removal (red color)
 - **★** - Indicates favorite bookmarks
+- **Header counts** - `(normal|archive|remind_set|remind_remove) (existing_reminders)`
 - **Date** - When the bookmark was created (shows reminder date when present)
 - **Title** - Bookmark title or URL if no title available
 - **Domain** - Truncated URL showing the domain and path
 - **Bottom section** - Shows notes, reminder dates, and excerpts for the selected item
 - **Status bar** - Last update time and current operation status
+
+## Reminder Management
+
+### Smart Reminder Toggle
+
+The `s` key provides intelligent reminder management based on the item's current state:
+
+- **Unscheduled items**: Press `s` to flag for reminder setting (shows blue "R ")
+- **Items with existing reminders**: Press `s` to flag for reminder removal (shows red "r ")
+
+### Reminder Scheduling
+
+- **Default time**: All reminders are set for the next day at 7:00 AM in your local timezone
+- **Automatic conversion**: Times are converted to UTC for API storage
+- **Visual feedback**: Items with reminders show the reminder date instead of creation date
+
+### Workflow Example
+
+```bash
+# Set reminders for important items
+1. Navigate to an unscheduled item
+2. Press 's' - item shows blue "R " flag
+3. Repeat for other items
+4. Press 'X' - executes all flagged operations
+
+# Remove unwanted reminders
+1. Navigate to an item with existing reminder
+2. Press 's' - item shows red "r " flag  
+3. Press 'X' - removes the reminder
+
+# Mixed operations
+1. Flag some items for archive with 'a'
+2. Flag some items for reminders with 's'
+3. Flag some existing reminders for removal with 's'
+4. Press 'X' - executes all operations at once
+```
+
+### Display Features
+
+- **Color coding**: Blue for setting reminders, red for removing them
+- **Status tracking**: Real-time count of flagged operations in header
+- **Jump navigation**: `J/K` keys jump between all flagged items (archive and reminder)
+- **Toggle visibility**: `S` key shows/hides items with future reminders
 
 ## Technical Details
 
@@ -194,7 +244,8 @@ hocket add https://example.com --collection 12345 --tag rust --tag cli
 - **Concurrency**: Async operations for non-blocking UI
 
 ### API Integration
-- **Raindrop.io REST API v1** - Full integration with bookmark management
+- **Raindrop.io REST API v1** - Full integration with bookmark and reminder management
+- **Individual reminder operations** - Each reminder uses separate API calls as required by Raindrop.io
 - **Smart pagination** - Efficiently handles large bookmark collections  
 - **Rate limiting** - Respects API limits with exponential backoff retry logic
 - **Error handling** - Graceful degradation on network issues
@@ -281,6 +332,16 @@ Current limitations that may be addressed in future versions:
 - Press `r` to refresh/fetch latest items
 - Check that items exist in your Raindrop.io unsorted collection
 - Verify your account has bookmarks
+
+**"Reminders not working"**
+- Ensure you have proper permissions to modify bookmarks
+- Check that the reminder time (next day 7:00 AM) is in the future
+- Verify your system timezone is configured correctly
+- Press `r` to refresh and see updated reminder states
+
+**"Reminder flags showing incorrectly"**
+- Press `S` to toggle reminder visibility and refresh the display
+- Use `r` to refresh from Raindrop.io to sync latest reminder states
 
 ### Getting Help
 
