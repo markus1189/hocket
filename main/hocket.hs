@@ -822,26 +822,22 @@ performArchive cred items = do
 performSetReminders :: BookmarkCredentials -> [(BookmarkItem, UTCTime)] -> IO (Either HttpException [(BookmarkItem, Bool)])
 performSetReminders cred itemsWithTimes = do
   tryHttpException $ runStdoutLoggingT $ do
-    results <-
-      traverse
-        ( \(item, reminderTime) -> do
-            success <- raindrop cred (SetReminder (view biId item) reminderTime)
-            pure (item, success)
-        )
-        itemsWithTimes
-    pure results
+    traverse
+      ( \(item, reminderTime) -> do
+          success <- raindrop cred (SetReminder (view biId item) reminderTime)
+          pure (item, success)
+      )
+      itemsWithTimes
 
 performRemoveReminders :: BookmarkCredentials -> [BookmarkItem] -> IO (Either HttpException [(BookmarkItem, Bool)])
 performRemoveReminders cred items = do
   tryHttpException $ runStdoutLoggingT $ do
-    results <-
-      traverse
-        ( \item -> do
-            success <- raindrop cred (RemoveReminder (view biId item))
-            pure (item, success)
-        )
-        items
-    pure results
+    traverse
+      ( \item -> do
+          success <- raindrop cred (RemoveReminder (view biId item))
+          pure (item, success)
+      )
+      items
 
 tryHttpException :: IO a -> IO (Either HttpException a)
 tryHttpException = try @HttpException
