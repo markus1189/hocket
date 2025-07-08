@@ -69,7 +69,7 @@ makePrisms ''RaindropCollectionId
 
 newtype URL = URL String deriving (Show, Eq, Generic)
 
-data PendingAction = None | ToBeArchived | ToBeReminded | ReminderToBeRemoved deriving (Show, Eq, Ord)
+data PendingAction = None | ToBeArchived | ToBeReminded UTCTime | ReminderToBeRemoved deriving (Show, Eq, Ord)
 
 data BookmarkCredentials = BookmarkCredentials
   { _raindropToken :: RaindropToken,

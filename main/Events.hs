@@ -24,7 +24,6 @@ where
 
 import Data.Set (Set)
 import Data.Text (Text)
-import Data.Time (UTCTime)
 import Data.Time.Clock.POSIX (POSIXTime)
 import Network.Bookmark.Types
 
@@ -39,7 +38,7 @@ data AsyncCommand
   | ArchiveItems
   | ArchivedItems ![BookmarkItemId]
   | SetReminders
-  | RemindersSet ![BookmarkItemId] !UTCTime
+  | RemindersSet ![BookmarkItemId]
   | RemoveReminders
   | RemindersRemoved ![BookmarkItemId]
   | AsyncActionFailed !(Maybe Text)
@@ -71,8 +70,8 @@ archivedItemsEvt bids = HocketAsync (ArchivedItems bids)
 setRemindersEvt :: HocketEvent
 setRemindersEvt = HocketAsync SetReminders
 
-remindersSetEvt :: [BookmarkItemId] -> UTCTime -> HocketEvent
-remindersSetEvt bids reminderTime = HocketAsync (RemindersSet bids reminderTime)
+remindersSetEvt :: [BookmarkItemId] -> HocketEvent
+remindersSetEvt bids = HocketAsync (RemindersSet bids)
 
 removeRemindersEvt :: HocketEvent
 removeRemindersEvt = HocketAsync RemoveReminders

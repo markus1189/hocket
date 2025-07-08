@@ -14,6 +14,12 @@ module Network.Bookmark.Ui.State
     hsStatus,
     hsCredentials,
     hsShowFutureReminders,
+    ItemCounts,
+    icNone,
+    icToBeArchived,
+    icToBeReminded,
+    icReminderToBeRemoved,
+    icFutureReminders,
     initialState,
     insertItem,
     insertItems,
@@ -26,6 +32,7 @@ module Network.Bookmark.Ui.State
     setAllFlagsToArchive,
     toggleShowFutureReminders,
     updateItemsWithReminder,
+    updateItemsWithStoredReminderTimes,
     removeReminderFromItems,
     SortByUpdated,
     syncForRender,
@@ -49,7 +56,7 @@ import Data.SortedList (SortedList)
 import qualified Data.SortedList as SL
 import Data.Text (Text)
 import Data.Time (UTCTime)
-import Data.Time.Clock.POSIX (POSIXTime)
+import Data.Time.Clock.POSIX (POSIXTime, posixSecondsToUTCTime)
 import qualified Data.Vector as V
 import Network.Bookmark.Types
 import Network.Bookmark.Ui.Widgets
@@ -82,23 +89,41 @@ getSortDate item = case _biReminder item of
   Just reminderDate -> reminderDate
   Nothing -> _biCreated item
 
+-- Normalize PendingAction for grouping - all ToBeReminded times become ToBeReminded with epoch
+normalizePendingAction :: PendingAction -> PendingAction
+normalizePendingAction (ToBeReminded _) = ToBeReminded (posixSecondsToUTCTime 0)
+normalizePendingAction other = other
+
 partitionItems :: HocketState -> Map PendingAction (SortedList SortByUpdated)
 partitionItems =
   Map.fromListWith (<>)
+    . over (mapped . _1) normalizePendingAction
     . over (mapped . _2) (SL.singleton . SBU)
     . toList
     . view hsContents
 
-hsNumItems :: HocketState -> (Int, Int, Int, Int, Int)
+data ItemCounts = ItemCounts
+  { _icNone :: Int,
+    _icToBeArchived :: Int,
+    _icToBeReminded :: Int,
+    _icReminderToBeRemoved :: Int,
+    _icFutureReminders :: Int
+  }
+
+makeLenses ''ItemCounts
+
+hsNumItems :: HocketState -> ItemCounts
 hsNumItems s =
-  ( length $ partitioned ^. at None . non (SL.toSortedList []),
-    length $ partitioned ^. at ToBeArchived . non (SL.toSortedList []),
-    length $ partitioned ^. at ToBeReminded . non (SL.toSortedList []),
-    length $ partitioned ^. at ReminderToBeRemoved . non (SL.toSortedList []),
-    if s ^. hsShowFutureReminders
-      then 0
-      else length $ filter (isJust . view biReminder . snd) $ Map.elems (s ^. hsContents)
-  )
+  ItemCounts
+    { _icNone = length $ partitioned ^. at None . non (SL.toSortedList []),
+      _icToBeArchived = length $ partitioned ^. at ToBeArchived . non (SL.toSortedList []),
+      _icToBeReminded = length $ partitioned ^. at (ToBeReminded (posixSecondsToUTCTime 0)) . non (SL.toSortedList []),
+      _icReminderToBeRemoved = length $ partitioned ^. at ReminderToBeRemoved . non (SL.toSortedList []),
+      _icFutureReminders =
+        if s ^. hsShowFutureReminders
+          then 0
+          else length $ filter (isJust . view biReminder . snd) $ Map.elems (s ^. hsContents)
+    }
   where
     partitioned = partitionItems s
 
@@ -135,19 +160,19 @@ togglePendingAction bid = hsContents . ix bid . _1 %~ toggle
   where
     toggle None = ToBeArchived
     toggle ToBeArchived = None
-    toggle ToBeReminded = None
+    toggle (ToBeReminded _) = None
     toggle ReminderToBeRemoved = None
 
-togglePendingActionToReminder :: BookmarkItemId -> HocketState -> HocketState
-togglePendingActionToReminder bid s =
+togglePendingActionToReminder :: BookmarkItemId -> UTCTime -> HocketState -> HocketState
+togglePendingActionToReminder bid reminderTime s =
   case s ^. hsContents . at bid of
     Just (currentAction, item) ->
       let hasExistingReminder = isJust (item ^. biReminder)
           newAction = case currentAction of
-            None -> if hasExistingReminder then ReminderToBeRemoved else ToBeReminded
-            ToBeReminded -> None
+            None -> if hasExistingReminder then ReminderToBeRemoved else ToBeReminded reminderTime
+            ToBeReminded _ -> None
             ReminderToBeRemoved -> None
-            ToBeArchived -> if hasExistingReminder then ReminderToBeRemoved else ToBeReminded
+            ToBeArchived -> if hasExistingReminder then ReminderToBeRemoved else ToBeReminded reminderTime
        in s & hsContents . at bid ?~ (newAction, item)
     Nothing -> s
 
@@ -179,9 +204,23 @@ updateItemsWithReminder bids reminderTime s =
   foldl'
     ( \st bid ->
         case st ^. hsContents . at bid of
-          Just (action, item) -> 
+          Just (action, item) ->
             let updatedItem = item & biReminder ?~ reminderTime
-            in st & hsContents . at bid ?~ (action, updatedItem)
+             in st & hsContents . at bid ?~ (action, updatedItem)
+          Nothing -> st
+    )
+    s
+    bids
+
+updateItemsWithStoredReminderTimes :: [BookmarkItemId] -> HocketState -> HocketState
+updateItemsWithStoredReminderTimes bids s =
+  foldl'
+    ( \st bid ->
+        case st ^. hsContents . at bid of
+          Just (ToBeReminded reminderTime, item) ->
+            let updatedItem = item & biReminder ?~ reminderTime
+             in st & hsContents . at bid ?~ (ToBeReminded reminderTime, updatedItem)
+          Just _ -> st -- Keep non-reminder actions unchanged
           Nothing -> st
     )
     s
@@ -192,9 +231,9 @@ removeReminderFromItems bids s =
   foldl'
     ( \st bid ->
         case st ^. hsContents . at bid of
-          Just (action, item) -> 
+          Just (action, item) ->
             let updatedItem = item & biReminder .~ Nothing
-            in st & hsContents . at bid ?~ (action, updatedItem)
+             in st & hsContents . at bid ?~ (action, updatedItem)
           Nothing -> st
     )
     s
