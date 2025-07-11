@@ -658,7 +658,7 @@ drawGui tz s = [w]
                 <> ( \counts ->
                        let base =
                              sformat
-                               ("(" % F.int % "|" % F.int % "|" % ")")
+                               ("(" % F.int % "|" % F.int % ")")
                                (counts ^. icNone)
                                (counts ^. icToBeArchived + counts ^. icToBeReminded + counts ^. icReminderToBeRemoved)
                            reminderPart =
