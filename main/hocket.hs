@@ -617,8 +617,9 @@ hocketAttrMap =
     ]
 
 cleanUnicodeText :: Text -> Text
-cleanUnicodeText = T.filter isValidChar
+cleanUnicodeText = T.map translateUnicodeChar
   where
+    translateUnicodeChar c = if isValidChar c then c else '.'
     isValidChar c = case c of
       '\t' -> True
       '\n' -> True
