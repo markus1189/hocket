@@ -152,6 +152,7 @@ hocket add https://example.com --collection 12345 --tag rust --tag cli
 #### Item Actions
 - `Space` - Open selected item in browser
 - `Enter` - Open item in browser AND mark for archiving
+- `e` - Open selected item's edit page in Raindrop.io
 - `a` - Flag selected item for archiving
 - `s` - Smart reminder toggle: flag for reminder setting (unscheduled items) or removal (scheduled items)
 - `u` - Remove flags from selected item (archive, reminder, or removal flags)

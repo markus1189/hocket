@@ -92,6 +92,7 @@ import Events
     asyncActionFailedEvt,
     browseItemEvt,
     clearAllFlagsEvt,
+    editItemInBrowserEvt,
     fetchItemsEvt,
     fetchedItemsEvt,
     remindersRemovedEvt,
@@ -305,6 +306,9 @@ vtyEventHandler es (EvKey (KChar 'S') []) = do
 vtyEventHandler es (EvKey (KChar 'v') []) = do
   liftIO $ es `trigger` toggleVideoFilterEvt
   pure ()
+vtyEventHandler es (EvKey (KChar 'e') []) = do
+  s <- use id
+  liftIO . for_ (focusedItem s) $ \bit -> es `trigger` editItemInBrowserEvt bit
 vtyEventHandler _ (EvKey (KChar 'q') []) = halt
 vtyEventHandler _ e = do
   zoom itemList (handleListEventVi handleListEvent e)
@@ -498,6 +502,13 @@ uiCommandEventHandler es (BrowseItem bit) = do
   case res of
     Left e -> liftIO $ es `trigger` setStatusEvt (Just (T.pack $ show e))
     Right () -> pure ()
+uiCommandEventHandler es (EditItemInBrowser bit) = do
+  let itemId = view biId bit ^. _BookmarkItemId
+      editUrl = "https://app.raindrop.io/my/-1/item/" <> T.unpack itemId <> "/edit"
+  res <- liftIO . try @SomeException $ browseItem "xdg-open '%s'" (URL editUrl)
+  case res of
+    Left e -> liftIO $ es `trigger` setStatusEvt (Just (T.pack $ show e))
+    Right () -> pure ()
 
 myEventHandler ::
   BChan HocketEvent ->
@@ -681,7 +692,7 @@ drawGui tz s = [w]
                    )
                   (hsNumItems s)
             )
-            "spc:Browse ent:Browse+flag r:Refresh S:Toggle future reminders v:Video filter X:Execute Flags a:Archive flag s:Reminder flag u:Unflag J/K:Jump U:Unflag all q:Quit",
+            "spc:Browse ent:Browse+flag e:Edit r:Refresh S:Toggle future reminders v:Video filter X:Execute Flags a:Archive flag s:Reminder flag u:Unflag J/K:Jump U:Unflag all q:Quit",
           hBorder,
           hBar
             ( maybe
