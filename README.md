@@ -163,36 +163,56 @@ hocket add https://example.com --collection 12345 --tag rust --tag cli
 - `X` - Execute all flagged operations (archive items, set reminders, remove reminders)
 - `S` - Toggle showing/hiding items with future reminders
 - `v` - Toggle video filter (show only YouTube URLs and items tagged with "video")
+- `V` - Toggle inverted video filter (hide YouTube URLs and items tagged with "video")
 
-## Video Filter
+## Video Filters
 
-The video filter (`v` key) allows you to quickly focus on video content in your bookmarks. When enabled, only bookmarks that meet the following criteria are displayed:
+Hocket provides two complementary video filters to help you manage video content in your bookmarks:
 
+### Video Content Detection
+Both filters identify video content by:
 - **YouTube URLs**: Bookmarks containing "youtube" in the URL (case-insensitive)
 - **Video tags**: Bookmarks tagged with "video" (case-insensitive)
 
-### Video Filter Features
-- **Toggle functionality**: Press `v` to turn the filter on/off
-- **Visual indicator**: Header shows "(VIDEO)" when filter is active
+### Show Only Videos Filter (`v` key)
+- **Functionality**: Press `v` to toggle showing only video content
+- **Visual indicator**: Header shows "(+V)" when active
+- **Use case**: Focus exclusively on video bookmarks
+
+### Hide Videos Filter (`V` key) 
+- **Functionality**: Press `V` to toggle hiding all video content
+- **Visual indicator**: Header shows "(-V)" when active
+- **Use case**: Focus on non-video content (articles, tools, etc.)
+
+### Filter Features
+- **Independent toggles**: Each filter can be toggled independently
 - **Combined with other filters**: Works alongside the reminder visibility toggle (`S`)
 - **All operations supported**: Archive, reminder, and other operations work normally on filtered results
-- **Non-persistent**: Filter resets when application restarts
+- **Non-persistent**: Filter states reset when application restarts
 
-### Interface Layout
+### Interface Layout Examples
 
+**Show Only Videos Filter Active (`v`)**:
 ```
-┌─ Hocket (VIDEO): (15|2|1|1) (3) ──────────────────────────────────┐
-│   2025-01-15: ★ Important Article Title         reddit.com/r/... │
-│   2025-01-14:   Regular Bookmark                github.com/...   │
-│ A 2025-01-13:   Item flagged for archive        example.com/...  │
-│ R 2025-01-12:   Item flagged for reminder       example.com/...  │
-│ r 2025-01-11:   Item flagged to remove reminder news.ycombinator...│
-│   2025-01-10:   Item with existing reminder     stackoverflow.com/│
+┌─ Hocket (+V): (5|1|0|0) (1) ───────────────────────────────────┐
+│   2025-01-15: ★ Learn Haskell Tutorial           youtube.com/... │
+│   2025-01-14:   React Best Practices            youtube.com/... │
+│ A 2025-01-13:   Conference Talk                 youtube.com/... │
+│   2025-01-12:   Coding Tutorial                 vimeo.com/...   │
 ├──────────────────────────────────────────────────────────────────┤
-└─ REMINDER 2025-01-12 EXCERPT: This is a sample excerpt ──────────┘
-│                                                    Last: 14:32:18 │
-│ Status: setting reminders                                         │
-└────────────────────────────────────────────────────────────────────┘
+└─ TAGS: tutorial, programming  EXCERPT: Great explanation... ─────┘
+```
+
+**Hide Videos Filter Active (`V`)**:
+```
+┌─ Hocket (-V): (10|1|1|0) (2) ──────────────────────────────────┐
+│   2025-01-15: ★ Documentation Site              docs.example.com │
+│   2025-01-14:   Research Paper                  arxiv.org/...   │
+│ A 2025-01-13:   Tool Documentation              github.com/...  │
+│ R 2025-01-12:   Blog Article                    medium.com/...  │
+│   2025-01-11:   Reference Guide                 stackoverflow.com│
+├──────────────────────────────────────────────────────────────────┤
+└─ REMINDER 2025-01-12 EXCERPT: Important article to read... ─────┘
 ```
 
 #### Visual Elements

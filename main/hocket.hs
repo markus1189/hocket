@@ -102,6 +102,7 @@ import Events
     setStatusEvt,
     shiftItemEvt,
     shiftItemReminderEvt,
+    toggleInvertedVideoFilterEvt,
     toggleRemindersEvt,
     toggleVideoFilterEvt,
   )
@@ -136,6 +137,7 @@ import Network.Bookmark.Types
 import Network.Bookmark.Ui.State
   ( HocketState,
     Name (..),
+    VideoFilterMode (..),
     clearAllFlags,
     clearFlagsForItems,
     focusRing,
@@ -158,6 +160,7 @@ import Network.Bookmark.Ui.State
     removeReminderFromItems,
     setAllFlagsToArchive,
     syncForRender,
+    toggleInvertedVideoFilter,
     togglePendingAction,
     togglePendingActionToReminder,
     toggleShowFutureReminders,
@@ -305,6 +308,9 @@ vtyEventHandler es (EvKey (KChar 'S') []) = do
   pure ()
 vtyEventHandler es (EvKey (KChar 'v') []) = do
   liftIO $ es `trigger` toggleVideoFilterEvt
+  pure ()
+vtyEventHandler es (EvKey (KChar 'V') []) = do
+  liftIO $ es `trigger` toggleInvertedVideoFilterEvt
   pure ()
 vtyEventHandler es (EvKey (KChar 'e') []) = do
   s <- use id
@@ -497,6 +503,9 @@ uiCommandEventHandler _ ToggleReminders = do
 uiCommandEventHandler _ ToggleVideoFilter = do
   id %= toggleVideoFilter
   id %= syncForRender
+uiCommandEventHandler _ ToggleInvertedVideoFilter = do
+  id %= toggleInvertedVideoFilter
+  id %= syncForRender
 uiCommandEventHandler es (BrowseItem bit) = do
   res <- liftIO . try @SomeException $ browseItem "firefox '%s'" (URL . T.unpack $ view biLink bit)
   case res of
@@ -676,7 +685,11 @@ drawGui tz s = [w]
       vBox
         [ hBarWithHints
             ( "Hocket"
-                <> (if s ^. hsVideoFilter then " (VIDEO)" else "")
+                <> ( case s ^. hsVideoFilter of
+                       NoVideoFilter -> ""
+                       ShowOnlyVideos -> " (+V)"
+                       HideVideos -> " (-V)"
+                   )
                 <> ": "
                 <> ( \counts ->
                        let base =
@@ -692,7 +705,7 @@ drawGui tz s = [w]
                    )
                   (hsNumItems s)
             )
-            "spc:Browse ent:Browse+flag e:Edit r:Refresh S:Toggle future reminders v:Video filter X:Execute Flags a:Archive flag s:Reminder flag u:Unflag J/K:Jump U:Unflag all q:Quit",
+            "spc:Browse ent:Browse+flag e:Edit r:Refresh S:Toggle future reminders v:Video filter V:Hide videos X:Execute Flags a:Archive flag s:Reminder flag u:Unflag J/K:Jump U:Unflag all q:Quit",
           hBorder,
           hBar
             ( maybe
