@@ -161,11 +161,26 @@ hocket add https://example.com --collection 12345 --tag rust --tag cli
 - `U` - Clear all flags from all items
 - `X` - Execute all flagged operations (archive items, set reminders, remove reminders)
 - `S` - Toggle showing/hiding items with future reminders
+- `v` - Toggle video filter (show only YouTube URLs and items tagged with "video")
+
+## Video Filter
+
+The video filter (`v` key) allows you to quickly focus on video content in your bookmarks. When enabled, only bookmarks that meet the following criteria are displayed:
+
+- **YouTube URLs**: Bookmarks containing "youtube" in the URL (case-insensitive)
+- **Video tags**: Bookmarks tagged with "video" (case-insensitive)
+
+### Video Filter Features
+- **Toggle functionality**: Press `v` to turn the filter on/off
+- **Visual indicator**: Header shows "(VIDEO)" when filter is active
+- **Combined with other filters**: Works alongside the reminder visibility toggle (`S`)
+- **All operations supported**: Archive, reminder, and other operations work normally on filtered results
+- **Non-persistent**: Filter resets when application restarts
 
 ### Interface Layout
 
 ```
-┌─ Hocket: (15|2|1|1) (3) ───────────────────────────────────────────┐
+┌─ Hocket (VIDEO): (15|2|1|1) (3) ──────────────────────────────────┐
 │   2025-01-15: ★ Important Article Title         reddit.com/r/... │
 │   2025-01-14:   Regular Bookmark                github.com/...   │
 │ A 2025-01-13:   Item flagged for archive        example.com/...  │

@@ -19,6 +19,7 @@ module Events
     clearAllFlagsEvt,
     setAllFlagsToArchiveEvt,
     toggleRemindersEvt,
+    toggleVideoFilterEvt,
   )
 where
 
@@ -53,6 +54,7 @@ data UiCommand
   | ClearAllFlags
   | SetAllFlagsToArchive
   | ToggleReminders
+  | ToggleVideoFilter
   deriving (Show, Eq)
 
 fetchItemsEvt :: HocketEvent
@@ -105,3 +107,6 @@ setAllFlagsToArchiveEvt = HocketUi SetAllFlagsToArchive
 
 toggleRemindersEvt :: HocketEvent
 toggleRemindersEvt = HocketUi ToggleReminders
+
+toggleVideoFilterEvt :: HocketEvent
+toggleVideoFilterEvt = HocketUi ToggleVideoFilter

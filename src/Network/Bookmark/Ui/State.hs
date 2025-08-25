@@ -14,6 +14,7 @@ module Network.Bookmark.Ui.State
     hsStatus,
     hsCredentials,
     hsShowFutureReminders,
+    hsVideoFilter,
     ItemCounts,
     icNone,
     icToBeArchived,
@@ -31,11 +32,13 @@ module Network.Bookmark.Ui.State
     clearFlagsForItems,
     setAllFlagsToArchive,
     toggleShowFutureReminders,
+    toggleVideoFilter,
     updateItemsWithReminder,
     updateItemsWithStoredReminderTimes,
     removeReminderFromItems,
     SortByUpdated,
     syncForRender,
+    isVideoBookmark,
   )
 where
 
@@ -55,6 +58,7 @@ import Data.Ord (Down (..), comparing)
 import Data.SortedList (SortedList)
 import qualified Data.SortedList as SL
 import Data.Text (Text)
+import qualified Data.Text as T
 import Data.Time (UTCTime)
 import Data.Time.Clock.POSIX (POSIXTime, posixSecondsToUTCTime)
 import qualified Data.Vector as V
@@ -71,7 +75,8 @@ data HocketState = HocketState
     _hsStatus :: !(Maybe Text),
     _hsContents :: !(Map BookmarkItemId (PendingAction, BookmarkItem)),
     _hsCredentials :: !BookmarkCredentials,
-    _hsShowFutureReminders :: !Bool
+    _hsShowFutureReminders :: !Bool,
+    _hsVideoFilter :: !Bool
   }
 
 makeLenses ''HocketState
@@ -138,6 +143,7 @@ initialState creds =
     Map.empty
     creds
     False
+    False
 
 insertItem :: BookmarkItem -> HocketState -> HocketState
 insertItem bit s =
@@ -199,6 +205,15 @@ setAllFlagsToArchive = setAllFlags ToBeArchived
 toggleShowFutureReminders :: HocketState -> HocketState
 toggleShowFutureReminders s = s & hsShowFutureReminders %~ not
 
+toggleVideoFilter :: HocketState -> HocketState
+toggleVideoFilter s = s & hsVideoFilter %~ not
+
+isVideoBookmark :: BookmarkItem -> Bool
+isVideoBookmark item = hasYouTubeInUrl || hasVideoTag
+  where
+    hasYouTubeInUrl = T.isInfixOf "youtube" (T.toLower $ item ^. biLink)
+    hasVideoTag = any (\tag -> T.toLower tag == "video") (item ^. biTags)
+
 updateItemsWithReminder :: [BookmarkItemId] -> UTCTime -> HocketState -> HocketState
 updateItemsWithReminder bids reminderTime s =
   foldl'
@@ -255,9 +270,15 @@ syncForRender s =
                 (Down . SBU . snd)
                 filteredContents
     filteredContents =
-      if s ^. hsShowFutureReminders
-        then Map.elems (s ^. hsContents)
-        else filter (not . hasFutureReminder . snd) (Map.elems (s ^. hsContents))
+      let reminderFiltered =
+            if s ^. hsShowFutureReminders
+              then Map.elems (s ^. hsContents)
+              else filter (not . hasFutureReminder . snd) (Map.elems (s ^. hsContents))
+          videoFiltered =
+            if s ^. hsVideoFilter
+              then filter (isVideoBookmark . snd) reminderFiltered
+              else reminderFiltered
+       in videoFiltered
 
     hasFutureReminder :: BookmarkItem -> Bool
     hasFutureReminder item =

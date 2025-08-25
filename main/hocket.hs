@@ -102,6 +102,7 @@ import Events
     shiftItemEvt,
     shiftItemReminderEvt,
     toggleRemindersEvt,
+    toggleVideoFilterEvt,
   )
 import Formatting (sformat, (%))
 import qualified Formatting as F
@@ -143,6 +144,7 @@ import Network.Bookmark.Ui.State
     hsLastUpdated,
     hsNumItems,
     hsStatus,
+    hsVideoFilter,
     icFutureReminders,
     icNone,
     icReminderToBeRemoved,
@@ -158,6 +160,7 @@ import Network.Bookmark.Ui.State
     togglePendingAction,
     togglePendingActionToReminder,
     toggleShowFutureReminders,
+    toggleVideoFilter,
     updateItemsWithStoredReminderTimes,
   )
 import Network.HTTP.Client
@@ -298,6 +301,9 @@ vtyEventHandler es (EvKey (KChar 'U') []) = do
   pure ()
 vtyEventHandler es (EvKey (KChar 'S') []) = do
   liftIO $ es `trigger` toggleRemindersEvt
+  pure ()
+vtyEventHandler es (EvKey (KChar 'v') []) = do
+  liftIO $ es `trigger` toggleVideoFilterEvt
   pure ()
 vtyEventHandler _ (EvKey (KChar 'q') []) = halt
 vtyEventHandler _ e = do
@@ -484,6 +490,9 @@ uiCommandEventHandler _ SetAllFlagsToArchive = id %= setAllFlagsToArchive
 uiCommandEventHandler _ ToggleReminders = do
   id %= toggleShowFutureReminders
   id %= syncForRender
+uiCommandEventHandler _ ToggleVideoFilter = do
+  id %= toggleVideoFilter
+  id %= syncForRender
 uiCommandEventHandler es (BrowseItem bit) = do
   res <- liftIO . try @SomeException $ browseItem "firefox '%s'" (URL . T.unpack $ view biLink bit)
   case res of
@@ -655,7 +664,9 @@ drawGui tz s = [w]
     w =
       vBox
         [ hBarWithHints
-            ( "Hocket: "
+            ( "Hocket"
+                <> (if s ^. hsVideoFilter then " (VIDEO)" else "")
+                <> ": "
                 <> ( \counts ->
                        let base =
                              sformat
@@ -670,7 +681,7 @@ drawGui tz s = [w]
                    )
                   (hsNumItems s)
             )
-            "spc:Browse ent:Browse+flag r:Refresh S:Toggle future reminders X:Execute Flags a:Archive flag s:Reminder flag u:Unflag J/K:Jump U:Unflag all q:Quit",
+            "spc:Browse ent:Browse+flag r:Refresh S:Toggle future reminders v:Video filter X:Execute Flags a:Archive flag s:Reminder flag u:Unflag J/K:Jump U:Unflag all q:Quit",
           hBorder,
           hBar
             ( maybe
