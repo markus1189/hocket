@@ -49,6 +49,10 @@ Hocket is a terminal-based bookmark manager for Raindrop.io built with Haskell a
 - **aeson** - JSON parsing and serialization
 - **async** - Concurrent operations
 
+## GitHub Actions
+
+- Automated flake updates and build verification via workflows in `.github/workflows/`
+
 ## Code Style Guidelines
 
 - Use `lens` package for record access - avoid underscore-prefixed accessors
@@ -58,3 +62,4 @@ Hocket is a terminal-based bookmark manager for Raindrop.io built with Haskell a
 - Run `cabal test` after implementing changes
 - Use `rg` (ripgrep) for searching the codebase
 - Update README when you change keybindings
+- GitHub workflows use `.yml` extension (not `.yaml`)
