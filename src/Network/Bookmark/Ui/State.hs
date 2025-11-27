@@ -230,7 +230,7 @@ toggleInvertedVideoFilter s = s & hsVideoFilter %~ toggleHideMode
 isVideoBookmark :: BookmarkItem -> Bool
 isVideoBookmark item = hasYouTubeInUrl || hasVideoTag
   where
-    hasYouTubeInUrl = T.isInfixOf "youtube" (T.toLower $ item ^. biLink)
+    hasYouTubeInUrl = T.isInfixOf "youtu.be" (T.toLower $ item ^. biLink) || T.isInfixOf "youtube" (T.toLower $ item ^. biLink)
     hasVideoTag = any (\tag -> T.toLower tag == "video") (item ^. biTags)
 
 updateItemsWithReminder :: [BookmarkItemId] -> UTCTime -> HocketState -> HocketState
