@@ -50,7 +50,7 @@ import qualified Brick.Widgets.List as L
 import Control.Applicative ((<|>))
 import Control.Concurrent.Async (Async)
 import Control.Lens
-import Data.Foldable (foldl', maximumBy, toList)
+import Data.Foldable (maximumBy, toList)
 import Data.Function (on)
 import Data.Functor (($>))
 import Data.Map (Map)
