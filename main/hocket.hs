@@ -63,7 +63,7 @@ import Control.Monad.Loops (unfoldrM)
 import Control.Monad.State (MonadState)
 import qualified Data.CaseInsensitive as CI
 import Data.Foldable (for_)
-import Data.List (find, findIndex, foldl', isPrefixOf)
+import Data.List (find, findIndex, isPrefixOf)
 import qualified Data.Map as Map
 import Data.Maybe (fromMaybe, isJust, mapMaybe)
 import Data.Text (Text)
