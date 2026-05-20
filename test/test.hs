@@ -37,8 +37,8 @@ sanitizeForDisplayTests =
         sanitizeForDisplay "Café résumé naïve" @?= "Café résumé naïve",
       testCase "preserves CJK characters" $
         sanitizeForDisplay "漢字テスト" @?= "漢字テスト",
-      testCase "preserves emoji" $
-        sanitizeForDisplay "Beach day 🌊🏖️" @?= "Beach day 🌊🏖️",
+      testCase "preserves base emoji" $
+        sanitizeForDisplay "Beach day \x1F30A\&\x1F3D6" @?= "Beach day \x1F30A\&\x1F3D6",
       testCase "replaces newline with space" $
         sanitizeForDisplay "line1\nline2" @?= "line1 line2",
       testCase "replaces carriage return and tab with space" $
@@ -50,7 +50,16 @@ sanitizeForDisplayTests =
       testCase "leaves empty text unchanged" $
         sanitizeForDisplay "" @?= "",
       testCase "preserves mixed Unicode and ASCII" $
-        sanitizeForDisplay "Foo — Bar – Baz «quoted»" @?= "Foo — Bar – Baz «quoted»"
+        sanitizeForDisplay "Foo — Bar – Baz «quoted»" @?= "Foo — Bar – Baz «quoted»",
+      testCase "strips ZWJ between emojis" $
+        sanitizeForDisplay "\x1F468\x200D\x1F469" @?= "\x1F468\&\x1F469",
+      testCase "strips emoji skin-tone modifier (Fitzpatrick)" $
+        sanitizeForDisplay "\x270C\&\x1F3FC" @?= "\x270C",
+      testCase "strips variation selector (text/emoji presentation)" $
+        sanitizeForDisplay "\x270C\&\xFE0F" @?= "\x270C",
+      testCase "real-world Carport title becomes width-stable" $
+        sanitizeForDisplay "EINFACH und SCHNELL zum eigenem Carport \x1F929 Die Anleitung \x270C\&\x1F3FC"
+          @?= "EINFACH und SCHNELL zum eigenem Carport \x1F929 Die Anleitung \x270C"
     ]
 
 bookmarkItem1 :: BookmarkItem

@@ -43,10 +43,16 @@ clamp :: (Ord a) => a -> a -> a -> a
 clamp mn mx val = max mn (min val mx)
 
 -- Collapse control characters (C0, DEL, C1) into spaces so they don't
--- emit terminal escapes or break list-row alignment. Printable Unicode
--- (letters, marks, symbols, wide chars, emoji) is passed through untouched
--- and rendered by Vty using wcwidth.
+-- emit terminal escapes or break list-row alignment. Also drop codepoints
+-- that the terminal merges into the preceding glyph: ZWJ, Variation
+-- Selectors, and Emoji Modifiers (skin tones). Vty's wcwidth counts each
+-- codepoint separately while the terminal renders the cluster as one
+-- cell, so leaving them in shifts every subsequent column.
 sanitizeForDisplay :: Text -> Text
-sanitizeForDisplay = T.map replaceControl
+sanitizeForDisplay = T.map replaceControl . T.filter (not . isComposing)
   where
     replaceControl c = if isControl c then ' ' else c
+    isComposing c =
+      c == '\x200D'
+        || (c >= '\xFE00' && c <= '\xFE0F')
+        || (c >= '\x1F3FB' && c <= '\x1F3FF')
