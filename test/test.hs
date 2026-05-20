@@ -17,6 +17,7 @@ import Data.Time.Clock (DiffTime, UTCTime (..))
 import Data.Time.Format.ISO8601 (iso8601ParseM)
 import Network.Bookmark.Types
 import Network.Bookmark.Ui.State
+import Network.Bookmark.Ui.Widgets (sanitizeForDisplay)
 import Test.Tasty
 import Test.Tasty.HUnit
 import Test.Tasty.QuickCheck as QC
@@ -24,7 +25,33 @@ import Test.Tasty.QuickCheck as QC
 main = defaultMain tests
 
 tests :: TestTree
-tests = testGroup "Tests" [hocketStateTests, raindropParsingTests, dateTimeParsingTests, jsonRoundtripTests]
+tests = testGroup "Tests" [hocketStateTests, raindropParsingTests, dateTimeParsingTests, jsonRoundtripTests, sanitizeForDisplayTests]
+
+sanitizeForDisplayTests :: TestTree
+sanitizeForDisplayTests =
+  testGroup
+    "sanitizeForDisplay"
+    [ testCase "preserves plain ASCII" $
+        sanitizeForDisplay "Hello, World!" @?= "Hello, World!",
+      testCase "preserves Latin diacritics" $
+        sanitizeForDisplay "Café résumé naïve" @?= "Café résumé naïve",
+      testCase "preserves CJK characters" $
+        sanitizeForDisplay "漢字テスト" @?= "漢字テスト",
+      testCase "preserves emoji" $
+        sanitizeForDisplay "Beach day 🌊🏖️" @?= "Beach day 🌊🏖️",
+      testCase "replaces newline with space" $
+        sanitizeForDisplay "line1\nline2" @?= "line1 line2",
+      testCase "replaces carriage return and tab with space" $
+        sanitizeForDisplay "a\rb\tc" @?= "a b c",
+      testCase "replaces C0 control chars with space" $
+        sanitizeForDisplay "x\ESCy\BELz" @?= "x y z",
+      testCase "replaces DEL and C1 control chars with space" $
+        sanitizeForDisplay "a\DELb\x80\&c\x9F\&d" @?= "a b c d",
+      testCase "leaves empty text unchanged" $
+        sanitizeForDisplay "" @?= "",
+      testCase "preserves mixed Unicode and ASCII" $
+        sanitizeForDisplay "Foo — Bar – Baz «quoted»" @?= "Foo — Bar – Baz «quoted»"
+    ]
 
 bookmarkItem1 :: BookmarkItem
 bookmarkItem1 =

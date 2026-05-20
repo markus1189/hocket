@@ -167,6 +167,7 @@ import Network.Bookmark.Ui.State
     toggleVideoFilter,
     updateItemsWithStoredReminderTimes,
   )
+import Network.Bookmark.Ui.Widgets (sanitizeForDisplay)
 import Network.HTTP.Client
   ( HttpException (HttpExceptionRequest),
     HttpExceptionContent (StatusCodeException),
@@ -645,16 +646,6 @@ hocketAttrMap =
       (attrName "bar", Vty.defAttr `Vty.withBackColor` Vty.black `Vty.withForeColor` Vty.white)
     ]
 
-cleanUnicodeText :: Text -> Text
-cleanUnicodeText = T.map translateUnicodeChar
-  where
-    translateUnicodeChar c = if isValidChar c then c else '.'
-    isValidChar c = case c of
-      '\t' -> True
-      '\n' -> True
-      '\r' -> True
-      _ -> c >= ' ' && c <= '\DEL'
-
 getDisplayContent :: BookmarkItem -> Text
 getDisplayContent item =
   let noteText = item ^. biNote
@@ -663,11 +654,11 @@ getDisplayContent item =
       hasNote = not (T.null noteText)
       hasExcerpt = not (T.null excerptText)
       hasReminder = isJust reminderDate
-      formattedNote = if hasNote then "NOTE " <> T.replace "\n" " " (cleanUnicodeText noteText) else T.empty
+      formattedNote = if hasNote then "NOTE " <> sanitizeForDisplay noteText else T.empty
       formattedReminder = case reminderDate of
         Just reminder -> "REMINDER " <> T.pack (formatTime defaultTimeLocale "%Y-%m-%d" reminder) <> " "
         Nothing -> T.empty
-      formattedExcerpt = if hasExcerpt then "EXCERPT " <> T.replace "\n" " " (cleanUnicodeText excerptText) else T.empty
+      formattedExcerpt = if hasExcerpt then "EXCERPT " <> sanitizeForDisplay excerptText else T.empty
    in case (hasNote, hasReminder, hasExcerpt) of
         (True, True, True) -> formattedNote <> " | " <> formattedReminder <> formattedExcerpt
         (True, True, False) -> formattedNote <> " | " <> formattedReminder
@@ -881,7 +872,7 @@ txtDisplay bit =
   txt (T.justifyRight 10 ' ' leftEdge)
     <+> txt favoriteIndicator
     <+> txt
-      ( cleanUnicodeText $
+      ( sanitizeForDisplay $
           fromMaybe
             "<empty>"
             (find (not . T.null) [view biTitle bit, T.pack url])
