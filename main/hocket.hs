@@ -1,3 +1,4 @@
+{-# LANGUAGE CPP #-}
 {-# LANGUAGE FlexibleContexts #-}
 {-# LANGUAGE OverloadedStrings #-}
 {-# LANGUAGE RankNTypes #-}
@@ -63,7 +64,10 @@ import Control.Monad.Loops (unfoldrM)
 import Control.Monad.State (MonadState)
 import qualified Data.CaseInsensitive as CI
 import Data.Foldable (for_)
-import Data.List (find, findIndex, foldl', isPrefixOf)
+#if !MIN_VERSION_base(4,20,0)
+import Data.List (foldl')
+#endif
+import Data.List (find, findIndex, isPrefixOf)
 import qualified Data.Map as Map
 import Data.Maybe (fromMaybe, isJust, mapMaybe)
 import Data.Text (Text)
