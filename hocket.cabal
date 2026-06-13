@@ -122,6 +122,7 @@ test-suite test
                      , sorted-list
                      , split
                      , tasty
+                     , tasty-golden
                      , tasty-hspec
                      , tasty-hunit
                      , tasty-quickcheck

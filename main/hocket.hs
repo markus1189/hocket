@@ -89,16 +89,21 @@ import qualified Data.Vector as V
 import Dhall (auto, input)
 import Events
   ( AsyncCommand (..),
+    FilterInput (..),
     HocketEvent (..),
     UiCommand (..),
     archiveItemsEvt,
     archivedItemsEvt,
     asyncActionFailedEvt,
     browseItemEvt,
+    cancelFilterEvt,
     clearAllFlagsEvt,
     editItemInBrowserEvt,
     fetchItemsEvt,
     fetchedItemsEvt,
+    filterBackspaceEvt,
+    filterCharEvt,
+    lockFilterEvt,
     remindersRemovedEvt,
     remindersSetEvt,
     removeRemindersEvt,
@@ -113,9 +118,9 @@ import Events
 import Formatting (sformat, (%))
 import qualified Formatting as F
 import qualified Formatting.Time as F
-import Graphics.Vty (Event (EvKey), Key (KChar))
+import Graphics.Vty (Event (EvKey), Key (KChar, KDown, KUp))
 import qualified Graphics.Vty as Vty
-import Graphics.Vty.Input.Events (Key (KEnter))
+import Graphics.Vty.Input.Events (Key (KBS, KEnter, KEsc))
 import Graphics.Vty.Platform.Unix (mkVty)
 import Network.Bookmark.Types
   ( BookmarkCredentials,
@@ -142,12 +147,18 @@ import Network.Bookmark.Ui.State
   ( HocketState,
     Name (..),
     VideoFilterMode (..),
+    appendFilterChar,
+    backspaceFilter,
+    cancelFilter,
     clearAllFlags,
     clearFlagsForItems,
+    enterFilterMode,
     focusRing,
     hsAsync,
     hsContents,
     hsCredentials,
+    hsFilterActive,
+    hsFilterQuery,
     hsLastUpdated,
     hsNumItems,
     hsStatus,
@@ -160,6 +171,7 @@ import Network.Bookmark.Ui.State
     initialState,
     insertItems,
     itemList,
+    lockFilter,
     removeItems,
     removeReminderFromItems,
     setAllFlagsToArchive,
@@ -261,33 +273,50 @@ vtyEventHandler ::
   BChan HocketEvent ->
   Event ->
   EventM Name HocketState ()
-vtyEventHandler es (EvKey (KChar ' ') []) = do
+vtyEventHandler es e = do
+  s <- use id
+  if s ^. hsFilterActive
+    then case e of
+      EvKey KEsc [] -> liftIO $ es `trigger` cancelFilterEvt
+      EvKey KEnter [] -> liftIO $ es `trigger` lockFilterEvt
+      EvKey KBS [] -> liftIO $ es `trigger` filterBackspaceEvt
+      EvKey (KChar c) [] -> liftIO $ es `trigger` filterCharEvt c
+      EvKey KUp [] -> zoom itemList (handleListEventVi handleListEvent e)
+      EvKey KDown [] -> zoom itemList (handleListEventVi handleListEvent e)
+      _ -> pure ()
+    else vtyEventHandlerNormal es e
+
+vtyEventHandlerNormal ::
+  BChan HocketEvent ->
+  Event ->
+  EventM Name HocketState ()
+vtyEventHandlerNormal es (EvKey (KChar ' ') []) = do
   s <- use id
   liftIO . for_ (focusedItem s) $ \bit -> es `trigger` browseItemEvt bit
-vtyEventHandler es (EvKey KEnter []) = do
+vtyEventHandlerNormal es (EvKey KEnter []) = do
   s <- use id
   liftIO . for_ (focusedItem s) $ \bit -> do
     es `trigger` browseItemEvt bit
     es `trigger` shiftItemEvt (view biId bit)
-vtyEventHandler es (EvKey (KChar 'r') []) = do
+vtyEventHandlerNormal es (EvKey (KChar 'r') []) = do
   liftIO $ es `trigger` fetchItemsEvt
   pure ()
-vtyEventHandler es (EvKey (KChar 'X') []) = do
+vtyEventHandlerNormal es (EvKey (KChar 'X') []) = do
   liftIO $ es `trigger` archiveItemsEvt
   liftIO $ es `trigger` setRemindersEvt
   liftIO $ es `trigger` removeRemindersEvt
   pure ()
-vtyEventHandler es (EvKey (KChar 'a') []) = do
+vtyEventHandlerNormal es (EvKey (KChar 'a') []) = do
   s <- use id
   liftIO . for_ (focusedItem s) $ \bit ->
     unless (getPendingActionForItem (view biId bit) s == ToBeArchived) $
       es `trigger` shiftItemEvt (view biId bit)
-vtyEventHandler es (EvKey (KChar 's') []) = do
+vtyEventHandlerNormal es (EvKey (KChar 's') []) = do
   s <- use id
   liftIO . for_ (focusedItem s) $ \bit ->
     unless (isToBeReminded (getPendingActionForItem (view biId bit) s)) $
       es `trigger` shiftItemReminderEvt (view biId bit)
-vtyEventHandler es (EvKey (KChar 'u') []) = do
+vtyEventHandlerNormal es (EvKey (KChar 'u') []) = do
   s <- use id
   liftIO . for_ (focusedItem s) $ \bit -> do
     let action = getPendingActionForItem (view biId bit) s
@@ -295,33 +324,38 @@ vtyEventHandler es (EvKey (KChar 'u') []) = do
       es `trigger` shiftItemEvt (view biId bit)
     when (isReminderAction action) $
       es `trigger` shiftItemReminderEvt (view biId bit)
-vtyEventHandler _ (EvKey (KChar 'J') []) = do
+vtyEventHandlerNormal _ (EvKey (KChar 'J') []) = do
   s <- use id
   case findNextFlaggedItem s of
     Just newIdx -> itemList %= L.listMoveTo newIdx
     Nothing -> pure ()
-vtyEventHandler _ (EvKey (KChar 'K') []) = do
+vtyEventHandlerNormal _ (EvKey (KChar 'K') []) = do
   s <- use id
   case findPrevFlaggedItem s of
     Just newIdx -> itemList %= L.listMoveTo newIdx
     Nothing -> pure ()
-vtyEventHandler es (EvKey (KChar 'U') []) = do
+vtyEventHandlerNormal es (EvKey (KChar 'U') []) = do
   liftIO $ es `trigger` clearAllFlagsEvt
   pure ()
-vtyEventHandler es (EvKey (KChar 'S') []) = do
+vtyEventHandlerNormal es (EvKey (KChar 'S') []) = do
   liftIO $ es `trigger` toggleRemindersEvt
   pure ()
-vtyEventHandler es (EvKey (KChar 'v') []) = do
+vtyEventHandlerNormal es (EvKey (KChar 'v') []) = do
   liftIO $ es `trigger` toggleVideoFilterEvt
   pure ()
-vtyEventHandler es (EvKey (KChar 'V') []) = do
+vtyEventHandlerNormal es (EvKey (KChar 'V') []) = do
   liftIO $ es `trigger` toggleInvertedVideoFilterEvt
   pure ()
-vtyEventHandler es (EvKey (KChar 'e') []) = do
+vtyEventHandlerNormal es (EvKey (KChar 'e') []) = do
   s <- use id
   liftIO . for_ (focusedItem s) $ \bit -> es `trigger` editItemInBrowserEvt bit
-vtyEventHandler _ (EvKey (KChar 'q') []) = halt
-vtyEventHandler _ e = do
+vtyEventHandlerNormal _ (EvKey (KChar '/') []) =
+  -- Flip into filter mode synchronously so the very next keystroke is already
+  -- seen under the editing guard; routing this through the BChan would leave a
+  -- one-event window where a fast 'q'/paste leaks to normal mode and quits.
+  id %= enterFilterMode
+vtyEventHandlerNormal _ (EvKey (KChar 'q') []) = halt
+vtyEventHandlerNormal _ e = do
   zoom itemList (handleListEventVi handleListEvent e)
 
 internalEventHandler ::
@@ -511,6 +545,13 @@ uiCommandEventHandler _ ToggleVideoFilter = do
 uiCommandEventHandler _ ToggleInvertedVideoFilter = do
   id %= toggleInvertedVideoFilter
   id %= syncForRender
+uiCommandEventHandler _ (FilterInput fi) =
+  id %= case fi of
+    EnterFilter -> enterFilterMode
+    LockFilter -> lockFilter
+    DoCancelFilter -> cancelFilter
+    FilterChar c -> appendFilterChar c
+    FilterBackspace -> backspaceFilter
 uiCommandEventHandler es (BrowseItem bit) = do
   res <- liftIO . try @SomeException $ browseItem "firefox '%s'" (URL . T.unpack $ view biLink bit)
   case res of
@@ -685,6 +726,10 @@ drawGui tz s = [w]
                        ShowOnlyVideos -> " (+V)"
                        HideVideos -> " (-V)"
                    )
+                <> ( if T.null (s ^. hsFilterQuery)
+                       then ""
+                       else " (/" <> sanitizeForDisplay (s ^. hsFilterQuery) <> ")"
+                   )
                 <> ": "
                 <> ( \counts ->
                        let base =
@@ -700,7 +745,7 @@ drawGui tz s = [w]
                    )
                   (hsNumItems s)
             )
-            "spc:Browse ent:Browse+flag e:Edit r:Refresh S:Toggle future reminders v:Video filter V:Hide videos X:Execute Flags a:Archive flag s:Reminder flag u:Unflag J/K:Jump U:Unflag all q:Quit",
+            "spc:Browse ent:Browse+flag e:Edit r:Refresh S:Toggle future reminders v:Video filter V:Hide videos /:Filter X:Execute Flags a:Archive flag s:Reminder flag u:Unflag J/K:Jump U:Unflag all q:Quit",
           hBorder,
           hBar
             ( maybe
@@ -726,7 +771,9 @@ drawGui tz s = [w]
                       )
                   )
               ),
-          txt (fromMaybe " " (s ^. hsStatus))
+          if s ^. hsFilterActive
+            then hBar (sanitizeForDisplay ("/" <> s ^. hsFilterQuery <> "_"))
+            else txt (fromMaybe " " (s ^. hsStatus))
         ]
 
 focusedList :: HocketState -> Maybe (L.List Name BookmarkItem)

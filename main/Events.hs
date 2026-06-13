@@ -2,6 +2,7 @@ module Events
   ( HocketEvent (..),
     AsyncCommand (..),
     UiCommand (..),
+    FilterInput (..),
     fetchItemsEvt,
     fetchedItemsEvt,
     archiveItemsEvt,
@@ -22,6 +23,11 @@ module Events
     toggleRemindersEvt,
     toggleVideoFilterEvt,
     toggleInvertedVideoFilterEvt,
+    enterFilterModeEvt,
+    lockFilterEvt,
+    cancelFilterEvt,
+    filterCharEvt,
+    filterBackspaceEvt,
   )
 where
 
@@ -59,6 +65,15 @@ data UiCommand
   | ToggleReminders
   | ToggleVideoFilter
   | ToggleInvertedVideoFilter
+  | FilterInput !FilterInput
+  deriving (Show, Eq)
+
+data FilterInput
+  = EnterFilter
+  | LockFilter
+  | DoCancelFilter
+  | FilterChar !Char
+  | FilterBackspace
   deriving (Show, Eq)
 
 fetchItemsEvt :: HocketEvent
@@ -120,3 +135,18 @@ toggleVideoFilterEvt = HocketUi ToggleVideoFilter
 
 toggleInvertedVideoFilterEvt :: HocketEvent
 toggleInvertedVideoFilterEvt = HocketUi ToggleInvertedVideoFilter
+
+enterFilterModeEvt :: HocketEvent
+enterFilterModeEvt = HocketUi (FilterInput EnterFilter)
+
+lockFilterEvt :: HocketEvent
+lockFilterEvt = HocketUi (FilterInput LockFilter)
+
+cancelFilterEvt :: HocketEvent
+cancelFilterEvt = HocketUi (FilterInput DoCancelFilter)
+
+filterCharEvt :: Char -> HocketEvent
+filterCharEvt c = HocketUi (FilterInput (FilterChar c))
+
+filterBackspaceEvt :: HocketEvent
+filterBackspaceEvt = HocketUi (FilterInput FilterBackspace)

@@ -17,6 +17,8 @@ module Network.Bookmark.Ui.State
     hsCredentials,
     hsShowFutureReminders,
     hsVideoFilter,
+    hsFilterActive,
+    hsFilterQuery,
     ItemCounts,
     icNone,
     icToBeArchived,
@@ -36,6 +38,12 @@ module Network.Bookmark.Ui.State
     toggleShowFutureReminders,
     toggleVideoFilter,
     toggleInvertedVideoFilter,
+    enterFilterMode,
+    lockFilter,
+    cancelFilter,
+    appendFilterChar,
+    backspaceFilter,
+    bookmarkSearchText,
     updateItemsWithReminder,
     updateItemsWithStoredReminderTimes,
     removeReminderFromItems,
@@ -88,7 +96,9 @@ data HocketState = HocketState
     _hsContents :: !(Map BookmarkItemId (PendingAction, BookmarkItem)),
     _hsCredentials :: !BookmarkCredentials,
     _hsShowFutureReminders :: !Bool,
-    _hsVideoFilter :: !VideoFilterMode
+    _hsVideoFilter :: !VideoFilterMode,
+    _hsFilterActive :: !Bool,
+    _hsFilterQuery :: !Text
   }
 
 makeLenses ''HocketState
@@ -156,6 +166,8 @@ initialState creds =
     creds
     False
     NoVideoFilter
+    False
+    T.empty
 
 insertItem :: BookmarkItem -> HocketState -> HocketState
 insertItem bit s =
@@ -231,6 +243,25 @@ toggleInvertedVideoFilter s = s & hsVideoFilter %~ toggleHideMode
     toggleHideMode HideVideos = NoVideoFilter
     toggleHideMode ShowOnlyVideos = HideVideos
 
+enterFilterMode :: HocketState -> HocketState
+enterFilterMode = hsFilterActive .~ True
+
+lockFilter :: HocketState -> HocketState
+lockFilter = hsFilterActive .~ False
+
+cancelFilter :: HocketState -> HocketState
+cancelFilter = (hsFilterActive .~ False) . (hsFilterQuery .~ T.empty)
+
+appendFilterChar :: Char -> HocketState -> HocketState
+appendFilterChar c = hsFilterQuery %~ (<> T.singleton c)
+
+backspaceFilter :: HocketState -> HocketState
+backspaceFilter = hsFilterQuery %~ T.dropEnd 1
+
+bookmarkSearchText :: BookmarkItem -> Text
+bookmarkSearchText bi =
+  T.unwords [bi ^. biTitle, bi ^. biDomain, bi ^. biExcerpt, bi ^. biNote]
+
 isVideoBookmark :: BookmarkItem -> Bool
 isVideoBookmark item = hasYouTubeInUrl || hasVideoTag
   where
@@ -302,7 +333,11 @@ syncForRender s =
               NoVideoFilter -> reminderFiltered
               ShowOnlyVideos -> filter (isVideoBookmark . snd) reminderFiltered
               HideVideos -> filter (not . isVideoBookmark . snd) reminderFiltered
-       in videoFiltered
+          textFiltered =
+            if T.null (s ^. hsFilterQuery)
+              then videoFiltered
+              else filter (fuzzyMatch (s ^. hsFilterQuery) . bookmarkSearchText . snd) videoFiltered
+       in textFiltered
 
     hasFutureReminder :: BookmarkItem -> Bool
     hasFutureReminder item =

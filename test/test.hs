@@ -1,31 +1,35 @@
 {-# LANGUAGE OverloadedStrings #-}
 {-# LANGUAGE ScopedTypeVariables #-}
 
+import qualified Brick.Widgets.List as L
 import Control.Lens (ix, view, _1, _2)
 import Control.Lens.Operators
 import qualified Data.Aeson as A
 import Data.Aeson.Types (parseMaybe)
 import qualified Data.ByteString.Lazy.Char8 as LBS
-import Data.List (find, head, last)
+import Data.List (find, head, intercalate, last)
 import Data.Map (Map)
 import qualified Data.Map as Map
 import Data.Ord
 import Data.Ratio ((%))
 import Data.Text (Text)
+import qualified Data.Text as T
 import Data.Time.Calendar (toGregorian)
 import Data.Time.Clock (DiffTime, UTCTime (..))
 import Data.Time.Format.ISO8601 (iso8601ParseM)
+import qualified Data.Vector as V
 import Network.Bookmark.Types
 import Network.Bookmark.Ui.State
-import Network.Bookmark.Ui.Widgets (sanitizeForDisplay)
+import Network.Bookmark.Ui.Widgets (fuzzyMatch, sanitizeForDisplay)
 import Test.Tasty
+import Test.Tasty.Golden (goldenVsString)
 import Test.Tasty.HUnit
 import Test.Tasty.QuickCheck as QC
 
 main = defaultMain tests
 
 tests :: TestTree
-tests = testGroup "Tests" [hocketStateTests, raindropParsingTests, dateTimeParsingTests, jsonRoundtripTests, sanitizeForDisplayTests]
+tests = testGroup "Tests" [hocketStateTests, raindropParsingTests, dateTimeParsingTests, jsonRoundtripTests, sanitizeForDisplayTests, fuzzyMatchTests, filterStateTests, filterTuningTests]
 
 sanitizeForDisplayTests :: TestTree
 sanitizeForDisplayTests =
@@ -123,6 +127,195 @@ hocketStateTests =
          in fmap (view (_2 . biTitle)) (Map.lookup (_biId bookmarkItem1) (view hsContents s)) @?= Just "newer title",
       testCase "insertItems: basic insertion count" $
         length (insertItems [bookmarkItem1] testState ^. hsContents) @?= 1
+    ]
+
+fuzzyMatchTests :: TestTree
+fuzzyMatchTests =
+  testGroup
+    "fuzzyMatch"
+    [ testCase "empty needle matches non-empty haystack" $
+        fuzzyMatch "" "anything" @?= True,
+      testCase "empty needle matches empty haystack" $
+        fuzzyMatch "" "" @?= True,
+      testCase "exact substring matches" $
+        fuzzyMatch "hask" "haskell" @?= True,
+      testCase "subsequence with gaps matches" $
+        fuzzyMatch "hkl" "haskell" @?= True,
+      testCase "case-insensitive: upper needle, lower haystack" $
+        fuzzyMatch "HSK" "haskell" @?= True,
+      testCase "case-insensitive: lower needle, upper haystack" $
+        fuzzyMatch "hsk" "HASKELL" @?= True,
+      testCase "out-of-order fails" $
+        fuzzyMatch "lha" "haskell" @?= False,
+      testCase "needle longer than match fails" $
+        fuzzyMatch "haskellx" "haskell" @?= False
+    ]
+
+filterTestBookmark :: BookmarkItem
+filterTestBookmark =
+  bookmarkItem1
+    { _biId = BookmarkItemId "filter-1",
+      _biTitle = "uniquetitle",
+      _biDomain = "uniquedomain.example",
+      _biExcerpt = "uniqueexcerpt",
+      _biNote = "uniquenote",
+      _biTags = ["zzqtag"]
+    }
+
+filterVideoBookmark :: BookmarkItem
+filterVideoBookmark =
+  bookmarkItem1
+    { _biId = BookmarkItemId "filter-video",
+      _biTitle = "uniquevideo",
+      _biDomain = "youtube.com",
+      _biLink = "https://youtube.com/watch",
+      _biExcerpt = "",
+      _biNote = "",
+      _biTags = []
+    }
+
+filterOtherBookmark :: BookmarkItem
+filterOtherBookmark =
+  bookmarkItem1
+    { _biId = BookmarkItemId "filter-other",
+      _biTitle = "somethingelse",
+      _biDomain = "other.example",
+      _biExcerpt = "",
+      _biNote = "",
+      _biTags = []
+    }
+
+-- | A 10-item fixture for exercising and tuning the live fuzzy filter.
+--
+-- Each item has distinct text across title/domain/excerpt/note and a distinct
+-- creation date that ascends with the id (t01 oldest .. t10 newest). Because
+-- 'syncForRender' sorts descending by 'getSortDate' (reminder if present, else
+-- '_biCreated'), the default render order is newest-first: t10, t09, .. t01.
+--
+-- All reminders are Nothing, so every item is visible under the default state
+-- and sorts purely by '_biCreated'. Tuning hooks:
+--   * Matching: edit the title/domain/excerpt/note fields or the query. The
+--     match target is title+domain+excerpt+note (tags are excluded).
+--   * Ordering: edit '_biCreated'. To make an item sort by a reminder instead,
+--     set '_biReminder' AND run with @hsShowFutureReminders .~ True@, otherwise
+--     'hasFutureReminder' hides it.
+tuningBookmarks :: [BookmarkItem]
+tuningBookmarks =
+  [ mk "t01" "2024-01-15" "Haskell lens tutorial" "school.dev" "learn optics and lenses" "read later",
+    mk "t02" "2024-02-15" "Functional programming in Scala" "blog.scala.org" "monads and functors" "",
+    mk "t03" "2024-03-15" "Brick TUI library guide" "hackage.haskell.org" "terminal user interfaces" "for hocket",
+    mk "t04" "2024-04-15" "Async concurrency patterns" "stackoverflow.com" "threads and channels" "",
+    mk "t05" "2024-05-15" "Parsing JSON with aeson" "hackage.haskell.org" "decode and encode records" "api work",
+    mk "t06" "2024-06-15" "Dhall configuration language" "dhall-lang.org" "typed config files" "config.dhall",
+    mk "t07" "2024-07-15" "Raindrop API reference" "developer.raindrop.io" "bookmark rest endpoints" "integration",
+    mk "t08" "2024-08-15" "Fuzzy finding algorithms" "junegunn.github.io" "subsequence matching like fzf" "filter feature",
+    mk "t09" "2024-09-15" "Nix flakes explained" "nix.dev" "reproducible builds" "flake update",
+    mk "t10" "2024-10-15" "GHC optimization tips" "well-typed.com" "strictness and inlining" "performance"
+  ]
+  where
+    mk :: Text -> String -> Text -> Text -> Text -> Text -> BookmarkItem
+    mk i created title domain excerpt note =
+      bookmarkItem1
+        { _biId = BookmarkItemId i,
+          _biCreated = read (created <> " 00:00:00 UTC"),
+          _biLastUpdate = read (created <> " 00:00:00 UTC"),
+          _biTitle = title,
+          _biDomain = domain,
+          _biExcerpt = excerpt,
+          _biNote = note,
+          _biLink = "https://" <> domain,
+          _biTags = [],
+          _biReminder = Nothing
+        }
+
+-- | Run a query through the real render pipeline and return the ordered items.
+runTuning :: Text -> [BookmarkItem]
+runTuning q =
+  let base = insertItems tuningBookmarks testState
+      filtered = syncForRender (base & hsFilterQuery .~ q)
+   in V.toList (view (itemList . L.listElementsL) filtered)
+
+-- | True iff the list is in non-increasing order (the render invariant).
+isDescending :: (Ord a) => [a] -> Bool
+isDescending xs = and (zipWith (>=) xs (drop 1 xs))
+
+-- | Queries whose ordered results are snapshotted into the golden file.
+-- Add a query here to start tracking it, then regenerate with @--accept@.
+tuningQueries :: [Text]
+tuningQueries = ["", "haskell", "config", "fuzzy", "api", "nix", "zzzznomatch"]
+
+-- | A stable, human-readable snapshot of "query -> ordered (id, title)" over
+-- the tuning fixture, for the golden test. Tune the fixture or the matcher,
+-- run @cabal test --test-options=--accept@, and eyeball the golden diff.
+renderTuning :: String
+renderTuning = intercalate "\n\n" (map renderQuery tuningQueries) <> "\n"
+  where
+    renderQuery q =
+      "query: "
+        <> show q
+        <> "\n"
+        <> case runTuning q of
+          [] -> "  (no matches)"
+          items -> intercalate "\n" (map renderItem items)
+    renderItem bi =
+      "  " <> T.unpack (unId (_biId bi)) <> "  " <> T.unpack (_biTitle bi)
+    unId (BookmarkItemId t) = t
+
+filterTuningTests :: TestTree
+filterTuningTests =
+  testGroup
+    "Live filter tuning fixture"
+    [ -- Golden snapshot of matching + ordering. Regenerate after tuning with:
+      --   cabal test --test-options=--accept
+      goldenVsString
+        "ordered filter results per query"
+        "test/golden/tuning-filter.golden"
+        (pure (LBS.pack renderTuning)),
+      -- Render invariant: whatever matches, the result is always date-desc.
+      testCase "survivors are always in descending created order" $
+        isDescending (map _biCreated (runTuning "e")) @?= True
+    ]
+
+filterStateTests :: TestTree
+filterStateTests =
+  testGroup
+    "Live filter state"
+    [ testCase "bookmarkSearchText includes title" $
+        fuzzyMatch "uniquetitle" (bookmarkSearchText filterTestBookmark) @?= True,
+      testCase "bookmarkSearchText includes domain" $
+        fuzzyMatch "uniquedomain" (bookmarkSearchText filterTestBookmark) @?= True,
+      testCase "bookmarkSearchText includes excerpt" $
+        fuzzyMatch "uniqueexcerpt" (bookmarkSearchText filterTestBookmark) @?= True,
+      testCase "bookmarkSearchText includes note" $
+        fuzzyMatch "uniquenote" (bookmarkSearchText filterTestBookmark) @?= True,
+      testCase "bookmarkSearchText excludes tags" $
+        fuzzyMatch "zzqtag" (bookmarkSearchText filterTestBookmark) @?= False,
+      testCase "enterFilterMode sets hsFilterActive" $
+        view hsFilterActive (enterFilterMode testState) @?= True,
+      testCase "backspace undoes appendFilterChar" $
+        view hsFilterQuery (backspaceFilter (appendFilterChar 'x' testState))
+          @?= view hsFilterQuery testState,
+      testCase "cancelFilter clears query and exits editing" $
+        let s = cancelFilter (appendFilterChar 'x' (enterFilterMode testState))
+         in (view hsFilterActive s, view hsFilterQuery s) @?= (False, ""),
+      testCase "lockFilter exits editing but preserves query" $
+        let s = lockFilter (appendFilterChar 'x' (enterFilterMode testState))
+         in (view hsFilterActive s, view hsFilterQuery s) @?= (False, "x"),
+      testCase "syncForRender applies fuzzy text filter" $
+        let base = insertItems [filterTestBookmark, filterOtherBookmark] testState
+            filtered = syncForRender (base & hsFilterQuery .~ "uniquetitle")
+            elems = view (itemList . L.listElementsL) filtered
+         in V.toList (V.map _biId elems) @?= [BookmarkItemId "filter-1"],
+      testCase "text filter composes with video filter" $
+        let base = insertItems [filterTestBookmark, filterVideoBookmark] testState
+            filtered =
+              syncForRender
+                ( base
+                    & hsVideoFilter .~ ShowOnlyVideos
+                    & hsFilterQuery .~ "unique"
+                )
+            elems = view (itemList . L.listElementsL) filtered
+         in V.toList (V.map _biId elems) @?= [BookmarkItemId "filter-video"]
     ]
 
 raindropParsingTests :: TestTree

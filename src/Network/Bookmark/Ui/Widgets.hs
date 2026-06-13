@@ -3,6 +3,7 @@ module Network.Bookmark.Ui.Widgets
     listInsertSorted,
     clamp,
     sanitizeForDisplay,
+    fuzzyMatch,
   )
 where
 
@@ -69,3 +70,13 @@ sanitizeForDisplay = T.concatMap replaceChar . T.filter (not . isComposing)
     isAssumedWide c =
       (c >= '\x2600' && c <= '\x27BF')
         || (c >= '\x1F000' && c <= '\x1FFFF')
+
+-- Case-insensitive fzf-style subsequence match: every char of the query
+-- appears in the haystack in order (gaps allowed). Empty query matches all.
+fuzzyMatch :: Text -> Text -> Bool
+fuzzyMatch query haystack = go (T.unpack (T.toLower query)) (T.toLower haystack)
+  where
+    go [] _ = True
+    go (q : qs) hs = case T.uncons (T.dropWhile (/= q) hs) of
+      Just (_, rest) -> go qs rest
+      Nothing -> False

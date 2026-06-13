@@ -1,0 +1,37 @@
+query: ""
+  t10  GHC optimization tips
+  t09  Nix flakes explained
+  t08  Fuzzy finding algorithms
+  t07  Raindrop API reference
+  t06  Dhall configuration language
+  t05  Parsing JSON with aeson
+  t04  Async concurrency patterns
+  t03  Brick TUI library guide
+  t02  Functional programming in Scala
+  t01  Haskell lens tutorial
+
+query: "haskell"
+  t05  Parsing JSON with aeson
+  t03  Brick TUI library guide
+  t01  Haskell lens tutorial
+
+query: "config"
+  t06  Dhall configuration language
+
+query: "fuzzy"
+  t08  Fuzzy finding algorithms
+
+query: "api"
+  t10  GHC optimization tips
+  t09  Nix flakes explained
+  t07  Raindrop API reference
+  t06  Dhall configuration language
+  t05  Parsing JSON with aeson
+  t02  Functional programming in Scala
+  t01  Haskell lens tutorial
+
+query: "nix"
+  t09  Nix flakes explained
+
+query: "zzzznomatch"
+  (no matches)
