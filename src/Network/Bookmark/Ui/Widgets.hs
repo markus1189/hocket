@@ -4,6 +4,7 @@ module Network.Bookmark.Ui.Widgets
     clamp,
     sanitizeForDisplay,
     fuzzyMatch,
+    fuzzyFilterMatch,
   )
 where
 
@@ -80,3 +81,13 @@ fuzzyMatch query haystack = go (T.unpack (T.toLower query)) (T.toLower haystack)
     go (q : qs) hs = case T.uncons (T.dropWhile (/= q) hs) of
       Just (_, rest) -> go qs rest
       Nothing -> False
+
+-- Stricter filter match: split the query into whitespace-separated terms;
+-- every term must fuzzy-subsequence-match at least one word of the haystack
+-- (AND across terms, no matching across word boundaries). An empty /
+-- all-whitespace query matches everything.
+fuzzyFilterMatch :: Text -> Text -> Bool
+fuzzyFilterMatch query haystack =
+  all (\term -> any (fuzzyMatch term) haystackWords) (T.words query)
+  where
+    haystackWords = T.words haystack

@@ -22,13 +22,8 @@ query: "fuzzy"
   t08  Fuzzy finding algorithms
 
 query: "api"
-  t10  GHC optimization tips
-  t09  Nix flakes explained
   t07  Raindrop API reference
-  t06  Dhall configuration language
   t05  Parsing JSON with aeson
-  t02  Functional programming in Scala
-  t01  Haskell lens tutorial
 
 query: "nix"
   t09  Nix flakes explained

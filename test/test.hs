@@ -20,7 +20,7 @@ import Data.Time.Format.ISO8601 (iso8601ParseM)
 import qualified Data.Vector as V
 import Network.Bookmark.Types
 import Network.Bookmark.Ui.State
-import Network.Bookmark.Ui.Widgets (fuzzyMatch, sanitizeForDisplay)
+import Network.Bookmark.Ui.Widgets (fuzzyFilterMatch, fuzzyMatch, sanitizeForDisplay)
 import Test.Tasty
 import Test.Tasty.Golden (goldenVsString)
 import Test.Tasty.HUnit
@@ -29,7 +29,7 @@ import Test.Tasty.QuickCheck as QC
 main = defaultMain tests
 
 tests :: TestTree
-tests = testGroup "Tests" [hocketStateTests, raindropParsingTests, dateTimeParsingTests, jsonRoundtripTests, sanitizeForDisplayTests, fuzzyMatchTests, filterStateTests, filterTuningTests]
+tests = testGroup "Tests" [hocketStateTests, raindropParsingTests, dateTimeParsingTests, jsonRoundtripTests, sanitizeForDisplayTests, fuzzyMatchTests, fuzzyFilterMatchTests, filterStateTests, filterTuningTests]
 
 sanitizeForDisplayTests :: TestTree
 sanitizeForDisplayTests =
@@ -149,6 +149,32 @@ fuzzyMatchTests =
         fuzzyMatch "lha" "haskell" @?= False,
       testCase "needle longer than match fails" $
         fuzzyMatch "haskellx" "haskell" @?= False
+    ]
+
+fuzzyFilterMatchTests :: TestTree
+fuzzyFilterMatchTests =
+  testGroup
+    "fuzzyFilterMatch"
+    [ -- The key regression: a term may not span word boundaries. "api" is a
+      -- subsequence of "apple pie" (a,p in "apple"; i in "pie") but of no
+      -- single word, so the stricter matcher rejects it.
+      testCase "term does not match across word boundaries" $
+        fuzzyFilterMatch "api" "apple pie" @?= False,
+      testCase "the same string still subsequence-matches the whole blob" $
+        fuzzyMatch "api" "apple pie" @?= True,
+      -- Intra-word gaps are still tolerated.
+      testCase "intra-word subsequence still matches" $
+        fuzzyFilterMatch "hkl" "haskell" @?= True,
+      -- Space-separated terms are ANDed; each must match some word.
+      testCase "all terms must match (success)" $
+        fuzzyFilterMatch "hask lens" "haskell lens tutorial" @?= True,
+      testCase "all terms must match (one term absent fails)" $
+        fuzzyFilterMatch "lens zzz" "haskell lens tutorial" @?= False,
+      -- Empty / whitespace-only queries match everything.
+      testCase "empty query matches anything" $
+        fuzzyFilterMatch "" "anything" @?= True,
+      testCase "whitespace-only query matches anything" $
+        fuzzyFilterMatch "   " "anything" @?= True
     ]
 
 filterTestBookmark :: BookmarkItem

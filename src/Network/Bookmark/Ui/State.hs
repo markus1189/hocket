@@ -336,7 +336,7 @@ syncForRender s =
           textFiltered =
             if T.null (s ^. hsFilterQuery)
               then videoFiltered
-              else filter (fuzzyMatch (s ^. hsFilterQuery) . bookmarkSearchText . snd) videoFiltered
+              else filter (fuzzyFilterMatch (s ^. hsFilterQuery) . bookmarkSearchText . snd) videoFiltered
        in textFiltered
 
     hasFutureReminder :: BookmarkItem -> Bool
