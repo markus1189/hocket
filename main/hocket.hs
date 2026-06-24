@@ -436,90 +436,56 @@ asyncCommandEventHandler es (AsyncActionFailed err) = do
   liftIO (es `trigger` setStatusEvt (Just ("failed" <> maybe "<no err>" (": " <>) err)))
 asyncCommandEventHandler es ArchiveItems = do
   s <- use id
-  let counts = hsNumItems s
-  case counts ^. icToBeArchived of
-    0 -> pure ()
-    _ -> do
-      archiveAsync <-
-        liftIO . async $ do
-          es `trigger` setStatusEvt (Just "archiving")
-          eitherErrorResults <-
-            performArchive (s ^. hsCredentials) (getItemsWithPendingAction ToBeArchived s)
-          case eitherErrorResults of
-            Left e ->
-              es `trigger` asyncActionFailedEvt (errorMessageFromException e)
-            Right results -> do
-              es
-                `trigger` archivedItemsEvt
-                  ( mapMaybe
-                      ( \(bit, successful) ->
-                          mfilter (const successful) (Just (view biId bit))
-                      )
-                      results
-                  )
-              es `trigger` setStatusEvt Nothing
-      hsAsync ?= archiveAsync
+  runFlaggedAsync es (hsNumItems s ^. icToBeArchived) "archiving" archivedItemsEvt $
+    performArchive (s ^. hsCredentials) (getItemsWithPendingAction ToBeArchived s)
 asyncCommandEventHandler _ (ArchivedItems bis) = do
   id %= removeItems bis
   hsAsync .= Nothing
 asyncCommandEventHandler es SetReminders = do
   s <- use id
-  let counts = hsNumItems s
-  case counts ^. icToBeReminded of
-    0 -> pure ()
-    _ -> do
-      reminderAsync <-
-        liftIO . async $ do
-          es `trigger` setStatusEvt (Just "setting reminders")
-          eitherErrorResults <-
-            performSetReminders (s ^. hsCredentials) (getItemsToBeReminded s)
-          case eitherErrorResults of
-            Left e ->
-              es `trigger` asyncActionFailedEvt (errorMessageFromException e)
-            Right results -> do
-              es
-                `trigger` remindersSetEvt
-                  ( mapMaybe
-                      ( \(bit, successful) ->
-                          mfilter (const successful) (Just (view biId bit))
-                      )
-                      results
-                  )
-              es `trigger` setStatusEvt Nothing
-      hsAsync ?= reminderAsync
+  runFlaggedAsync es (hsNumItems s ^. icToBeReminded) "setting reminders" remindersSetEvt $
+    performSetReminders (s ^. hsCredentials) (getItemsToBeReminded s)
 asyncCommandEventHandler _ (RemindersSet bis) = do
   id %= updateItemsWithStoredReminderTimes bis
   id %= clearToBeRemindedFlags bis
   hsAsync .= Nothing
 asyncCommandEventHandler es RemoveReminders = do
   s <- use id
-  let counts = hsNumItems s
-  case counts ^. icReminderToBeRemoved of
-    0 -> pure ()
-    _ -> do
-      removeAsync <-
-        liftIO . async $ do
-          es `trigger` setStatusEvt (Just "removing reminders")
-          eitherErrorResults <-
-            performRemoveReminders (s ^. hsCredentials) (getItemsWithPendingAction ReminderToBeRemoved s)
-          case eitherErrorResults of
-            Left e ->
-              es `trigger` asyncActionFailedEvt (errorMessageFromException e)
-            Right results -> do
-              es
-                `trigger` remindersRemovedEvt
-                  ( mapMaybe
-                      ( \(bit, successful) ->
-                          mfilter (const successful) (Just (view biId bit))
-                      )
-                      results
-                  )
-              es `trigger` setStatusEvt Nothing
-      hsAsync ?= removeAsync
+  runFlaggedAsync es (hsNumItems s ^. icReminderToBeRemoved) "removing reminders" remindersRemovedEvt $
+    performRemoveReminders (s ^. hsCredentials) (getItemsWithPendingAction ReminderToBeRemoved s)
 asyncCommandEventHandler _ (RemindersRemoved bis) = do
   id %= removeReminderFromItems bis
   id %= clearFlagsForItems ReminderToBeRemoved bis
   hsAsync .= Nothing
+
+-- | Run an async operation over the currently flagged items, updating the
+-- status bar while it runs and firing @mkDoneEvt@ with the IDs of the items
+-- whose operation succeeded. Does nothing when there are no flagged items.
+runFlaggedAsync ::
+  BChan HocketEvent ->
+  Int ->
+  Text ->
+  ([BookmarkItemId] -> HocketEvent) ->
+  IO (Either HttpException [(BookmarkItem, Bool)]) ->
+  EventM Name HocketState ()
+runFlaggedAsync _ 0 _ _ _ = pure ()
+runFlaggedAsync es _ status mkDoneEvt operation = do
+  actionAsync <-
+    liftIO . async $ do
+      es `trigger` setStatusEvt (Just status)
+      eitherErrorResults <- operation
+      case eitherErrorResults of
+        Left e ->
+          es `trigger` asyncActionFailedEvt (errorMessageFromException e)
+        Right results -> do
+          es `trigger` mkDoneEvt (successfulItemIds results)
+          es `trigger` setStatusEvt Nothing
+  hsAsync ?= actionAsync
+
+-- | Extract the IDs of the items whose operation reported success.
+successfulItemIds :: [(BookmarkItem, Bool)] -> [BookmarkItemId]
+successfulItemIds =
+  mapMaybe (\(bit, successful) -> mfilter (const successful) (Just (view biId bit)))
 
 uiCommandEventHandler ::
   BChan HocketEvent ->
