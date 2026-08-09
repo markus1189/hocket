@@ -96,6 +96,7 @@ import Events
     browseItemEvt,
     cancelFilterEvt,
     clearAllFlagsEvt,
+    copyUrlEvt,
     editItemInBrowserEvt,
     executeBatchDoneEvt,
     executeBatchEvt,
@@ -223,19 +224,21 @@ import Options.Applicative
     (<**>),
   )
 import System.Directory (XdgDirectory (..), createDirectoryIfMissing, doesFileExist, getXdgDirectory)
-import System.Exit (exitFailure)
+import System.Environment (lookupEnv)
+import System.Exit (ExitCode (..), exitFailure)
 import System.FilePath ((</>))
-import System.IO (hPutStrLn, stderr)
+import System.IO (hClose, hPutStr, hPutStrLn, stderr)
 import System.Process
   ( CreateProcess,
     createProcess,
+    proc,
     shell,
     waitForProcess,
   )
 import System.Process.Internals (StdStream (CreatePipe))
 import Text.Printf (printf)
 
-makeLensesFor [("std_err", "stdErr"), ("std_out", "stdOut")] ''CreateProcess
+makeLensesFor [("std_in", "stdIn"), ("std_err", "stdErr"), ("std_out", "stdOut")] ''CreateProcess
 
 data HocketCommand
   = RunTUI
@@ -349,6 +352,9 @@ vtyEventHandlerNormal es (EvKey (KChar 'V') []) = do
 vtyEventHandlerNormal es (EvKey (KChar 'e') []) = do
   s <- use id
   liftIO . for_ (focusedItem s) $ \bit -> es `trigger` editItemInBrowserEvt bit
+vtyEventHandlerNormal es (EvKey (KChar 'y') []) = do
+  s <- use id
+  liftIO . for_ (focusedItem s) $ \bit -> es `trigger` copyUrlEvt bit
 vtyEventHandlerNormal _ (EvKey (KChar '/') []) =
   -- Flip into filter mode synchronously so the very next keystroke is already
   -- seen under the editing guard; routing this through the BChan would leave a
@@ -550,6 +556,12 @@ uiCommandEventHandler es (BrowseItem bit) = do
   case res of
     Left e -> liftIO $ es `trigger` setStatusEvt (Just (T.pack $ show e))
     Right () -> pure ()
+uiCommandEventHandler es (CopyUrl bit) = do
+  let url = cleanUrl (T.unpack (view biLink bit))
+  eitherClipError <- liftIO . try @SomeException $ copyToClipboard url
+  case eitherClipError of
+    Right () -> liftIO $ es `trigger` setStatusEvt (Just ("Copied: " <> T.pack url))
+    Left e -> liftIO $ es `trigger` setStatusEvt (Just ("Copy failed: " <> T.pack (show e)))
 uiCommandEventHandler es (EditItemInBrowser bit) = do
   let itemId = view biId bit ^. _BookmarkItemId
       editUrl = "https://app.raindrop.io/my/-1/item/" <> T.unpack itemId <> "/edit"
@@ -738,7 +750,7 @@ drawGui tz s = [w]
                    )
                   (hsNumItems s)
             )
-            "spc:Browse ent:Browse+flag e:Edit r:Refresh S:Toggle future reminders v:Video filter V:Hide videos /:Filter X:Execute Flags a:Archive flag s:Reminder flag u:Unflag J/K:Jump U:Unflag all q:Quit",
+            "spc:Browse ent:Browse+flag e:Edit y:Copied URL r:Refresh S:Toggle future reminders v:Video filter V:Hide videos /:Filter X:Execute Flags a:Archive flag s:Reminder flag u:Unflag J/K:Jump U:Unflag all q:Quit",
           hBorder,
           hBar
             ( maybe
@@ -1039,6 +1051,25 @@ browseItem shellCmd (URL url) = do
       spec = shell $ printf shellCmd cleanedUrl
   (_, _, _, ph) <- createProcess $ spec & stdOut .~ CreatePipe & stdErr .~ CreatePipe
   void . waitForProcess $ ph
+
+-- | Copy text to the system clipboard via the native tool: wl-copy on
+-- Wayland, else xclip.
+copyToClipboard :: String -> IO ()
+copyToClipboard text = do
+  wayland <- isJust <$> lookupEnv "WAYLAND_DISPLAY"
+  if wayland
+    then runClipboardCmd "wl-copy" [] text
+    else runClipboardCmd "xclip" ["-selection", "clipboard"] text
+
+-- | Spawn a tool, feed @text@ on stdin, close it for EOF, and wait; fail on
+-- a nonzero exit.
+runClipboardCmd :: String -> [String] -> String -> IO ()
+runClipboardCmd cmd args text = do
+  (mIn, _, _, ph) <- createProcess (proc cmd args & stdIn .~ CreatePipe)
+  for_ mIn $ \h -> hPutStr h text >> hClose h
+  exitCode <- waitForProcess ph
+  unless (exitCode == ExitSuccess) $
+    ioError (userError (cmd <> " exited with code " <> show exitCode))
 
 errorMessageFromException :: HttpException -> Maybe Text
 errorMessageFromException (HttpExceptionRequest _ (StatusCodeException resp _)) = msg

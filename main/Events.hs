@@ -17,6 +17,7 @@ module Events
     setStatusEvt,
     browseItemEvt,
     editItemInBrowserEvt,
+    copyUrlEvt,
     clearAllFlagsEvt,
     setAllFlagsToArchiveEvt,
     toggleRemindersEvt,
@@ -58,6 +59,7 @@ data UiCommand
   | SetStatus !(Maybe Text)
   | BrowseItem !BookmarkItem
   | EditItemInBrowser !BookmarkItem
+  | CopyUrl !BookmarkItem
   | ClearAllFlags
   | SetAllFlagsToArchive
   | ToggleReminders
@@ -115,6 +117,9 @@ browseItemEvt bit = HocketUi (BrowseItem bit)
 
 editItemInBrowserEvt :: BookmarkItem -> HocketEvent
 editItemInBrowserEvt bit = HocketUi (EditItemInBrowser bit)
+
+copyUrlEvt :: BookmarkItem -> HocketEvent
+copyUrlEvt bit = HocketUi (CopyUrl bit)
 
 clearAllFlagsEvt :: HocketEvent
 clearAllFlagsEvt = HocketUi ClearAllFlags

@@ -154,6 +154,7 @@ hocket add https://example.com --collection 12345 --tag rust --tag cli
 - `Space` - Open selected item in browser
 - `Enter` - Open item in browser AND mark for archiving
 - `e` - Open selected item's edit page in Raindrop.io
+- `y` - Copy selected item's URL to the clipboard (wl-copy on Wayland, xclip on X11) and flash `Copied: <url>` in the status bar
 - `a` - Flag selected item for archiving
 - `s` - Smart reminder toggle: flag for reminder setting (unscheduled items) or removal (scheduled items)
 - `u` - Remove flags from selected item (archive, reminder, or removal flags)
