@@ -5,11 +5,10 @@ module Events
     FilterInput (..),
     fetchItemsEvt,
     fetchedItemsEvt,
-    archiveItemsEvt,
+    executeBatchEvt,
+    executeBatchDoneEvt,
     archivedItemsEvt,
-    setRemindersEvt,
     remindersSetEvt,
-    removeRemindersEvt,
     remindersRemovedEvt,
     asyncActionFailedEvt,
     shiftItemEvt,
@@ -44,11 +43,10 @@ data HocketEvent
 data AsyncCommand
   = FetchItems
   | FetchedItems !POSIXTime ![BookmarkItem] !Bool
-  | ArchiveItems
+  | ExecuteBatch
+  | ExecuteBatchDone
   | ArchivedItems ![BookmarkItemId]
-  | SetReminders
   | RemindersSet ![BookmarkItemId]
-  | RemoveReminders
   | RemindersRemoved ![BookmarkItemId]
   | AsyncActionFailed !(Maybe Text)
   deriving (Show, Eq)
@@ -82,20 +80,17 @@ fetchItemsEvt = HocketAsync FetchItems
 fetchedItemsEvt :: POSIXTime -> [BookmarkItem] -> Bool -> HocketEvent
 fetchedItemsEvt t itms isAllCollections = HocketAsync (FetchedItems t itms isAllCollections)
 
-archiveItemsEvt :: HocketEvent
-archiveItemsEvt = HocketAsync ArchiveItems
+executeBatchEvt :: HocketEvent
+executeBatchEvt = HocketAsync ExecuteBatch
+
+executeBatchDoneEvt :: HocketEvent
+executeBatchDoneEvt = HocketAsync ExecuteBatchDone
 
 archivedItemsEvt :: [BookmarkItemId] -> HocketEvent
 archivedItemsEvt bids = HocketAsync (ArchivedItems bids)
 
-setRemindersEvt :: HocketEvent
-setRemindersEvt = HocketAsync SetReminders
-
 remindersSetEvt :: [BookmarkItemId] -> HocketEvent
 remindersSetEvt bids = HocketAsync (RemindersSet bids)
-
-removeRemindersEvt :: HocketEvent
-removeRemindersEvt = HocketAsync RemoveReminders
 
 remindersRemovedEvt :: [BookmarkItemId] -> HocketEvent
 remindersRemovedEvt bids = HocketAsync (RemindersRemoved bids)

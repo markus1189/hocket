@@ -12,7 +12,13 @@ module Network.Bookmark.Ui.State
     hsContents,
     Name (..),
     VideoFilterMode (..),
-    hsAsync,
+    AsyncOp (..),
+    BatchStep (..),
+    hsAsyncOp,
+    tryAcquireAsyncOp,
+    completeAsyncOp,
+    asyncOpRunning,
+    batchStepsWithWork,
     hsStatus,
     hsCredentials,
     hsShowFutureReminders,
@@ -57,7 +63,6 @@ import qualified Brick.Focus as F
 import Brick.Widgets.List (List)
 import qualified Brick.Widgets.List as L
 import Control.Applicative ((<|>))
-import Control.Concurrent.Async (Async)
 import Control.Lens
 #if !MIN_VERSION_base(4,20,0)
 import Data.Foldable (foldl')
@@ -81,6 +86,14 @@ import Network.Bookmark.Ui.Widgets
 
 data Name = ItemListName deriving (Show, Eq, Ord)
 
+-- | The async operations the TUI may start. Only one is ever in flight at a
+-- time (single-slot lock). The identity is recorded so the lock can be tested
+-- purely, instead of being an opaque 'Async' handle nobody reads.
+data AsyncOp
+  = OpFetchItems
+  | OpExecuteBatch
+  deriving (Show, Eq)
+
 data VideoFilterMode
   = NoVideoFilter
   | ShowOnlyVideos
@@ -91,7 +104,7 @@ data HocketState = HocketState
   { _itemList :: !(List Name BookmarkItem),
     _focusRing :: !(F.FocusRing Name),
     _hsLastUpdated :: !(Maybe POSIXTime),
-    _hsAsync :: !(Maybe (Async ())),
+    _hsAsyncOp :: !(Maybe AsyncOp),
     _hsStatus :: !(Maybe Text),
     _hsContents :: !(Map BookmarkItemId (PendingAction, BookmarkItem)),
     _hsCredentials :: !BookmarkCredentials,
@@ -102,6 +115,21 @@ data HocketState = HocketState
   }
 
 makeLenses ''HocketState
+
+asyncOpRunning :: HocketState -> Bool
+asyncOpRunning s = case s ^. hsAsyncOp of
+  Nothing -> False
+  Just _ -> True
+
+-- | Acquire the single async slot (marking it in-flight), or 'Nothing' if
+-- another op already owns it.
+tryAcquireAsyncOp :: AsyncOp -> HocketState -> Maybe HocketState
+tryAcquireAsyncOp whichOp s
+  | asyncOpRunning s = Nothing
+  | otherwise = Just (s & hsAsyncOp ?~ whichOp)
+
+completeAsyncOp :: HocketState -> HocketState
+completeAsyncOp = hsAsyncOp .~ Nothing
 
 newtype SortByUpdated = SBU BookmarkItem
 
@@ -153,6 +181,23 @@ hsNumItems s =
     }
   where
     partitioned = partitionItems s
+
+data BatchStep
+  = StepArchive
+  | StepSetReminders
+  | StepRemoveReminders
+  deriving (Show, Eq)
+
+-- | The non-empty 'X' sub-buckets, in the order the batch op runs them.
+batchStepsWithWork :: HocketState -> [BatchStep]
+batchStepsWithWork s =
+  let counts = hsNumItems s
+      stepIf pending step = [step | pending]
+   in concat
+        [ stepIf (counts ^. icToBeArchived > 0) StepArchive,
+          stepIf (counts ^. icToBeReminded > 0) StepSetReminders,
+          stepIf (counts ^. icReminderToBeRemoved > 0) StepRemoveReminders
+        ]
 
 initialState :: BookmarkCredentials -> HocketState
 initialState creds =

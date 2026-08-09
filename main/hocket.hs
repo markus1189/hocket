@@ -1,5 +1,7 @@
+{-# LANGUAGE BlockArguments #-}
 {-# LANGUAGE CPP #-}
 {-# LANGUAGE FlexibleContexts #-}
+{-# LANGUAGE LambdaCase #-}
 {-# LANGUAGE OverloadedStrings #-}
 {-# LANGUAGE RankNTypes #-}
 {-# LANGUAGE ScopedTypeVariables #-}
@@ -41,7 +43,7 @@ import Brick.Widgets.List (handleListEvent, handleListEventVi)
 import qualified Brick.Widgets.List as L
 import Control.Applicative ((<|>))
 import Control.Concurrent.Async (async)
-import Control.Exception (SomeException)
+import Control.Exception (SomeException, finally)
 import Control.Exception.Base (try)
 import Control.Lens (at, makeLensesFor, view)
 import Control.Lens.Combinators (use)
@@ -50,8 +52,6 @@ import Control.Lens.Operators
     (&),
     (.=),
     (.~),
-    (<&>),
-    (?=),
     (?~),
     (^.),
     (^?),
@@ -61,7 +61,6 @@ import qualified Control.Monad.Catch as Catch
 import Control.Monad.IO.Class (liftIO)
 import Control.Monad.Logger (logErrorN, logInfoN, runStdoutLoggingT)
 import Control.Monad.Loops (unfoldrM)
-import Control.Monad.State (MonadState)
 import qualified Data.CaseInsensitive as CI
 import Data.Foldable (for_)
 #if !MIN_VERSION_base(4,20,0)
@@ -92,13 +91,14 @@ import Events
     FilterInput (..),
     HocketEvent (..),
     UiCommand (..),
-    archiveItemsEvt,
     archivedItemsEvt,
     asyncActionFailedEvt,
     browseItemEvt,
     cancelFilterEvt,
     clearAllFlagsEvt,
     editItemInBrowserEvt,
+    executeBatchDoneEvt,
+    executeBatchEvt,
     fetchItemsEvt,
     fetchedItemsEvt,
     filterBackspaceEvt,
@@ -106,8 +106,6 @@ import Events
     lockFilterEvt,
     remindersRemovedEvt,
     remindersSetEvt,
-    removeRemindersEvt,
-    setRemindersEvt,
     setStatusEvt,
     shiftItemEvt,
     shiftItemReminderEvt,
@@ -144,17 +142,20 @@ import Network.Bookmark.Types
     _BookmarkItemId,
   )
 import Network.Bookmark.Ui.State
-  ( HocketState,
+  ( AsyncOp (..),
+    BatchStep (..),
+    HocketState,
     Name (..),
     VideoFilterMode (..),
     appendFilterChar,
     backspaceFilter,
+    batchStepsWithWork,
     cancelFilter,
     clearAllFlags,
     clearFlagsForItems,
+    completeAsyncOp,
     enterFilterMode,
     focusRing,
-    hsAsync,
     hsContents,
     hsCredentials,
     hsFilterActive,
@@ -181,6 +182,7 @@ import Network.Bookmark.Ui.State
     togglePendingActionToReminder,
     toggleShowFutureReminders,
     toggleVideoFilter,
+    tryAcquireAsyncOp,
     updateItemsWithStoredReminderTimes,
   )
 import Network.Bookmark.Ui.Widgets (sanitizeForDisplay)
@@ -302,9 +304,7 @@ vtyEventHandlerNormal es (EvKey (KChar 'r') []) = do
   liftIO $ es `trigger` fetchItemsEvt
   pure ()
 vtyEventHandlerNormal es (EvKey (KChar 'X') []) = do
-  liftIO $ es `trigger` archiveItemsEvt
-  liftIO $ es `trigger` setRemindersEvt
-  liftIO $ es `trigger` removeRemindersEvt
+  liftIO $ es `trigger` executeBatchEvt
   pure ()
 vtyEventHandlerNormal es (EvKey (KChar 'a') []) = do
   s <- use id
@@ -365,10 +365,16 @@ internalEventHandler ::
 internalEventHandler es (HocketAsync e) = asyncCommandEventHandler es e
 internalEventHandler es (HocketUi e) = uiCommandEventHandler es e
 
-unlessAsyncRunning :: (MonadState HocketState m) => m () -> m ()
-unlessAsyncRunning act = do
-  asyncRunning <- use id <&> isJust . view hsAsync
-  unless asyncRunning act
+-- | Run an async-op body only when the single slot is free; otherwise drop the
+-- op (matching the old 'unlessAsyncRunning' drop-on-busy semantics).
+withAsyncSlot :: AsyncOp -> EventM Name HocketState () -> EventM Name HocketState ()
+withAsyncSlot op run = do
+  s <- use id
+  case tryAcquireAsyncOp op s of
+    Nothing -> pure ()
+    Just s' -> do
+      id .= s'
+      run
 
 formatPOSIXTime :: POSIXTime -> Text
 formatPOSIXTime t = T.pack $ formatTime defaultTimeLocale "%Y-%m-%d" (posixSecondsToUTCTime t)
@@ -383,37 +389,93 @@ nextDayAt7AM = do
       tomorrowAt7AM = LocalTime tomorrow sevenAM
   pure $ localTimeToUTC tz tomorrowAt7AM
 
+-- The three 'X' sub-op bodies, run sequentially by 'runBatchOp'.
+runArchiveOp :: BChan HocketEvent -> HocketState -> IO ()
+runArchiveOp es s = do
+  es `trigger` setStatusEvt (Just "archiving")
+  eitherErrorResults <-
+    performArchive (s ^. hsCredentials) (getItemsWithPendingAction ToBeArchived s)
+  case eitherErrorResults of
+    Left e -> es `trigger` asyncActionFailedEvt (errorMessageFromException e)
+    Right results -> do
+      es
+        `trigger` archivedItemsEvt
+          ( mapMaybe
+              (\(bit, successful) -> mfilter (const successful) (Just (view biId bit)))
+              results
+          )
+      es `trigger` setStatusEvt Nothing
+
+runSetRemindersOp :: BChan HocketEvent -> HocketState -> IO ()
+runSetRemindersOp es s = do
+  es `trigger` setStatusEvt (Just "setting reminders")
+  eitherErrorResults <- performSetReminders (s ^. hsCredentials) (getItemsToBeReminded s)
+  case eitherErrorResults of
+    Left e -> es `trigger` asyncActionFailedEvt (errorMessageFromException e)
+    Right results -> do
+      es
+        `trigger` remindersSetEvt
+          ( mapMaybe
+              (\(bit, successful) -> mfilter (const successful) (Just (view biId bit)))
+              results
+          )
+      es `trigger` setStatusEvt Nothing
+
+runRemoveRemindersOp :: BChan HocketEvent -> HocketState -> IO ()
+runRemoveRemindersOp es s = do
+  es `trigger` setStatusEvt (Just "removing reminders")
+  eitherErrorResults <- performRemoveReminders (s ^. hsCredentials) (getItemsWithPendingAction ReminderToBeRemoved s)
+  case eitherErrorResults of
+    Left e -> es `trigger` asyncActionFailedEvt (errorMessageFromException e)
+    Right results -> do
+      es
+        `trigger` remindersRemovedEvt
+          ( mapMaybe
+              (\(bit, successful) -> mfilter (const successful) (Just (view biId bit)))
+              results
+          )
+      es `trigger` setStatusEvt Nothing
+
+-- Run every bucket that has pending work, in order, in one async thread. The
+-- slot is held for the whole batch and freed exactly once via
+-- 'executeBatchDoneEvt', guarded by 'finally' so a sub-op failure can't leak it.
+runBatchOp :: BChan HocketEvent -> HocketState -> IO ()
+runBatchOp es s =
+  for_
+    (batchStepsWithWork s)
+    ( \case
+        StepArchive -> runArchiveOp es s
+        StepSetReminders -> runSetRemindersOp es s
+        StepRemoveReminders -> runRemoveRemindersOp es s
+    )
+    `finally` (es `trigger` executeBatchDoneEvt)
+
 asyncCommandEventHandler ::
   BChan HocketEvent ->
   AsyncCommand ->
   EventM Name HocketState ()
-asyncCommandEventHandler es FetchItems = do
-  s <- use id
-  unlessAsyncRunning $ do
-    fetchAsync <-
-      liftIO . async $ do
-        let searchParam = case s ^. hsLastUpdated of
-              Nothing -> Nothing
-              Just lastTime ->
-                let dayBefore = lastTime - 86400
-                    dateStr = formatPOSIXTime dayBefore
-                 in Just ("lastUpdate:>" <> dateStr)
-            isUpdateFetch = isJust (s ^. hsLastUpdated)
-            collectionToFetch =
-              if isUpdateFetch
-                then RaindropCollectionId "0"
-                else RaindropCollectionId "-1"
-            suffix = maybe "" (\since -> " since: " <> formatPOSIXTime (since - 86400)) $ s ^. hsLastUpdated
-        es `trigger` setStatusEvt (Just ("fetching" <> suffix))
-        eitherErrorBis <- retrieveItems (s ^. hsCredentials) searchParam collectionToFetch
-        case eitherErrorBis of
-          Left e ->
-            es `trigger` asyncActionFailedEvt (errorMessageFromException e)
-          Right batches -> do
-            es `trigger` setStatusEvt Nothing
-            for_ batches $ \(BookmarkItemBatch ts bis _) -> do
-              es `trigger` fetchedItemsEvt ts bis isUpdateFetch
-    hsAsync ?= fetchAsync
+asyncCommandEventHandler es FetchItems =
+  withAsyncSlot OpFetchItems $ do
+    s <- use id
+    _ <- liftIO . async $ do
+      let searchParam = case s ^. hsLastUpdated of
+            Nothing -> Nothing
+            Just lastTime -> Just ("lastUpdate:>" <> formatPOSIXTime (lastTime - 86400))
+          isUpdateFetch = isJust (s ^. hsLastUpdated)
+          collectionToFetch =
+            if isUpdateFetch
+              then RaindropCollectionId "0"
+              else RaindropCollectionId "-1"
+          suffix = maybe "" (\since -> " since: " <> formatPOSIXTime (since - 86400)) $ s ^. hsLastUpdated
+      es `trigger` setStatusEvt (Just ("fetching" <> suffix))
+      eitherErrorBis <- retrieveItems (s ^. hsCredentials) searchParam collectionToFetch
+      case eitherErrorBis of
+        Left e -> es `trigger` asyncActionFailedEvt (errorMessageFromException e)
+        Right batches -> do
+          es `trigger` setStatusEvt Nothing
+          for_ batches $ \(BookmarkItemBatch ts bis _) -> do
+            es `trigger` fetchedItemsEvt ts bis isUpdateFetch
+    pure ()
 asyncCommandEventHandler _ (FetchedItems ts bis wasAllCollectionsFetch) = do
   if wasAllCollectionsFetch
     then do
@@ -424,7 +486,7 @@ asyncCommandEventHandler _ (FetchedItems ts bis wasAllCollectionsFetch) = do
       id %= insertItems itemsToPotentiallyAdd
     else id %= insertItems bis
 
-  hsAsync .= Nothing
+  id %= completeAsyncOp
   currentLastUpdated <- use hsLastUpdated
   let newTimestampToConsider = if null bis then Nothing else Just ts
   case (currentLastUpdated, newTimestampToConsider) of
@@ -432,94 +494,25 @@ asyncCommandEventHandler _ (FetchedItems ts bis wasAllCollectionsFetch) = do
     (Just oldTs, Just newTs) -> when (newTs >= oldTs) $ hsLastUpdated .= Just newTs
     _ -> pure ()
 asyncCommandEventHandler es (AsyncActionFailed err) = do
-  hsAsync .= Nothing
+  id %= completeAsyncOp
   liftIO (es `trigger` setStatusEvt (Just ("failed" <> maybe "<no err>" (": " <>) err)))
-asyncCommandEventHandler es ArchiveItems = do
+asyncCommandEventHandler es ExecuteBatch = do
   s <- use id
-  let counts = hsNumItems s
-  case counts ^. icToBeArchived of
-    0 -> pure ()
-    _ -> do
-      archiveAsync <-
-        liftIO . async $ do
-          es `trigger` setStatusEvt (Just "archiving")
-          eitherErrorResults <-
-            performArchive (s ^. hsCredentials) (getItemsWithPendingAction ToBeArchived s)
-          case eitherErrorResults of
-            Left e ->
-              es `trigger` asyncActionFailedEvt (errorMessageFromException e)
-            Right results -> do
-              es
-                `trigger` archivedItemsEvt
-                  ( mapMaybe
-                      ( \(bit, successful) ->
-                          mfilter (const successful) (Just (view biId bit))
-                      )
-                      results
-                  )
-              es `trigger` setStatusEvt Nothing
-      hsAsync ?= archiveAsync
+  case batchStepsWithWork s of
+    [] -> pure ()
+    _ -> withAsyncSlot OpExecuteBatch $ do
+      _ <- liftIO $ async $ runBatchOp es s
+      pure ()
+asyncCommandEventHandler _ ExecuteBatchDone = do
+  id %= completeAsyncOp
 asyncCommandEventHandler _ (ArchivedItems bis) = do
   id %= removeItems bis
-  hsAsync .= Nothing
-asyncCommandEventHandler es SetReminders = do
-  s <- use id
-  let counts = hsNumItems s
-  case counts ^. icToBeReminded of
-    0 -> pure ()
-    _ -> do
-      reminderAsync <-
-        liftIO . async $ do
-          es `trigger` setStatusEvt (Just "setting reminders")
-          eitherErrorResults <-
-            performSetReminders (s ^. hsCredentials) (getItemsToBeReminded s)
-          case eitherErrorResults of
-            Left e ->
-              es `trigger` asyncActionFailedEvt (errorMessageFromException e)
-            Right results -> do
-              es
-                `trigger` remindersSetEvt
-                  ( mapMaybe
-                      ( \(bit, successful) ->
-                          mfilter (const successful) (Just (view biId bit))
-                      )
-                      results
-                  )
-              es `trigger` setStatusEvt Nothing
-      hsAsync ?= reminderAsync
 asyncCommandEventHandler _ (RemindersSet bis) = do
   id %= updateItemsWithStoredReminderTimes bis
   id %= clearToBeRemindedFlags bis
-  hsAsync .= Nothing
-asyncCommandEventHandler es RemoveReminders = do
-  s <- use id
-  let counts = hsNumItems s
-  case counts ^. icReminderToBeRemoved of
-    0 -> pure ()
-    _ -> do
-      removeAsync <-
-        liftIO . async $ do
-          es `trigger` setStatusEvt (Just "removing reminders")
-          eitherErrorResults <-
-            performRemoveReminders (s ^. hsCredentials) (getItemsWithPendingAction ReminderToBeRemoved s)
-          case eitherErrorResults of
-            Left e ->
-              es `trigger` asyncActionFailedEvt (errorMessageFromException e)
-            Right results -> do
-              es
-                `trigger` remindersRemovedEvt
-                  ( mapMaybe
-                      ( \(bit, successful) ->
-                          mfilter (const successful) (Just (view biId bit))
-                      )
-                      results
-                  )
-              es `trigger` setStatusEvt Nothing
-      hsAsync ?= removeAsync
 asyncCommandEventHandler _ (RemindersRemoved bis) = do
   id %= removeReminderFromItems bis
   id %= clearFlagsForItems ReminderToBeRemoved bis
-  hsAsync .= Nothing
 
 uiCommandEventHandler ::
   BChan HocketEvent ->

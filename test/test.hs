@@ -29,7 +29,7 @@ import Test.Tasty.QuickCheck as QC
 main = defaultMain tests
 
 tests :: TestTree
-tests = testGroup "Tests" [hocketStateTests, raindropParsingTests, dateTimeParsingTests, jsonRoundtripTests, sanitizeForDisplayTests, fuzzyMatchTests, fuzzyFilterMatchTests, filterStateTests, filterTuningTests]
+tests = testGroup "Tests" [xKeyBatchConcurrencyTests, hocketStateTests, raindropParsingTests, dateTimeParsingTests, jsonRoundtripTests, sanitizeForDisplayTests, fuzzyMatchTests, fuzzyFilterMatchTests, filterStateTests, filterTuningTests]
 
 sanitizeForDisplayTests :: TestTree
 sanitizeForDisplayTests =
@@ -97,6 +97,63 @@ bookmarkItem1_same_ts_diff_title :: BookmarkItem
 bookmarkItem1_same_ts_diff_title = bookmarkItem1 {_biTitle = "title for same ts item"}
 
 testState = initialState (BookmarkCredentials (RaindropToken "") 0)
+
+-- Fixtures for the 'X'-batch regression test: three items, one per bucket.
+batchReminderTime :: UTCTime
+batchReminderTime = read "2016-05-23 07:00:00 UTC"
+
+batchArmArchive :: BookmarkItem
+batchArmArchive = bookmarkItem1 {_biId = BookmarkItemId "bx1"}
+
+batchArmSetRem :: BookmarkItem
+batchArmSetRem = bookmarkItem1 {_biId = BookmarkItemId "bx2", _biReminder = Nothing}
+
+batchArmRmvRem :: BookmarkItem
+batchArmRmvRem = bookmarkItem1 {_biId = BookmarkItemId "bx3", _biReminder = Just (read "2016-05-22 12:33:11 UTC")}
+
+-- State with pending work in all three 'X' buckets at once.
+armedBatchState :: HocketState
+armedBatchState =
+  insertItems [batchArmArchive, batchArmSetRem, batchArmRmvRem] testState
+    & togglePendingAction (_biId batchArmArchive)
+    & togglePendingActionToReminder (_biId batchArmSetRem) batchReminderTime
+    & togglePendingActionToReminder (_biId batchArmRmvRem) batchReminderTime
+
+-- One 'X' press must cover every pending bucket via a single slot-owning batch,
+-- and a second press/fetch is refused while it runs. These assertions fail if
+-- the three ops are ever uncoordinated again or a bucket is silently dropped.
+xKeyBatchConcurrencyTests :: TestTree
+xKeyBatchConcurrencyTests =
+  testGroup
+    "X-key batch (regression)"
+    [ testCase "one X press plans every non-empty bucket" $ do
+        batchStepsWithWork testState @?= []
+        batchStepsWithWork justArchive @?= [StepArchive]
+        batchStepsWithWork justSetRem @?= [StepSetReminders]
+        batchStepsWithWork justRmvRem @?= [StepRemoveReminders]
+        batchStepsWithWork armedBatchState @?= [StepArchive, StepSetReminders, StepRemoveReminders],
+      testCase "batch holds the single slot; a double X is refused, completion frees it" $ do
+        asyncOpRunning armedBatchState @?= False
+        let Just fired = tryAcquireAsyncOp OpExecuteBatch armedBatchState
+        asyncOpRunning fired @?= True
+        ( case tryAcquireAsyncOp OpExecuteBatch fired of
+            Nothing -> pure ()
+            Just _ -> assertFailure "a second X started while a batch owns the slot"
+          )
+        ( case tryAcquireAsyncOp OpFetchItems fired of
+            Nothing -> pure ()
+            Just _ -> assertFailure "fetch started while the batch owns the slot"
+          )
+        let done = completeAsyncOp fired
+        asyncOpRunning done @?= False
+        case tryAcquireAsyncOp OpExecuteBatch done of
+          Just inFlight -> asyncOpRunning inFlight @?= True
+          Nothing -> assertFailure "batch refused after slot freed"
+    ]
+  where
+    justArchive = insertItems [batchArmArchive] testState & togglePendingAction (_biId batchArmArchive)
+    justSetRem = insertItems [batchArmSetRem] testState & togglePendingActionToReminder (_biId batchArmSetRem) batchReminderTime
+    justRmvRem = insertItems [batchArmRmvRem] testState & togglePendingActionToReminder (_biId batchArmRmvRem) batchReminderTime
 
 hocketStateTests =
   testGroup
