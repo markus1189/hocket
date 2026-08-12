@@ -28,6 +28,13 @@ module Events
     cancelFilterEvt,
     filterCharEvt,
     filterBackspaceEvt,
+    setPendingActionEvt,
+    setFilterQueryEvt,
+    setVideoFilterModeEvt,
+    setShowFutureRemindersEvt,
+    selectItemEvt,
+    openItemByIdEvt,
+    setAgentClientsEvt,
   )
 where
 
@@ -35,6 +42,7 @@ import Data.Set (Set)
 import Data.Text (Text)
 import Data.Time.Clock.POSIX (POSIXTime)
 import Network.Bookmark.Types
+import Network.Bookmark.Ui.State (VideoFilterMode)
 
 data HocketEvent
   = HocketAsync !AsyncCommand
@@ -66,6 +74,14 @@ data UiCommand
   | ToggleVideoFilter
   | ToggleInvertedVideoFilter
   | FilterInput !FilterInput
+  | -- Agent-socket commands: idempotent variants of the keyboard toggles.
+    SetPendingAction !BookmarkItemId !PendingAction
+  | SetFilterQuery !Text
+  | SetVideoFilterMode !VideoFilterMode
+  | SetShowFutureReminders !Bool
+  | SelectItem !BookmarkItemId
+  | OpenItemById !BookmarkItemId
+  | SetAgentClients !Int
   deriving (Show, Eq)
 
 data FilterInput
@@ -150,3 +166,24 @@ filterCharEvt c = HocketUi (FilterInput (FilterChar c))
 
 filterBackspaceEvt :: HocketEvent
 filterBackspaceEvt = HocketUi (FilterInput FilterBackspace)
+
+setPendingActionEvt :: BookmarkItemId -> PendingAction -> HocketEvent
+setPendingActionEvt bid act = HocketUi (SetPendingAction bid act)
+
+setFilterQueryEvt :: Text -> HocketEvent
+setFilterQueryEvt q = HocketUi (SetFilterQuery q)
+
+setVideoFilterModeEvt :: VideoFilterMode -> HocketEvent
+setVideoFilterModeEvt m = HocketUi (SetVideoFilterMode m)
+
+setShowFutureRemindersEvt :: Bool -> HocketEvent
+setShowFutureRemindersEvt b = HocketUi (SetShowFutureReminders b)
+
+selectItemEvt :: BookmarkItemId -> HocketEvent
+selectItemEvt bid = HocketUi (SelectItem bid)
+
+openItemByIdEvt :: BookmarkItemId -> HocketEvent
+openItemByIdEvt bid = HocketUi (OpenItemById bid)
+
+setAgentClientsEvt :: Int -> HocketEvent
+setAgentClientsEvt n = HocketUi (SetAgentClients n)

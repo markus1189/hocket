@@ -18,6 +18,8 @@ library
   ghc-options:         -Wall -Werror
   hs-source-dirs:      src
   exposed-modules:     Network.Raindrop
+                     , Network.Bookmark.Agent.Protocol
+                     , Network.Bookmark.Agent.Snapshot
                      , Network.Bookmark.Types
                      , Network.Bookmark.Ui.State
                      , Network.Bookmark.Ui.Widgets
@@ -59,10 +61,13 @@ executable hocket
   ghc-options:         -Wall -threaded -Werror
   main-is:             hocket.hs
   hs-source-dirs:      main
-  other-modules:       Events
-  build-depends:       async
+  other-modules:       AgentServer
+                     , Events
+  build-depends:       aeson
+                     , async
                      , base
                      , brick
+                     , bytestring
                      , case-insensitive
                      , containers
                      , data-default
@@ -80,13 +85,16 @@ executable hocket
                      , monad-loops
                      , exceptions
                      , mtl
+                     , network
                      , network-uri
                      , optparse-applicative
                      , process
                      , retry
+                     , stm
                      , text
                      , time
                      , transformers
+                     , unix
                      , vector
                      , vty-unix
                      , vty

@@ -1,6 +1,9 @@
 # Agent-Native Hocket: Design Exploration
 
-Status: **draft for review** — no implementation yet.
+Status: **phases 1–2 implemented** (state mirror, control socket, read
+methods, validated writes; `add_bookmark` and the MCP bridge are still
+open). The protocol as built is documented in the README's
+"Agent Control Socket" section.
 
 ## Goal
 
