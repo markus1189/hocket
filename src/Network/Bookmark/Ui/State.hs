@@ -38,6 +38,12 @@ module Network.Bookmark.Ui.State
     removeItems,
     togglePendingAction,
     togglePendingActionToReminder,
+    setPendingAction,
+    setFilterQuery,
+    setVideoFilterMode,
+    setShowFutureReminders,
+    setAgentClients,
+    hsAgentClients,
     clearAllFlags,
     clearFlagsForItems,
     setAllFlagsToArchive,
@@ -111,7 +117,8 @@ data HocketState = HocketState
     _hsShowFutureReminders :: !Bool,
     _hsVideoFilter :: !VideoFilterMode,
     _hsFilterActive :: !Bool,
-    _hsFilterQuery :: !Text
+    _hsFilterQuery :: !Text,
+    _hsAgentClients :: !Int
   }
 
 makeLenses ''HocketState
@@ -213,6 +220,7 @@ initialState creds =
     NoVideoFilter
     False
     T.empty
+    0
 
 insertItem :: BookmarkItem -> HocketState -> HocketState
 insertItem bit s =
@@ -250,6 +258,26 @@ togglePendingActionToReminder bid reminderTime s =
             ToBeArchived -> if hasExistingReminder then ReminderToBeRemoved else ToBeReminded reminderTime
        in s & hsContents . at bid ?~ (newAction, item)
     Nothing -> s
+
+-- | Idempotent flag assignment for the agent socket: unlike the keyboard
+-- toggles this cannot flip the wrong way when the caller's view is stale.
+-- A no-op for unknown ids.
+setPendingAction :: BookmarkItemId -> PendingAction -> HocketState -> HocketState
+setPendingAction bid act = hsContents . ix bid . _1 .~ act
+
+-- | Replace the fuzzy filter query wholesale (agents set it in one step
+-- rather than char-by-char) and leave filter-input mode locked in.
+setFilterQuery :: Text -> HocketState -> HocketState
+setFilterQuery q = (hsFilterQuery .~ q) . (hsFilterActive .~ False)
+
+setVideoFilterMode :: VideoFilterMode -> HocketState -> HocketState
+setVideoFilterMode m = hsVideoFilter .~ m
+
+setShowFutureReminders :: Bool -> HocketState -> HocketState
+setShowFutureReminders b = hsShowFutureReminders .~ b
+
+setAgentClients :: Int -> HocketState -> HocketState
+setAgentClients n = hsAgentClients .~ n
 
 setAllFlags :: PendingAction -> HocketState -> HocketState
 setAllFlags action = hsContents . mapped . _1 .~ action

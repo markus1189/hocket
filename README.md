@@ -118,6 +118,13 @@ The application will automatically create the schema file if it doesn't exist.
 ```bash
 # Run the interactive TUI (config is loaded from ~/.config/hocket/config.dhall)
 hocket tui
+
+# Run the TUI with the agent control socket enabled (default path:
+# $XDG_RUNTIME_DIR/hocket/control.sock, else /tmp/hocket-<uid>/control.sock)
+hocket tui --agent-socket
+
+# Same, with an explicit socket path
+hocket tui --agent-socket-path /path/to/control.sock
 ```
 
 #### Add Bookmarks from Command Line
@@ -228,6 +235,37 @@ Both filters identify video content by:
 - **Domain** - Truncated URL showing the domain and path
 - **Bottom section** - Shows notes, reminder dates, and excerpts for the selected item
 - **Status bar** - Last update time and current operation status
+
+## Agent Control Socket
+
+With `--agent-socket` (or `--agent-socket-path PATH`) the TUI listens on a
+Unix domain socket so external tools — AI agents, scripts, editor plugins —
+can observe and drive the running TUI. See
+`docs/agent-native-design.md` for the full design.
+
+- **Protocol**: newline-delimited JSON. Requests look like
+  `{"id": 1, "method": "get_state"}` with an optional `"params"` object;
+  responses echo the `id` and carry `"ok"` plus `"result"` or `"error"`.
+- **Reads** (answered from a state mirror, never blocking the UI):
+  `get_state`, `list_items` (`visible_only`, `flagged_only`), `get_item`,
+  and `wait_version` (long-polls until the state version passes `after`).
+- **Writes** (injected as regular UI events, so they behave exactly like
+  keystrokes): `set_flag` (`action`: `archive` | `reminder` |
+  `remove_reminder` | `none`), `clear_all_flags`, `flag_all_archive`,
+  `execute`, `refresh`, `set_filter`, `set_video_filter`,
+  `set_show_future_reminders`, `select_item`, `open_item`, and
+  `set_status` (shows `agent: <text>` in the status bar).
+- **Visibility**: the header shows `[agent]` while at least one client is
+  connected; flags staged by an agent are ordinary flags you can review
+  with `J`/`K`, drop with `u`, and execute with `X`.
+- **Security**: the socket is created `0600` in a `0700` directory, and the
+  Raindrop token is never exposed over it.
+
+Quick smoke test from a shell:
+
+```bash
+echo '{"id":1,"method":"get_state"}' | socat - UNIX-CONNECT:$XDG_RUNTIME_DIR/hocket/control.sock
+```
 
 ## Reminder Management
 

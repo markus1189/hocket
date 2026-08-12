@@ -16,6 +16,7 @@ module Main
   )
 where
 
+import AgentServer (AgentEnv (..), resolveAgentSocketPath, runAgentServer)
 import Brick
   ( App (..),
     AttrMap,
@@ -36,13 +37,14 @@ import Brick
     zoom,
     (<+>),
   )
-import Brick.BChan (BChan, newBChan, writeBChan)
+import Brick.BChan (BChan, newBChan, writeBChan, writeBChanNonBlocking)
 import qualified Brick.Focus as Focus
 import Brick.Widgets.Border (hBorder)
 import Brick.Widgets.List (handleListEvent, handleListEventVi)
 import qualified Brick.Widgets.List as L
 import Control.Applicative ((<|>))
 import Control.Concurrent.Async (async)
+import Control.Concurrent.STM (TVar, atomically, modifyTVar', newTVarIO)
 import Control.Exception (SomeException, finally)
 import Control.Exception.Base (try)
 import Control.Lens (at, makeLensesFor, view)
@@ -84,6 +86,7 @@ import Data.Time.LocalTime
     localTimeToUTC,
     utcToLocalTime,
   )
+import Data.Traversable (for)
 import qualified Data.Vector as V
 import Dhall (auto, input)
 import Events
@@ -121,6 +124,7 @@ import Graphics.Vty (Event (EvKey), Key (KChar, KDown, KUp))
 import qualified Graphics.Vty as Vty
 import Graphics.Vty.Input.Events (Key (KBS, KEnter, KEsc))
 import Graphics.Vty.Platform.Unix (mkVty)
+import Network.Bookmark.Agent.Snapshot (AgentSnapshot, asVersion, emptySnapshot, takeSnapshot)
 import Network.Bookmark.Types
   ( BookmarkCredentials,
     BookmarkItem,
@@ -157,6 +161,7 @@ import Network.Bookmark.Ui.State
     completeAsyncOp,
     enterFilterMode,
     focusRing,
+    hsAgentClients,
     hsContents,
     hsCredentials,
     hsFilterActive,
@@ -176,7 +181,12 @@ import Network.Bookmark.Ui.State
     lockFilter,
     removeItems,
     removeReminderFromItems,
+    setAgentClients,
     setAllFlagsToArchive,
+    setFilterQuery,
+    setPendingAction,
+    setShowFutureReminders,
+    setVideoFilterMode,
     syncForRender,
     toggleInvertedVideoFilter,
     togglePendingAction,
@@ -208,6 +218,7 @@ import Options.Applicative
     argument,
     command,
     execParser,
+    flag,
     fullDesc,
     header,
     help,
@@ -223,7 +234,7 @@ import Options.Applicative
     strOption,
     (<**>),
   )
-import System.Directory (XdgDirectory (..), createDirectoryIfMissing, doesFileExist, getXdgDirectory)
+import System.Directory (XdgDirectory (..), createDirectoryIfMissing, doesFileExist, getXdgDirectory, removeFile)
 import System.Environment (lookupEnv)
 import System.Exit (ExitCode (..), exitFailure)
 import System.FilePath ((</>))
@@ -241,13 +252,33 @@ import Text.Printf (printf)
 makeLensesFor [("std_in", "stdIn"), ("std_err", "stdErr"), ("std_out", "stdOut")] ''CreateProcess
 
 data HocketCommand
-  = RunTUI
+  = RunTUI !(Maybe AgentSocketOpt)
   | AddBookmarkCmd !Text !(Maybe Text) ![Text]
+  deriving (Show, Eq)
+
+-- | Where to bind the agent control socket, when enabled at all.
+data AgentSocketOpt = AgentSocketDefault | AgentSocketAt !FilePath
   deriving (Show, Eq)
 
 tuiCommandParser :: Mod CommandFields HocketCommand
 tuiCommandParser =
-  command "tui" (info (pure RunTUI) (progDesc "Run the Hocket Terminal User Interface"))
+  command "tui" (info (RunTUI <$> agentSocketParser) (progDesc "Run the Hocket Terminal User Interface"))
+
+agentSocketParser :: Parser (Maybe AgentSocketOpt)
+agentSocketParser =
+  ( Just . AgentSocketAt
+      <$> strOption
+        ( long "agent-socket-path"
+            <> metavar "PATH"
+            <> help "Enable the agent control socket at PATH"
+        )
+  )
+    <|> flag
+      Nothing
+      (Just AgentSocketDefault)
+      ( long "agent-socket"
+          <> help "Enable the agent control socket at $XDG_RUNTIME_DIR/hocket/control.sock"
+      )
 
 addCommandParser :: Mod CommandFields HocketCommand
 addCommandParser =
@@ -551,6 +582,24 @@ uiCommandEventHandler _ (FilterInput fi) =
     DoCancelFilter -> cancelFilter
     FilterChar c -> appendFilterChar c
     FilterBackspace -> backspaceFilter
+uiCommandEventHandler _ (SetPendingAction bid act) = id %= setPendingAction bid act
+uiCommandEventHandler _ (SetFilterQuery q) = do
+  id %= setFilterQuery q
+  id %= syncForRender
+uiCommandEventHandler _ (SetVideoFilterMode m) = do
+  id %= setVideoFilterMode m
+  id %= syncForRender
+uiCommandEventHandler _ (SetShowFutureReminders b) = do
+  id %= setShowFutureReminders b
+  id %= syncForRender
+uiCommandEventHandler _ (SelectItem bid) = do
+  s <- use id
+  let mIdx = V.findIndex (\bit -> view biId bit == bid) (s ^. itemList . L.listElementsL)
+  for_ mIdx $ \i -> itemList %= L.listMoveTo i
+uiCommandEventHandler es (OpenItemById bid) = do
+  s <- use id
+  liftIO . for_ (s ^. hsContents . at bid) $ \(_, bit) -> es `trigger` browseItemEvt bit
+uiCommandEventHandler _ (SetAgentClients n) = id %= setAgentClients n
 uiCommandEventHandler es (BrowseItem bit) = do
   res <- liftIO . try @SomeException $ browseItem "firefox '%s'" (URL . T.unpack $ view biLink bit)
   case res of
@@ -617,22 +666,50 @@ ensureSchemaFile = do
         writeFile xdgSchemaPath legacyContent
       else writeFile xdgSchemaPath "{ _raindropToken : Text, _archiveCollectionId : Natural }\n"
 
-runTuiApp :: IO ()
-runTuiApp = do
+runTuiApp :: Maybe AgentSocketOpt -> IO ()
+runTuiApp mAgentOpt = do
   ensureSchemaFile
   configPath <- getConfigPath
   cred <- input auto (T.pack configPath)
   events <- newBChan 10
   tz <- getCurrentTimeZone
+  mAgent <- for mAgentOpt (startAgentServer events)
   vty <- mkVty Vty.defaultConfig
   void
     ( customMain
         vty
         (mkVty Vty.defaultConfig)
         (Just events)
-        (app tz events)
+        (app tz events (snd <$> mAgent))
         (initialState cred)
     )
+    `finally` for_ mAgent (\(path, _) -> void (try @SomeException (removeFile path)))
+
+-- | Bind the agent control socket and keep serving it in the background.
+-- Server failures surface in the TUI status bar instead of killing the app.
+startAgentServer :: BChan HocketEvent -> AgentSocketOpt -> IO (FilePath, TVar AgentSnapshot)
+startAgentServer events opt = do
+  path <- case opt of
+    AgentSocketDefault -> resolveAgentSocketPath
+    AgentSocketAt p -> pure p
+  snapVar <- newTVarIO emptySnapshot
+  let env =
+        AgentEnv
+          { aeSnapshot = snapVar,
+            aeInject = writeBChanNonBlocking events,
+            aeReminderTime = nextDayAt7AM
+          }
+  _ <- async $ do
+    r <- try @SomeException (runAgentServer path env)
+    case r of
+      Left e ->
+        void
+          ( writeBChanNonBlocking
+              events
+              (setStatusEvt (Just ("agent socket failed: " <> T.pack (show e))))
+          )
+      Right () -> pure ()
+  pure (path, snapVar)
 
 runAddCommand :: Text -> Maybe Text -> [Text] -> IO ()
 runAddCommand url mCollection tags = do
@@ -661,17 +738,24 @@ main :: IO ()
 main = do
   cmd <- execParser opts
   case cmd of
-    RunTUI -> runTuiApp
+    RunTUI mAgentOpt -> runTuiApp mAgentOpt
     AddBookmarkCmd url mCollection tags -> runAddCommand url mCollection tags
 
-app :: TimeZone -> BChan HocketEvent -> App HocketState HocketEvent Name
-app tz events =
+app :: TimeZone -> BChan HocketEvent -> Maybe (TVar AgentSnapshot) -> App HocketState HocketEvent Name
+app tz events mSnapVar =
   App
     { appDraw = drawGui tz,
       appChooseCursor = Focus.focusRingCursor (view focusRing),
       appHandleEvent = \e -> do
         myEventHandler events e
-        id %= syncForRender,
+        id %= syncForRender
+        -- Mirror the post-render state for the agent socket. Persistent
+        -- data sharing keeps this cheap; the item projection is only fully
+        -- forced by a server thread that actually serves it.
+        for_ mSnapVar $ \snapVar -> do
+          s <- use id
+          liftIO . atomically . modifyTVar' snapVar $ \old ->
+            takeSnapshot (asVersion old + 1) s,
       appStartEvent = liftIO (events `trigger` fetchItemsEvt),
       appAttrMap = const hocketAttrMap
     }
@@ -725,7 +809,8 @@ drawGui tz s = [w]
     w =
       vBox
         [ hBarWithHints
-            ( "Hocket"
+            ( (if s ^. hsAgentClients > 0 then "[agent] " else "")
+                <> "Hocket"
                 <> ( case s ^. hsVideoFilter of
                        NoVideoFilter -> ""
                        ShowOnlyVideos -> " (+V)"
