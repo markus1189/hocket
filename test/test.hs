@@ -1,13 +1,25 @@
 {-# LANGUAGE OverloadedStrings #-}
 {-# LANGUAGE ScopedTypeVariables #-}
+{-# LANGUAGE TypeApplications #-}
 
+import AgentServer (AgentEnv (..), runAgentServer)
+import Brick.BChan (BChan, newBChan, readBChan, writeBChan)
 import qualified Brick.Widgets.List as L
+import Control.Concurrent (forkIO, threadDelay)
+import Control.Concurrent.Async (withAsync)
+import Control.Concurrent.STM (TVar, atomically, modifyTVar', newTVarIO)
+import Control.Exception (IOException, try)
+import Control.Monad (void)
 import Control.Lens (ix, view, _1, _2)
 import Control.Lens.Operators
 import qualified Data.Aeson as A
 import Data.Aeson.Types (parseMaybe)
+import qualified Data.ByteString.Char8 as BSC
 import qualified Data.ByteString.Lazy.Char8 as LBS
 import Data.Either (isLeft)
+import qualified Data.Aeson.Key as AKey
+import qualified Data.Aeson.KeyMap as KM
+import Data.Foldable (for_)
 import Data.List (find, head, intercalate, isInfixOf, last)
 import Data.Map (Map)
 import qualified Data.Map as Map
@@ -17,13 +29,37 @@ import Data.Text (Text)
 import qualified Data.Text as T
 import Data.Time.Calendar (toGregorian)
 import Data.Time.Clock (DiffTime, UTCTime (..))
+import Data.Time.Clock.POSIX (POSIXTime)
 import Data.Time.Format.ISO8601 (iso8601ParseM)
 import qualified Data.Vector as V
+import Events
 import Network.Bookmark.Agent.Protocol
 import Network.Bookmark.Agent.Snapshot
 import Network.Bookmark.Types
 import Network.Bookmark.Ui.State
 import Network.Bookmark.Ui.Widgets (fuzzyFilterMatch, fuzzyMatch, sanitizeForDisplay)
+import Network.Socket
+  ( Family (AF_UNIX),
+    SockAddr (SockAddrUnix),
+    Socket,
+    SocketType (Stream),
+    close,
+    connect,
+    defaultProtocol,
+    socket,
+    socketToHandle,
+  )
+import System.Directory (getTemporaryDirectory, removeFile)
+import System.FilePath ((</>))
+import System.IO
+  ( BufferMode (LineBuffering),
+    Handle,
+    IOMode (ReadWriteMode),
+    hFlush,
+    hSetBuffering,
+  )
+import System.Posix.Process (getProcessID)
+import System.Posix.Time (epochTime)
 import Test.Tasty
 import Test.Tasty.Golden (goldenVsString)
 import Test.Tasty.HUnit
@@ -32,7 +68,7 @@ import Test.Tasty.QuickCheck as QC
 main = defaultMain tests
 
 tests :: TestTree
-tests = testGroup "Tests" [xKeyBatchConcurrencyTests, hocketStateTests, raindropParsingTests, dateTimeParsingTests, jsonRoundtripTests, sanitizeForDisplayTests, fuzzyMatchTests, fuzzyFilterMatchTests, filterStateTests, filterTuningTests, agentSnapshotTests, agentProtocolTests]
+tests = testGroup "Tests" [xKeyBatchConcurrencyTests, hocketStateTests, raindropParsingTests, dateTimeParsingTests, jsonRoundtripTests, sanitizeForDisplayTests, fuzzyMatchTests, fuzzyFilterMatchTests, filterStateTests, filterTuningTests, agentSnapshotTests, agentProtocolTests, agentServerIntegrationTests]
 
 sanitizeForDisplayTests :: TestTree
 sanitizeForDisplayTests =
@@ -567,6 +603,23 @@ agentSnapshotTests =
         map siId (filter siVisible (asItems agentSnapWithRem)) @?= [BookmarkItemId "ag1"]
         fmap siVisible (find ((== BookmarkItemId "ag3") . siId) (asItems agentSnapWithRem))
           @?= Just False,
+      testCase "setPendingAction is idempotent (replace, not toggle)" $ do
+        -- Flag archive, then re-flag archive: must not flip to None.
+        let s = setPendingAction (BookmarkItemId "ag1") ToBeArchived $ insertItems [agentItemA] testState
+        fst <$> Map.lookup (BookmarkItemId "ag1") (s ^. hsContents) @?= Just ToBeArchived,
+      testCase "setFilterQuery replaces the query and clears filter-input mode" $ do
+        let s = setFilterQuery "haskell" (enterFilterMode testState)
+        s ^. hsFilterQuery @?= "haskell"
+        s ^. hsFilterActive @?= False,
+      testCase "setVideoFilterMode is a plain assignment" $ do
+        let s = setVideoFilterMode ShowOnlyVideos testState
+        s ^. hsVideoFilter @?= ShowOnlyVideos,
+      testCase "setShowFutureReminders is a plain assignment" $ do
+        let s = setShowFutureReminders True testState
+        s ^. hsShowFutureReminders @?= True,
+      testCase "setAgentClients sets the header count" $ do
+        let s = setAgentClients 2 testState
+        s ^. hsAgentClients @?= 2,
       testCase "credentials never appear in the encoded snapshot" $
         let s =
               syncForRender
@@ -611,6 +664,35 @@ agentProtocolTests =
         assertBool
           "expected Left"
           (isLeft (serveRead agentSnapAB (CmdGetItem (BookmarkItemId "nope")))),
+      testCase "serveRead: get_item returns the matching item's fields" $
+        case serveRead agentSnapAB (CmdGetItem (BookmarkItemId "ag1")) of
+          Left err -> assertFailure (T.unpack err)
+          Right v -> case v of
+            A.Object o -> do
+              KM.lookup (AKey.fromText "id") o @?= Just (A.String "ag1")
+              KM.lookup (AKey.fromText "visible") o @?= Just (A.Bool True)
+              -- pending field carries an action object with "action":"none"
+              case KM.lookup (AKey.fromText "pending") o of
+                Just (A.Object p) ->
+                  KM.lookup (AKey.fromText "action") p @?= Just (A.String "none")
+                _ -> assertFailure "pending is not an object"
+            _ -> assertFailure "get_item result is not an object",
+      testCase "stateView pins the documented wire contract" $ do
+        let v = stateView agentSnapFlagged
+        case v of
+          A.Object o -> do
+            -- top-level keys the README documents
+            for_ ["version", "counts", "selected", "filter_query", "video_filter", "show_future_reminders", "status", "last_updated", "async_op"] $ \k ->
+              assertBool ("stateView missing key " <> k) (KM.member (AKey.fromText (T.pack k)) o)
+            -- counts subobject
+            case KM.lookup (AKey.fromText "counts") o of
+              Just (A.Object c) -> do
+                let vn = KM.lookup (AKey.fromText "archive_flagged") c
+                vn @?= Just (A.Number 1)
+              _ -> assertFailure "stateView counts is not an object"
+            -- selected reflects the focused item
+            KM.lookup (AKey.fromText "selected") o @?= Just (A.String "ag1")
+          _ -> assertFailure "stateView is not an object",
       testCase "serveRead: flagged_only narrows to flagged items" $
         case serveRead agentSnapFlagged (CmdListItems False True) of
           Left err -> assertFailure (T.unpack err)
@@ -636,4 +718,226 @@ agentProtocolTests =
         assertBool
           "expected Left"
           (isLeft (validateWrite agentSnapWithRem (CmdSelectItem (BookmarkItemId "ag3"))))
+    ]
+
+-- ---------------------------------------------------------------------------
+
+-- ---------------------------------------------------------------------------
+-- Agent control socket: end-to-end over a real Unix-domain socket. These
+-- exercise the IO shell (AgentServer.hs) that the pure protocol tests cannot
+-- reach: real AF_UNIX connects, reads answered from the snapshot TVar,
+-- validated write-injection into the event BChan, and wait_version
+-- long-polling that must unblock when the snapshot version advances.
+-- ---------------------------------------------------------------------------
+
+-- Small helper: a BookmarkItem with a stable id/title.
+agentSockItem :: Text -> Text -> BookmarkItem
+agentSockItem i t =
+  bookmarkItem1
+    { _biId = BookmarkItemId i,
+      _biTitle = t,
+      _biCreated = read "2020-01-01 10:00:00 UTC",
+      _biLastUpdate = read "2020-01-01 10:00:00 UTC"
+    }
+
+-- | Build the (pure) snapshot projection the server will serve, given a
+-- version. Mirrors what appHandleEvent does each frame.
+buildTestSnapshot :: Int -> AgentSnapshot
+buildTestSnapshot v =
+  takeSnapshot v $
+    syncForRender $
+      insertItems
+        [ agentSockItem "in-1" "first bookmark",
+          agentSockItem "in-2" "second bookmark"
+        ]
+        testState
+
+-- | Connect a client socket to the server; returns the IO handle.
+connectAgentClient :: FilePath -> IO Handle
+connectAgentClient path = do
+  sock <- socket AF_UNIX Stream defaultProtocol
+  connect sock (SockAddrUnix path)
+  h <- socketToHandle sock ReadWriteMode
+  hSetBuffering h LineBuffering
+  pure h
+
+-- | Send one newline-delimited request and read the newline-delimited reply.
+sendRequest :: Handle -> BSC.ByteString -> IO A.Value
+sendRequest h line = do
+  LBS.hPutStr h (LBS.fromStrict line <> "\n")
+  hFlush h
+  BSC.hGetLine h >>= \resp ->
+    case A.eitherDecodeStrict resp of
+      Left e -> assertFailure ("bad response json: " ++ show e)
+      Right v -> pure v
+
+-- | Observe the next, non-announcement UiCommand injected into the event
+-- channel (blocking). Skips SetAgentClients connect/disconnect bookkeeping.
+readAgentInjected :: BChan HocketEvent -> IO UiCommand
+readAgentInjected ch = do
+  ev <- readBChan ch
+  case ev of
+    HocketUi (SetAgentClients _) -> readAgentInjected ch
+    HocketUi u -> pure u
+    _ -> readAgentInjected ch
+
+-- | Poll-connect to a socket until a listener accepts (server fully bound),
+-- retrying a bounded number of times with a short sleep. Guards against the
+-- race where a test launches a server in the background and immediately
+-- probes it before the server has actually bound its path.
+waitUntilReachable :: Int -> FilePath -> IO ()
+waitUntilReachable attempts path
+  | attempts <= 0 = assertFailure ("server never became reachable at " ++ path)
+  | otherwise =
+      reachable path >>= \ok ->
+        if ok
+          then pure ()
+          else threadDelay 20000 >> waitUntilReachable (attempts - 1) path
+  where
+    reachable :: FilePath -> IO Bool
+    reachable p = do
+      sock <- socket AF_UNIX Stream defaultProtocol
+      r <- try @IOException (connect sock (SockAddrUnix p) >> socketToHandle sock ReadWriteMode >> pure ())
+      close sock
+      pure (not (isLeft r))
+
+-- | Run the agent server on a throwaway socket with a snapshot TVar we own,
+-- handing both that TVar and the event BChan to the action so the test can
+-- bump versions and observe injected writes.
+withAgentServer ::
+  (TVar AgentSnapshot -> BChan HocketEvent -> FilePath -> IO a) ->
+  IO a
+withAgentServer action = do
+  tmp <- getTemporaryDirectory
+  e <- epochTime
+  pid <- getProcessID
+  let path = tmp </> ("hocket-test-" ++ show pid ++ "-" ++ show e ++ ".sock")
+  snapVar <- newTVarIO emptySnapshot
+  atomically (modifyTVar' snapVar (const (buildTestSnapshot 1)))
+  events <- newBChan 10
+  let env =
+        AgentEnv
+          { aeSnapshot = snapVar,
+            aeInject = \evt -> do
+              void (writeBChan events evt)
+              pure True,
+            aeReminderTime = pure (read "2020-01-01 07:00:00 UTC" :: UTCTime)
+          }
+  withAsync (runAgentServer path env) $ \_ -> action snapVar events path
+
+-- | Drain (up to n) injected events from the BChan, returning the UiCommands.
+drainUI :: BChan HocketEvent -> Int -> IO [UiCommand]
+drainUI ch n = go n []
+  where
+    go 0 acc = pure (reverse acc)
+    go k acc = do
+      ev <- readBChan ch
+      case ev of
+        HocketUi u -> go (k - 1) (u : acc)
+        _ -> go (k - 1) acc
+
+agentServerIntegrationTests :: TestTree
+agentServerIntegrationTests =
+  testGroup
+    "Agent server (socket)"
+    [ testCase "get_state returns the snapshot view with a version" $
+        withAgentServer $ \snapVar events path -> do
+          -- seed the snapshot the test owns; the server reads from the same TVar
+          atomically (modifyTVar' snapVar (const (buildTestSnapshot 7)))
+          h <- connectAgentClient path
+          resp <- sendRequest h "{\"id\":1,\"method\":\"get_state\"}"
+          case resp of
+            A.Object o ->
+              case KM.lookup (AKey.fromText "result") o of
+                Just (A.Object r) -> do
+                  KM.lookup (AKey.fromText "version") r @?= Just (A.Number 7)
+                  -- counts subobject reflects the two seeded items
+                  case KM.lookup (AKey.fromText "counts") r of
+                    Just (A.Object c) ->
+                      KM.lookup (AKey.fromText "visible") c @?= Just (A.Number 2)
+                    _ -> assertFailure "no counts object"
+                _ -> assertFailure "no result object"
+            _ -> assertFailure "response not an object",
+      testCase "list_items returns the snapshot items" $
+        withAgentServer $ \snapVar events path -> do
+          atomically (modifyTVar' snapVar (const (buildTestSnapshot 3)))
+          h <- connectAgentClient path
+          resp <- sendRequest h "{\"id\":2,\"method\":\"list_items\"}"
+          case resp of
+            A.Object o ->
+              case KM.lookup (AKey.fromText "result") o of
+                Just (A.Array items) -> length items @?= 2
+                _ -> assertFailure "list_items result is not an array"
+            _ -> assertFailure "response not an object",
+      testCase "a validated write is injected into the event BChan" $
+        withAgentServer $ \snapVar events path -> do
+          atomically (modifyTVar' snapVar (const (buildTestSnapshot 9)))
+          h <- connectAgentClient path
+          -- set_filter is a validated write that translates to SetFilterQuery.
+          resp <-
+            sendRequest
+              h
+              "{\"id\":4,\"method\":\"set_filter\",\"params\":{\"query\":\"haskell\"}}"
+          -- response should be ok, result carrying "injected":true
+          case resp of
+            A.Object o -> do
+              KM.lookup (AKey.fromText "ok") o @?= Just (A.Bool True)
+              case KM.lookup (AKey.fromText "result") o of
+                Just (A.Object r) ->
+                  KM.lookup (AKey.fromText "injected") r @?= Just (A.Bool True)
+                _ -> assertFailure "set_filter result missing"
+            _ -> assertFailure "set_filter response not an object"
+          -- The injected event must be a SetFilterQuery "haskell".
+          injected <- readAgentInjected events
+          injected @?= SetFilterQuery "haskell",
+      testCase "wait_version unblocks once the snapshot version advances" $
+        withAgentServer $ \snapVar events path -> do
+          atomically (modifyTVar' snapVar (const (buildTestSnapshot 4)))
+          h <- connectAgentClient path
+          -- Bump the version on a delay so the client has to genuinely wait.
+          _ <- forkIO $ do
+            threadDelay 300000
+            atomically (modifyTVar' snapVar (const (buildTestSnapshot 6)))
+          resp <-
+            sendRequest
+              h
+              "{\"id\":3,\"method\":\"wait_version\",\"params\":{\"after\":4,\"timeout_ms\":5000}}"
+          case resp of
+            A.Object o ->
+              case KM.lookup (AKey.fromText "result") o of
+                Just (A.Object r) ->
+                  KM.lookup (AKey.fromText "version") r @?= Just (A.Number 6)
+                _ -> assertFailure "wait_version result missing"
+            _ -> assertFailure "wait_version response not object",
+      testCase "a second server on the same path fails instead of hijacking" $
+        withAgentServer $ \snapVar events path -> do
+          -- First server is live on `path`. Attempt to start a second one on
+          -- the same path; the probe-then-reclaim must NOT unlink the live
+          -- socket, and the second bind must fail with a genuine error
+          -- rather than stealing ownership.
+          snapVar2 <- newTVarIO emptySnapshot
+          events2 <- newBChan 10
+          let env2 =
+                AgentEnv
+                  { aeSnapshot = snapVar2,
+                    aeInject = \evt -> do
+                      void (writeBChan events2 evt)
+                      pure True,
+                    aeReminderTime = pure (read "2020-01-01 07:00:00 UTC" :: UTCTime)
+                  }
+          -- Ensure server 1 has actually bound the path before we probe, so
+          -- server 2's bind can genuinely be rejected rather than racing
+          -- ahead and winning the path (which would hang us in accept).
+          waitUntilReachable 50 path
+          result <- try @IOException (runAgentServer path env2)
+          assertBool
+            "expected the second server's bind to fail (address already in use)"
+            (isLeft result)
+          -- The original server must still be reachable after the attempt.
+          h <- connectAgentClient path
+          resp <- sendRequest h "{\"id\":99,\"method\":\"get_state\"}"
+          case resp of
+            A.Object o ->
+              KM.lookup (AKey.fromText "ok") o @?= Just (A.Bool True)
+            _ -> assertFailure "original server unreachable after collision attempt"
     ]

@@ -24,8 +24,8 @@ import Control.Concurrent.STM
     readTVar,
     readTVarIO,
   )
-import Control.Exception (SomeException, bracket, finally, try)
-import Control.Monad (forever, void, when)
+import Control.Exception (IOException, SomeException, bracket, finally, try)
+import Control.Monad (forever, void)
 import Data.Aeson (Value, eitherDecodeStrict, encode, object, (.=))
 import qualified Data.ByteString.Char8 as BS
 import qualified Data.ByteString.Lazy.Char8 as BSL
@@ -69,12 +69,13 @@ import Network.Socket
     accept,
     bind,
     close,
+    connect,
     defaultProtocol,
     listen,
     socket,
     socketToHandle,
   )
-import System.Directory (createDirectoryIfMissing, doesFileExist, removeFile)
+import System.Directory (createDirectoryIfMissing, removeFile)
 import System.Environment (lookupEnv)
 import System.FilePath (takeDirectory, (</>))
 import System.IO
@@ -96,6 +97,26 @@ data AgentEnv = AgentEnv
     aeReminderTime :: !(IO UTCTime)
   }
 
+-- | Reclaim a stale socket file left over from a crash or hard kill, but
+-- never touch a socket that a live instance still owns. The probe is a
+-- connect: a live Unix-domain listener accepts it; a stale one (whose owning
+-- process is gone) refuses it with ECONNREFUSED. A live competitor is left
+-- intact so the subsequent 'bind' raises the kernel's canonical
+-- "address already in use" instead of us silently hijacking it.
+reclaimStaleSocket :: FilePath -> IO ()
+reclaimStaleSocket path = do
+  live <-
+    try @IOException $ do
+      probe <- socket AF_UNIX Stream defaultProtocol
+      connect probe (SockAddrUnix path)
+      close probe
+  case live of
+    Right () -> pure () -- a live listener owns the path; leave it for 'bind'
+    Left _ ->
+      -- Not reachable via a listener. Only unlink if a (dead) socket file
+      -- actually exists; a wholly absent path is not ours to remove.
+      void (try @IOException (removeFile path))
+
 -- | Default socket location: @$XDG_RUNTIME_DIR/hocket/control.sock@, falling
 -- back to a per-uid directory under /tmp.
 resolveAgentSocketPath :: IO FilePath
@@ -114,8 +135,7 @@ runAgentServer :: FilePath -> AgentEnv -> IO ()
 runAgentServer path env = do
   createDirectoryIfMissing True (takeDirectory path)
   setFileMode (takeDirectory path) 0o700
-  stale <- doesFileExist path
-  when stale (removeFile path)
+  reclaimStaleSocket path
   clients <- newTVarIO (0 :: Int)
   bracket (socket AF_UNIX Stream defaultProtocol) close $ \sock -> do
     bind sock (SockAddrUnix path)

@@ -234,10 +234,10 @@ import Options.Applicative
     strOption,
     (<**>),
   )
-import System.Directory (XdgDirectory (..), createDirectoryIfMissing, doesFileExist, getXdgDirectory, removeFile)
+import System.Directory (XdgDirectory (..), createDirectoryIfMissing, doesFileExist, getXdgDirectory, removePathForcibly, removeFile)
 import System.Environment (lookupEnv)
 import System.Exit (ExitCode (..), exitFailure)
-import System.FilePath ((</>))
+import System.FilePath ((</>), takeDirectory)
 import System.IO (hClose, hPutStr, hPutStrLn, stderr)
 import System.Process
   ( CreateProcess,
@@ -683,7 +683,19 @@ runTuiApp mAgentOpt = do
         (app tz events (snd <$> mAgent))
         (initialState cred)
     )
-    `finally` for_ mAgent (\(path, _) -> void (try @SomeException (removeFile path)))
+    `finally` cleanupAgentSocket mAgent
+
+-- | On graceful exit, remove the socket file and then the (now-empty)
+-- containing directory so we do not accumulate stale shells. Wrapped in
+-- 'try' so a failed cleanup can never change the exit outcome. All removal
+-- here is best-effort: unlike the collision path in 'runAgentServer', this
+-- runs after our own socket is gone, so there is no live-socket danger.
+cleanupAgentSocket :: Maybe (FilePath, TVar AgentSnapshot) -> IO ()
+cleanupAgentSocket mAgent =
+  for_ mAgent $ \(path, _) ->
+    void . try @SomeException $ do
+      removeFile path
+      removePathForcibly (takeDirectory path)
 
 -- | Bind the agent control socket and keep serving it in the background.
 -- Server failures surface in the TUI status bar instead of killing the app.
