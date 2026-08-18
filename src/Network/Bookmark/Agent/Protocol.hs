@@ -1,3 +1,4 @@
+{-# LANGUAGE LambdaCase #-}
 {-# LANGUAGE OverloadedStrings #-}
 
 -- | The agent control-socket protocol: newline-delimited JSON requests are
@@ -11,6 +12,7 @@ module Network.Bookmark.Agent.Protocol
     FlagAction (..),
     RawRequest (..),
     decodeCmd,
+    encodeCmd,
     serveRead,
     validateWrite,
     stateView,
@@ -143,6 +145,44 @@ decodeCmd method mparams = case method of
         Just (Object o) -> Right o
         Just _ -> Left "params must be an object"
       first T.pack (parseEither f o)
+
+-- | Inverse of 'decodeCmd': a typed command back to its wire method name and
+-- params object. Pure and total, so a client that builds requests with it
+-- cannot produce a method name or enum spelling the server would reject.
+-- Round-tripping through 'decodeCmd' is what keeps the shipped CLI and the
+-- protocol welded together.
+encodeCmd :: AgentCmd -> (Text, Value)
+encodeCmd = \case
+  ARead CmdGetState -> ("get_state", object [])
+  ARead (CmdListItems visOnly flaggedOnly) ->
+    ("list_items", object ["visible_only" .= visOnly, "flagged_only" .= flaggedOnly])
+  ARead (CmdGetItem bid) -> ("get_item", itemIdParams bid)
+  AWait after timeoutMs ->
+    ("wait_version", object ["after" .= after, "timeout_ms" .= timeoutMs])
+  AWrite (CmdSetFlag bid act) ->
+    ("set_flag", object ["id" .= itemIdText bid, "action" .= flagActionToText act])
+  AWrite CmdClearFlags -> ("clear_all_flags", object [])
+  AWrite CmdFlagAllArchive -> ("flag_all_archive", object [])
+  AWrite CmdExecute -> ("execute", object [])
+  AWrite CmdRefresh -> ("refresh", object [])
+  AWrite (CmdSetFilter q) -> ("set_filter", object ["query" .= q])
+  AWrite (CmdSetVideoFilter m) ->
+    ("set_video_filter", object ["mode" .= videoFilterModeToText m])
+  AWrite (CmdSetShowFutureReminders b) ->
+    ("set_show_future_reminders", object ["show" .= b])
+  AWrite (CmdSelectItem bid) -> ("select_item", itemIdParams bid)
+  AWrite (CmdOpenItem bid) -> ("open_item", itemIdParams bid)
+  AWrite (CmdSetStatus t) -> ("set_status", object ["text" .= t])
+  where
+    itemIdParams bid = object ["id" .= itemIdText bid]
+
+-- | The wire spelling of a flag action, as accepted by 'decodeCmd'.
+flagActionToText :: FlagAction -> Text
+flagActionToText = \case
+  FlagArchive -> "archive"
+  FlagReminder -> "reminder"
+  FlagRemoveReminder -> "remove_reminder"
+  FlagNone -> "none"
 
 -- | Serve a read command purely from the snapshot.
 serveRead :: AgentSnapshot -> ReadCmd -> Either Text Value

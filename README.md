@@ -258,14 +258,43 @@ can observe and drive the running TUI. See
 - **Visibility**: the header shows `[agent]` while at least one client is
   connected; flags staged by an agent are ordinary flags you can review
   with `J`/`K`, drop with `u`, and execute with `X`.
-- **Security**: the socket is created `0600` in a `0700` directory, and the
-  Raindrop token is never exposed over it.
+- **Security**: the socket file is created `0600`, the containing directory
+  is created `0700` when hocket creates it (a pre-existing directory is left
+  untouched), and the Raindrop token is never exposed over it.
 
-Quick smoke test from a shell:
+### Talking to it
+
+`hocket agent` is the shipped client: one subcommand per protocol method,
+one line of JSON on stdout, exit 0 for `ok: true`, 1 for `ok: false`, 2 when
+the socket is unreachable.
+
+```bash
+hocket agent get_state | jq .result.counts
+hocket agent list_items --flagged-only
+hocket agent set_flag 123 --action archive
+hocket agent wait_version --after 42 --timeout-ms 30000
+```
+
+Pass `--socket-path PATH` for a non-default socket, and `hocket agent
+--help` for the full method list.
+
+Quick smoke test without the binary:
 
 ```bash
 echo '{"id":1,"method":"get_state"}' | socat - UNIX-CONNECT:$XDG_RUNTIME_DIR/hocket/control.sock
 ```
+
+### For AI agents
+
+`skills/hocket-rpc/SKILL.md` is a self-contained operating guide for the
+socket — methods, watch loop, staging recipes and the ways it bites. Install
+it for Claude Code with:
+
+```bash
+cp -r skills/hocket-rpc ~/.claude/skills/
+```
+
+The full protocol specification lives in [`docs/RPC.md`](docs/RPC.md).
 
 ## Reminder Management
 

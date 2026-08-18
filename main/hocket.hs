@@ -16,6 +16,7 @@ module Main
   )
 where
 
+import AgentClient (runAgentCommand)
 import AgentServer (AgentEnv (..), resolveAgentSocketPath, runAgentServer)
 import Brick
   ( App (..),
@@ -110,6 +111,7 @@ import Events
     lockFilterEvt,
     remindersRemovedEvt,
     remindersSetEvt,
+    setAgentErrorEvt,
     setStatusEvt,
     shiftItemEvt,
     shiftItemReminderEvt,
@@ -124,12 +126,18 @@ import Graphics.Vty (Event (EvKey), Key (KChar, KDown, KUp))
 import qualified Graphics.Vty as Vty
 import Graphics.Vty.Input.Events (Key (KBS, KEnter, KEsc))
 import Graphics.Vty.Platform.Unix (mkVty)
+import Network.Bookmark.Agent.Protocol
+  ( AgentCmd (..),
+    FlagAction (..),
+    ReadCmd (..),
+    WriteCmd (..),
+  )
 import Network.Bookmark.Agent.Snapshot (AgentSnapshot, asVersion, emptySnapshot, takeSnapshot)
 import Network.Bookmark.Types
   ( BookmarkCredentials,
     BookmarkItem,
     BookmarkItemBatch (..),
-    BookmarkItemId,
+    BookmarkItemId (..),
     BookmarkRequest (AddBookmark, BatchArchiveBookmarks, RemoveReminder, RetrieveBookmarks, SetReminder),
     PendingAction (..),
     RaindropCollectionId (RaindropCollectionId),
@@ -162,6 +170,7 @@ import Network.Bookmark.Ui.State
     enterFilterMode,
     focusRing,
     hsAgentClients,
+    hsAgentError,
     hsContents,
     hsCredentials,
     hsFilterActive,
@@ -182,6 +191,7 @@ import Network.Bookmark.Ui.State
     removeItems,
     removeReminderFromItems,
     setAgentClients,
+    setAgentError,
     setAllFlagsToArchive,
     setFilterQuery,
     setPendingAction,
@@ -217,8 +227,10 @@ import Options.Applicative
     ParserInfo,
     argument,
     command,
+    eitherReader,
     execParser,
     flag,
+    flag',
     fullDesc,
     header,
     help,
@@ -228,16 +240,21 @@ import Options.Applicative
     long,
     many,
     metavar,
+    option,
     optional,
     progDesc,
+    showDefault,
     str,
     strOption,
+    switch,
+    value,
     (<**>),
   )
-import System.Directory (XdgDirectory (..), createDirectoryIfMissing, doesFileExist, getXdgDirectory, removePathForcibly, removeFile)
+import qualified Options.Applicative as Opt
+import System.Directory (XdgDirectory (..), createDirectoryIfMissing, doesFileExist, getXdgDirectory, removeFile, removePathForcibly)
 import System.Environment (lookupEnv)
 import System.Exit (ExitCode (..), exitFailure)
-import System.FilePath ((</>), takeDirectory)
+import System.FilePath (takeDirectory, (</>))
 import System.IO (hClose, hPutStr, hPutStrLn, stderr)
 import System.Process
   ( CreateProcess,
@@ -254,6 +271,8 @@ makeLensesFor [("std_in", "stdIn"), ("std_err", "stdErr"), ("std_out", "stdOut")
 data HocketCommand
   = RunTUI !(Maybe AgentSocketOpt)
   | AddBookmarkCmd !Text !(Maybe Text) ![Text]
+  | -- | Speak one request to a running TUI's control socket and exit.
+    AgentCall !(Maybe FilePath) !AgentCmd
   deriving (Show, Eq)
 
 -- | Where to bind the agent control socket, when enabled at all.
@@ -290,8 +309,105 @@ addCommandParser =
         <*> optional (strOption (long "collection" <> help "Collection ID (defaults to -1 for unsorted)"))
         <*> many (strOption (long "tag" <> help "Tags to add"))
 
+agentCommandParser :: Mod CommandFields HocketCommand
+agentCommandParser =
+  command
+    "agent"
+    ( info
+        (AgentCall <$> socketPathParser <*> hsubparser agentMethods)
+        (progDesc "Send one control-socket request to a running TUI and print the reply")
+    )
+  where
+    socketPathParser =
+      optional
+        ( strOption
+            ( long "socket-path"
+                <> metavar "PATH"
+                <> help "Control socket to talk to (default: $XDG_RUNTIME_DIR/hocket/control.sock)"
+            )
+        )
+
+-- | One sub-subcommand per protocol method, named exactly as the method is
+-- named on the wire, so anything read in docs/RPC.md can be typed verbatim.
+-- Each parser yields an 'AgentCmd', which makes an ill-formed request
+-- unrepresentable rather than a runtime "unknown method".
+agentMethods :: Mod CommandFields AgentCmd
+agentMethods =
+  mconcat
+    [ meth "get_state" "Header summary and items, from the snapshot mirror" (pure (ARead CmdGetState)),
+      meth "list_items" "List items (visible ones only, unless --all)" listItemsP,
+      meth "get_item" "Fetch one item by id (hidden items included)" (ARead . CmdGetItem <$> itemIdArg),
+      meth "wait_version" "Long-poll until the state version passes --after" waitP,
+      meth "set_flag" "Stage a pending action on one item" setFlagP,
+      meth "clear_all_flags" "Drop every staged action (the 'u' key)" (pure (AWrite CmdClearFlags)),
+      meth "flag_all_archive" "Stage archive on every item" (pure (AWrite CmdFlagAllArchive)),
+      meth "execute" "Execute the staged batch (the 'X' key)" (pure (AWrite CmdExecute)),
+      meth "refresh" "Resync from Raindrop (the 'r' key)" (pure (AWrite CmdRefresh)),
+      meth "set_filter" "Replace the live filter query" setFilterP,
+      meth "set_video_filter" "Set the video filter" (AWrite . CmdSetVideoFilter <$> videoModeArg),
+      meth "set_show_future_reminders" "Show or hide future reminders" showFutureP,
+      meth "select_item" "Move the TUI selection (item must be visible)" (AWrite . CmdSelectItem <$> itemIdArg),
+      meth "open_item" "Open an item in the browser" (AWrite . CmdOpenItem <$> itemIdArg),
+      meth "set_status" "Write 'agent: TEXT' to the shared status line" setStatusP
+    ]
+  where
+    meth n d p = command n (info p (progDesc d))
+    itemIdArg = BookmarkItemId <$> argument str (metavar "ID")
+    listItemsP =
+      fmap ARead $
+        CmdListItems . not
+          <$> switch (long "all" <> help "Include items hidden by the current filters")
+          <*> switch (long "flagged-only" <> help "Only items with a staged action")
+    waitP =
+      AWait
+        <$> option Opt.auto (long "after" <> metavar "N" <> help "Return once the version exceeds N")
+        <*> option
+          Opt.auto
+          ( long "timeout-ms"
+              <> metavar "MS"
+              <> value 10000
+              <> showDefault
+              <> help "Server-side timeout, clamped to [0, 60000]"
+          )
+    setFlagP =
+      fmap AWrite $
+        CmdSetFlag
+          <$> itemIdArg
+          <*> option
+            (eitherReader flagActionReader)
+            ( long "action"
+                <> metavar "ACTION"
+                <> help "archive | reminder | remove_reminder | none"
+            )
+    setFilterP = AWrite . CmdSetFilter <$> argument str (metavar "QUERY")
+    setStatusP = AWrite . CmdSetStatus <$> argument str (metavar "TEXT")
+    showFutureP =
+      AWrite . CmdSetShowFutureReminders
+        <$> ( flag' True (long "show" <> help "Show future reminders")
+                <|> flag' False (long "hide" <> help "Hide future reminders")
+            )
+    videoModeArg =
+      argument
+        (eitherReader videoModeReader)
+        (metavar "MODE" <> help "none | only_videos | hide_videos")
+
+flagActionReader :: String -> Either String FlagAction
+flagActionReader = \case
+  "archive" -> Right FlagArchive
+  "reminder" -> Right FlagReminder
+  "remove_reminder" -> Right FlagRemoveReminder
+  "none" -> Right FlagNone
+  other -> Left ("unknown flag action: " <> other <> " (want archive | reminder | remove_reminder | none)")
+
+videoModeReader :: String -> Either String VideoFilterMode
+videoModeReader = \case
+  "none" -> Right NoVideoFilter
+  "only_videos" -> Right ShowOnlyVideos
+  "hide_videos" -> Right HideVideos
+  other -> Left ("unknown video filter mode: " <> other <> " (want none | only_videos | hide_videos)")
+
 hocketCommandParser :: Parser HocketCommand
-hocketCommandParser = hsubparser (tuiCommandParser <> addCommandParser)
+hocketCommandParser = hsubparser (tuiCommandParser <> addCommandParser <> agentCommandParser)
 
 opts :: ParserInfo HocketCommand
 opts =
@@ -600,6 +716,7 @@ uiCommandEventHandler es (OpenItemById bid) = do
   s <- use id
   liftIO . for_ (s ^. hsContents . at bid) $ \(_, bit) -> es `trigger` browseItemEvt bit
 uiCommandEventHandler _ (SetAgentClients n) = id %= setAgentClients n
+uiCommandEventHandler _ (SetAgentError e) = id %= setAgentError e
 uiCommandEventHandler es (BrowseItem bit) = do
   res <- liftIO . try @SomeException $ browseItem "firefox '%s'" (URL . T.unpack $ view biLink bit)
   case res of
@@ -714,12 +831,16 @@ startAgentServer events opt = do
   _ <- async $ do
     r <- try @SomeException (runAgentServer path env)
     case r of
-      Left e ->
+      Left e -> do
+        -- The status line is single-lane and gets overwritten by the very
+        -- next status write (the startup fetch, typically within the same
+        -- second), so also latch the failure into the header.
         void
           ( writeBChanNonBlocking
               events
               (setStatusEvt (Just ("agent socket failed: " <> T.pack (show e))))
           )
+        void (writeBChanNonBlocking events (setAgentErrorEvt (Just (T.pack (show e)))))
       Right () -> pure ()
   pure (path, snapVar)
 
@@ -752,6 +873,7 @@ main = do
   case cmd of
     RunTUI mAgentOpt -> runTuiApp mAgentOpt
     AddBookmarkCmd url mCollection tags -> runAddCommand url mCollection tags
+    AgentCall mpath agentCmd -> runAgentCommand mpath agentCmd
 
 app :: TimeZone -> BChan HocketEvent -> Maybe (TVar AgentSnapshot) -> App HocketState HocketEvent Name
 app tz events mSnapVar =
@@ -821,7 +943,11 @@ drawGui tz s = [w]
     w =
       vBox
         [ hBarWithHints
-            ( (if s ^. hsAgentClients > 0 then "[agent] " else "")
+            ( ( case (s ^. hsAgentError, s ^. hsAgentClients > 0) of
+                  (Just _, _) -> "[agent: socket failed] "
+                  (Nothing, True) -> "[agent] "
+                  (Nothing, False) -> ""
+              )
                 <> "Hocket"
                 <> ( case s ^. hsVideoFilter of
                        NoVideoFilter -> ""

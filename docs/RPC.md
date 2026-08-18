@@ -99,10 +99,23 @@ strictly request/response, one in flight at a time per connection.
 A client that sends concatenated multiple lines per write is handled (each
 line is a separate request). A blank/whitespace-only line is skipped.
 
+> **`nc` note.** With OpenBSD/`-U` netcat, an interactive one-shot like
+> `echo '{"id":1,"method":"get_state"}' | nc -U $SOCK` will *not* exit by
+> itself: by default `nc` keeps the connection open waiting for more input
+> after EOF, so the shell hangs after the response. Pass `-N` (shutdown on
+> EOF of input) to make it close once the server replies:
+> `echo '{"id":1,"method":"get_state"}' | nc -N -U $SOCK`. The `socat`
+> lines in §10 close cleanly on their own.
+
 ### 2.3 Permission and ownership
 
-- The containing directory is created `0700`.
-- The socket file itself is created `0600`.
+- The containing directory is created `0700` **when hocket creates it**. A
+  directory that already exists is left exactly as it is: with
+  `--agent-socket-path /tmp/x.sock` the containing directory is `/tmp`, and
+  re-permissioning it would either fail outright or lock down a directory
+  that is none of hocket's business.
+- The socket file itself is always created `0600`. This, not the directory
+  mode, is what gates access.
 - The socket is owned by whichever user launched the TUI.
 
 Only the owning user (and root) may connect. This is the first line of
@@ -583,6 +596,31 @@ echo '{"id":5,"method":"execute"}' | socat - UNIX-CONNECT:$SOCK
 line, reusing the connection across requests rather than reconnecting like
 the one-shot `socat` lines above.)
 
+### The shipped client
+
+`hocket agent` speaks this protocol without hand-assembled JSON. It has one
+subcommand per method, named exactly as the method is named on the wire, and
+builds requests from the same typed `AgentCmd` the server decodes into
+(`encodeCmd` in `Protocol.hs` is the inverse of `decodeCmd`, round-trip
+tested), so a CLI invocation cannot produce an unknown method or a
+misspelled enum:
+
+```bash
+hocket agent get_state
+hocket agent set_flag 101 --action archive
+hocket agent wait_version --after 43 --timeout-ms 30000
+hocket agent execute
+```
+
+It prints the raw response line on stdout and exits 0 on `ok: true`, 1 on
+`ok: false`, and 2 when the socket cannot be reached. Each invocation is a
+fresh one-shot connection, so a long-running client should still speak the
+protocol directly over one persistent connection.
+
+For an agent-facing summary of the whole surface — methods, the watch loop,
+staging recipes, failure modes — see `skills/hocket-rpc/SKILL.md`. This
+document remains the normative spec.
+
 ---
 
 ## 11. Implementation map
@@ -591,6 +629,7 @@ the one-shot `socat` lines above.)
 |---|---|---|
 | Protocol decode / validate / serve | `src/Network/Bookmark/Agent/Protocol.hs` | `decodeCmd`, `validateWrite`, `serveRead`, `stateView`; total & pure |
 | Snapshot mirror + JSON | `src/Network/Bookmark/Agent/Snapshot.hs` | `AgentSnapshot`, `takeSnapshot`, `ToJSON` |
+| Client (CLI + IO shell) | `main/AgentClient.hs` | `callAgent`, `runAgentCommand`; requests built via `encodeCmd` |
 | Socket server (IO shell) | `main/AgentServer.hs` | `runAgentServer`, `resolveAgentSocketPath`, `reclaimStaleSocket`, `handleLine` / `dispatch` / `toEvent` |
 | Event types + injection | `main/Events.hs` | agent write events; `setAgentClientsEvt` |
 | Wiring, rendering mirror, cleanup | `main/hocket.hs` | `startAgentServer`, `app` snapshot rebuild, `cleanupAgentSocket` |

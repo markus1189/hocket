@@ -25,7 +25,7 @@ import Control.Concurrent.STM
     readTVarIO,
   )
 import Control.Exception (IOException, SomeException, bracket, finally, try)
-import Control.Monad (forever, void)
+import Control.Monad (forever, unless, void)
 import Data.Aeson (Value, eitherDecodeStrict, encode, object, (.=))
 import qualified Data.ByteString.Char8 as BS
 import qualified Data.ByteString.Lazy.Char8 as BSL
@@ -75,7 +75,7 @@ import Network.Socket
     socket,
     socketToHandle,
   )
-import System.Directory (createDirectoryIfMissing, removeFile)
+import System.Directory (createDirectoryIfMissing, doesDirectoryExist, removeFile)
 import System.Environment (lookupEnv)
 import System.FilePath (takeDirectory, (</>))
 import System.IO
@@ -133,8 +133,16 @@ resolveAgentSocketPath = do
 -- TUI status bar).
 runAgentServer :: FilePath -> AgentEnv -> IO ()
 runAgentServer path env = do
-  createDirectoryIfMissing True (takeDirectory path)
-  setFileMode (takeDirectory path) 0o700
+  let dir = takeDirectory path
+  dirExisted <- doesDirectoryExist dir
+  createDirectoryIfMissing True dir
+  -- Tighten the directory only when we are the ones who created it. An
+  -- explicit --agent-socket-path may point into a directory that is none of
+  -- our business: chmodding a shared one (/tmp) fails outright and kills the
+  -- server, and chmodding one the user owns ($HOME) would silently lock it
+  -- down. The socket file itself is always 0600, which is what actually
+  -- gates access.
+  unless dirExisted (setFileMode dir 0o700)
   reclaimStaleSocket path
   clients <- newTVarIO (0 :: Int)
   bracket (socket AF_UNIX Stream defaultProtocol) close $ \sock -> do

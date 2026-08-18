@@ -44,6 +44,8 @@ module Network.Bookmark.Ui.State
     setShowFutureReminders,
     setAgentClients,
     hsAgentClients,
+    setAgentError,
+    hsAgentError,
     clearAllFlags,
     clearFlagsForItems,
     setAllFlagsToArchive,
@@ -118,7 +120,10 @@ data HocketState = HocketState
     _hsVideoFilter :: !VideoFilterMode,
     _hsFilterActive :: !Bool,
     _hsFilterQuery :: !Text,
-    _hsAgentClients :: !Int
+    _hsAgentClients :: !Int,
+    -- | Set when the agent socket server died; the shared status line is
+    -- overwritten within a frame, so the header carries this instead.
+    _hsAgentError :: !(Maybe Text)
   }
 
 makeLenses ''HocketState
@@ -221,6 +226,7 @@ initialState creds =
     False
     T.empty
     0
+    Nothing
 
 insertItem :: BookmarkItem -> HocketState -> HocketState
 insertItem bit s =
@@ -278,6 +284,9 @@ setShowFutureReminders b = hsShowFutureReminders .~ b
 
 setAgentClients :: Int -> HocketState -> HocketState
 setAgentClients n = hsAgentClients .~ n
+
+setAgentError :: Maybe Text -> HocketState -> HocketState
+setAgentError e = hsAgentError .~ e
 
 setAllFlags :: PendingAction -> HocketState -> HocketState
 setAllFlags action = hsContents . mapped . _1 .~ action

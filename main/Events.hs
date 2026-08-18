@@ -35,6 +35,7 @@ module Events
     selectItemEvt,
     openItemByIdEvt,
     setAgentClientsEvt,
+    setAgentErrorEvt,
   )
 where
 
@@ -82,6 +83,7 @@ data UiCommand
   | SelectItem !BookmarkItemId
   | OpenItemById !BookmarkItemId
   | SetAgentClients !Int
+  | SetAgentError !(Maybe Text)
   deriving (Show, Eq)
 
 data FilterInput
@@ -187,3 +189,6 @@ openItemByIdEvt bid = HocketUi (OpenItemById bid)
 
 setAgentClientsEvt :: Int -> HocketEvent
 setAgentClientsEvt n = HocketUi (SetAgentClients n)
+
+setAgentErrorEvt :: Maybe Text -> HocketEvent
+setAgentErrorEvt e = HocketUi (SetAgentError e)

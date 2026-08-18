@@ -61,7 +61,8 @@ executable hocket
   ghc-options:         -Wall -threaded -Werror
   main-is:             hocket.hs
   hs-source-dirs:      main
-  other-modules:       AgentServer
+  other-modules:       AgentClient
+                     , AgentServer
                      , Events
   build-depends:       aeson
                      , async
@@ -105,7 +106,8 @@ test-suite test
   type:                exitcode-stdio-1.0
   hs-source-dirs:      test, main
   main-is:             test.hs
-  other-modules:       AgentServer
+  other-modules:       AgentClient
+                     , AgentServer
                      , Events
   build-depends:       base
                      , aeson

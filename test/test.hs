@@ -2,6 +2,7 @@
 {-# LANGUAGE ScopedTypeVariables #-}
 {-# LANGUAGE TypeApplications #-}
 
+import AgentClient (callAgent)
 import AgentServer (AgentEnv (..), runAgentServer)
 import Brick.BChan (BChan, newBChan, readBChan, writeBChan)
 import qualified Brick.Widgets.List as L
@@ -9,16 +10,16 @@ import Control.Concurrent (forkIO, threadDelay)
 import Control.Concurrent.Async (withAsync)
 import Control.Concurrent.STM (TVar, atomically, modifyTVar', newTVarIO)
 import Control.Exception (IOException, try)
-import Control.Monad (void)
 import Control.Lens (ix, view, _1, _2)
 import Control.Lens.Operators
+import Control.Monad (void)
 import qualified Data.Aeson as A
+import qualified Data.Aeson.Key as AKey
+import qualified Data.Aeson.KeyMap as KM
 import Data.Aeson.Types (parseMaybe)
 import qualified Data.ByteString.Char8 as BSC
 import qualified Data.ByteString.Lazy.Char8 as LBS
 import Data.Either (isLeft)
-import qualified Data.Aeson.Key as AKey
-import qualified Data.Aeson.KeyMap as KM
 import Data.Foldable (for_)
 import Data.List (find, head, intercalate, isInfixOf, last)
 import Data.Map (Map)
@@ -49,7 +50,7 @@ import Network.Socket
     socket,
     socketToHandle,
   )
-import System.Directory (getTemporaryDirectory, removeFile)
+import System.Directory (createDirectoryIfMissing, getTemporaryDirectory, removeDirectoryRecursive, removeFile)
 import System.FilePath ((</>))
 import System.IO
   ( BufferMode (LineBuffering),
@@ -58,6 +59,7 @@ import System.IO
     hFlush,
     hSetBuffering,
   )
+import System.Posix.Files (fileMode, getFileStatus, setFileMode)
 import System.Posix.Process (getProcessID)
 import System.Posix.Time (epochTime)
 import Test.Tasty
@@ -633,12 +635,46 @@ agentSnapshotTests =
               (not ("super-secret-token" `isInfixOf` encoded))
     ]
 
+-- | The CLI builds requests with 'encodeCmd' and the server reads them with
+-- 'decodeCmd'; if the two ever disagree, `hocket agent` starts emitting
+-- requests the socket rejects. This asserts they are inverses.
+roundTripsCmd :: AgentCmd -> IO ()
+roundTripsCmd cmd =
+  let (method, params) = encodeCmd cmd
+   in decodeCmd method (Just params) @?= Right cmd
+
 agentProtocolTests :: TestTree
 agentProtocolTests =
   testGroup
     "Agent protocol"
     [ testCase "decodeCmd: get_state" $
         decodeCmd "get_state" Nothing @?= Right (ARead CmdGetState),
+      testCase "encodeCmd round-trips through decodeCmd for every command" $
+        mapM_
+          roundTripsCmd
+          [ ARead CmdGetState,
+            ARead (CmdListItems True False),
+            ARead (CmdListItems False True),
+            ARead (CmdGetItem (BookmarkItemId "ag1")),
+            AWait 12 30000,
+            AWrite (CmdSetFlag (BookmarkItemId "ag1") FlagArchive),
+            AWrite (CmdSetFlag (BookmarkItemId "ag1") FlagReminder),
+            AWrite (CmdSetFlag (BookmarkItemId "ag1") FlagRemoveReminder),
+            AWrite (CmdSetFlag (BookmarkItemId "ag1") FlagNone),
+            AWrite CmdClearFlags,
+            AWrite CmdFlagAllArchive,
+            AWrite CmdExecute,
+            AWrite CmdRefresh,
+            AWrite (CmdSetFilter "haskell"),
+            AWrite (CmdSetVideoFilter NoVideoFilter),
+            AWrite (CmdSetVideoFilter ShowOnlyVideos),
+            AWrite (CmdSetVideoFilter HideVideos),
+            AWrite (CmdSetShowFutureReminders True),
+            AWrite (CmdSetShowFutureReminders False),
+            AWrite (CmdSelectItem (BookmarkItemId "ag1")),
+            AWrite (CmdOpenItem (BookmarkItemId "ag1")),
+            AWrite (CmdSetStatus "hello")
+          ],
       testCase "decodeCmd: list_items defaults to visible-only" $
         decodeCmd "list_items" Nothing @?= Right (ARead (CmdListItems True False)),
       testCase "decodeCmd: wait_version defaults its timeout" $
@@ -909,6 +945,64 @@ agentServerIntegrationTests =
                   KM.lookup (AKey.fromText "version") r @?= Just (A.Number 6)
                 _ -> assertFailure "wait_version result missing"
             _ -> assertFailure "wait_version response not object",
+      testCase "the shipped client reads state over the socket" $
+        withAgentServer $ \snapVar _events path -> do
+          atomically (modifyTVar' snapVar (const (buildTestSnapshot 11)))
+          res <- callAgent path (ARead CmdGetState)
+          case res of
+            Left err -> assertFailure (T.unpack err)
+            Right (A.Object o) -> do
+              KM.lookup (AKey.fromText "ok") o @?= Just (A.Bool True)
+              case KM.lookup (AKey.fromText "result") o of
+                Just (A.Object r) ->
+                  KM.lookup (AKey.fromText "version") r @?= Just (A.Number 11)
+                _ -> assertFailure "no result object"
+            Right _ -> assertFailure "client response not an object",
+      testCase "the shipped client injects a validated write" $
+        withAgentServer $ \snapVar events path -> do
+          atomically (modifyTVar' snapVar (const (buildTestSnapshot 12)))
+          res <- callAgent path (AWrite (CmdSetFlag (BookmarkItemId "in-1") FlagArchive))
+          case res of
+            Left err -> assertFailure (T.unpack err)
+            Right (A.Object o) ->
+              KM.lookup (AKey.fromText "ok") o @?= Just (A.Bool True)
+            Right _ -> assertFailure "client response not an object"
+          injected <- readAgentInjected events
+          injected @?= SetPendingAction (BookmarkItemId "in-1") ToBeArchived,
+      testCase "the shipped client reports an unreachable socket" $ do
+        res <- callAgent "/nonexistent/hocket-agent-absent.sock" (ARead CmdGetState)
+        assertBool "expected a transport error" (isLeft res),
+      testCase "binding into a pre-existing directory leaves its mode alone" $ do
+        -- An explicit --agent-socket-path may point into a directory we did
+        -- not create (/tmp, $HOME). Tightening it to 0700 would either fail
+        -- outright (killing the server) or silently lock down a directory
+        -- that is none of our business.
+        tmp <- getTemporaryDirectory
+        pid <- getProcessID
+        e <- epochTime
+        let dir = tmp </> ("hocket-mode-" ++ show pid ++ "-" ++ show e)
+            path = dir </> "control.sock"
+        createDirectoryIfMissing True dir
+        setFileMode dir 0o755
+        snapVar <- newTVarIO emptySnapshot
+        atomically (modifyTVar' snapVar (const (buildTestSnapshot 1)))
+        events <- newBChan 10
+        let env =
+              AgentEnv
+                { aeSnapshot = snapVar,
+                  aeInject = \evt -> do
+                    void (writeBChan events evt)
+                    pure True,
+                  aeReminderTime = pure (read "2020-01-01 07:00:00 UTC" :: UTCTime)
+                }
+        withAsync (runAgentServer path env) $ \_ -> do
+          waitUntilReachable 50 path
+          st <- getFileStatus dir
+          (fileMode st `mod` 0o1000) @?= 0o755
+          -- and the server is genuinely serving from that directory
+          res <- callAgent path (ARead CmdGetState)
+          assertBool "expected a response from the server" (not (isLeft res))
+        removeDirectoryRecursive dir,
       testCase "a second server on the same path fails instead of hijacking" $
         withAgentServer $ \snapVar events path -> do
           -- First server is live on `path`. Attempt to start a second one on

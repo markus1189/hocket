@@ -31,9 +31,11 @@ Hocket is a terminal-based bookmark manager for Raindrop.io built with Haskell a
 - **src/Network/Bookmark/Ui/State.hs** - Application state management and UI state synchronization
 - **src/Network/Bookmark/Ui/Widgets.hs** - Reusable UI helper functions
 - **main/AgentServer.hs** - Unix-domain socket server (IO shell) for the agent control socket
-- **src/Network/Bookmark/Agent/Protocol.hs** - Agent control-socket protocol: command decode, write validation, read serving
+- **main/AgentClient.hs** - Client for the agent control socket, exposed as the `hocket agent` subcommand
+- **src/Network/Bookmark/Agent/Protocol.hs** - Agent control-socket protocol: command decode/encode, write validation, read serving
 - **src/Network/Bookmark/Agent/Snapshot.hs** - Serializable read-only mirror of TUI state for the agent socket
 - **docs/RPC.md** - Full spec of the agent control-socket protocol
+- **skills/hocket-rpc/SKILL.md** - Agent-facing operating guide for the control socket (install with `cp -r skills/hocket-rpc ~/.claude/skills/`)
 
 ### Architecture Patterns
 - **Event-driven async operations** - UI remains responsive during network calls using BChan and async
