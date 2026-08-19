@@ -253,7 +253,7 @@ can observe and drive the running TUI. See
   keystrokes): `set_flag` (`action`: `archive` | `reminder` |
   `remove_reminder` | `none`), `clear_all_flags`, `flag_all_archive`,
   `execute`, `refresh`, `set_filter`, `set_video_filter`,
-  `set_show_future_reminders`, `select_item`, `open_item`, and
+  `set_show_future_reminders`, `select_item`, `open_item`, `open_and_flag`, and
   `set_status` (shows `agent: <text>` in the status bar).
 - **Visibility**: the header shows `[agent]` while at least one client is
   connected; flags staged by an agent are ordinary flags you can review

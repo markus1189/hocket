@@ -348,6 +348,7 @@ agentMethods =
       meth "set_show_future_reminders" "Show or hide future reminders" showFutureP,
       meth "select_item" "Move the TUI selection (item must be visible)" (AWrite . CmdSelectItem <$> itemIdArg),
       meth "open_item" "Open an item in the browser" (AWrite . CmdOpenItem <$> itemIdArg),
+      meth "open_and_flag" "Open in browser AND stage for archive (deterministic set)" (AWrite . CmdOpenAndFlag <$> itemIdArg),
       meth "set_status" "Write 'agent: TEXT' to the shared status line" setStatusP
     ]
   where
@@ -715,6 +716,14 @@ uiCommandEventHandler _ (SelectItem bid) = do
 uiCommandEventHandler es (OpenItemById bid) = do
   s <- use id
   liftIO . for_ (s ^. hsContents . at bid) $ \(_, bit) -> es `trigger` browseItemEvt bit
+uiCommandEventHandler es (OpenAndFlagItem bid) = do
+  s <- use id
+  case s ^. hsContents . at bid of
+    Just (_, bit) -> do
+      id %= setPendingAction bid ToBeArchived
+      id %= syncForRender
+      liftIO (es `trigger` browseItemEvt bit)
+    Nothing -> pure ()
 uiCommandEventHandler _ (SetAgentClients n) = id %= setAgentClients n
 uiCommandEventHandler _ (SetAgentError e) = id %= setAgentError e
 uiCommandEventHandler es (BrowseItem bit) = do

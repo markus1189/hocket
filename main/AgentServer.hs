@@ -37,6 +37,7 @@ import Events
     clearAllFlagsEvt,
     executeBatchEvt,
     fetchItemsEvt,
+    openAndFlagEvt,
     openItemByIdEvt,
     selectItemEvt,
     setAgentClientsEvt,
@@ -236,4 +237,5 @@ toEvent env = \case
   CmdSetShowFutureReminders b -> pure (setShowFutureRemindersEvt b)
   CmdSelectItem bid -> pure (selectItemEvt bid)
   CmdOpenItem bid -> pure (openItemByIdEvt bid)
+  CmdOpenAndFlag bid -> pure (openAndFlagEvt bid)
   CmdSetStatus t -> pure (setStatusEvt (Just ("agent: " <> t)))

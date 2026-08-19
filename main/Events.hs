@@ -34,6 +34,7 @@ module Events
     setShowFutureRemindersEvt,
     selectItemEvt,
     openItemByIdEvt,
+    openAndFlagEvt,
     setAgentClientsEvt,
     setAgentErrorEvt,
   )
@@ -82,6 +83,7 @@ data UiCommand
   | SetShowFutureReminders !Bool
   | SelectItem !BookmarkItemId
   | OpenItemById !BookmarkItemId
+  | OpenAndFlagItem !BookmarkItemId
   | SetAgentClients !Int
   | SetAgentError !(Maybe Text)
   deriving (Show, Eq)
@@ -186,6 +188,9 @@ selectItemEvt bid = HocketUi (SelectItem bid)
 
 openItemByIdEvt :: BookmarkItemId -> HocketEvent
 openItemByIdEvt bid = HocketUi (OpenItemById bid)
+
+openAndFlagEvt :: BookmarkItemId -> HocketEvent
+openAndFlagEvt bid = HocketUi (OpenAndFlagItem bid)
 
 setAgentClientsEvt :: Int -> HocketEvent
 setAgentClientsEvt n = HocketUi (SetAgentClients n)

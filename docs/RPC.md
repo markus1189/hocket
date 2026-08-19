@@ -41,7 +41,8 @@ For the operations guide, see the *Agent Control Socket* section of the
   - [6.9 `set_show_future_reminders`](#69-set_show_future_reminders)
   - [6.10 `select_item`](#610-select_item)
   - [6.11 `open_item`](#611-open_item)
-  - [6.12 `set_status`](#612-set_status)
+  - [6.12 `open_and_flag`](#612-open_and_flag)
+  - [6.13 `set_status`](#613-set_status)
 - [7. Concurrency model](#7-concurrency-model)
 - [8. Security](#8-security)
 - [9. Design constraints](#9-design-constraints)
@@ -473,9 +474,30 @@ params: { "id": "123" }
 ```
 
 Opens the item in the browser. Any item in the contents map is accepted
-(need not be visible).
+(need not be visible). This is browse-only; to also stage archive, use
+[`open_and_flag`](#612-open_and_flag).
 
-### 6.12 `set_status`
+### 6.12 `open_and_flag`
+
+```
+params: { "id": "123" }
+```
+
+Opens the item in the browser **and** stages it for archive in one atomic
+composite — the agent analogue of the GUI Enter key (minus the filter-lock
+branch and cursor-move).
+
+- The flag is a deterministic **set**, not a toggle: the pending action is
+  always set to `ToBeArchived` regardless of any prior action. An agent
+  cannot un-flag via this command (see `set_flag` with `action: none` for
+  that).
+- `open_item` remains browse-only; use this command when the intent is
+  explicitly "browse and stage".
+- Single write, single render, single `version` bump — the browser side
+effect and the flag land in one atomic unit, so `wait_version` observes a
+consistent post-state with no intermediate partial snapshot.
+
+### 6.13 `set_status`
 
 ```
 params: { "text": "hello" }

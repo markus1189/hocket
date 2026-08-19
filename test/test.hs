@@ -673,6 +673,7 @@ agentProtocolTests =
             AWrite (CmdSetShowFutureReminders False),
             AWrite (CmdSelectItem (BookmarkItemId "ag1")),
             AWrite (CmdOpenItem (BookmarkItemId "ag1")),
+            AWrite (CmdOpenAndFlag (BookmarkItemId "ag1")),
             AWrite (CmdSetStatus "hello")
           ],
       testCase "decodeCmd: list_items defaults to visible-only" $
@@ -753,7 +754,16 @@ agentProtocolTests =
       testCase "validateWrite: selecting a filtered-out item is rejected" $
         assertBool
           "expected Left"
-          (isLeft (validateWrite agentSnapWithRem (CmdSelectItem (BookmarkItemId "ag3"))))
+          (isLeft (validateWrite agentSnapWithRem (CmdSelectItem (BookmarkItemId "ag3")))),
+      testCase "validateWrite: open_item and open_and_flag on a known item pass through" $ do
+        validateWrite agentSnapAB (CmdOpenItem (BookmarkItemId "ag1"))
+          @?= Right (CmdOpenItem (BookmarkItemId "ag1"))
+        validateWrite agentSnapAB (CmdOpenAndFlag (BookmarkItemId "ag1"))
+          @?= Right (CmdOpenAndFlag (BookmarkItemId "ag1")),
+      testCase "validateWrite: open_and_flag on an unknown id is rejected" $
+        assertBool
+          "expected Left"
+          (isLeft (validateWrite agentSnapAB (CmdOpenAndFlag (BookmarkItemId "nope"))))
     ]
 
 -- ---------------------------------------------------------------------------

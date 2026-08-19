@@ -75,7 +75,8 @@ Writes — injected as UI events:
 | `set_video_filter none\|only_videos\|hide_videos` | `set_video_filter` | |
 | `set_show_future_reminders --show\|--hide` | `set_show_future_reminders` | |
 | `select_item ID` | `select_item` | moves the user's cursor |
-| `open_item ID` | `open_item` | opens a browser |
+| `open_item ID` | `open_item` | opens a browser (browse-only) |
+| `open_and_flag ID` | `open_and_flag` | open + stage archive in one atomic set |
 | `set_status TEXT` | `set_status` | writes `agent: TEXT` to the status bar |
 
 An item carries: `id`, `title`, `link`, `tags`, `note`, `excerpt`,
@@ -113,6 +114,16 @@ hocket agent wait_version --after "$V"
 hocket agent get_item 123 | jq .result.pending
 ```
 
+**Open and stage archive in one call.** Browse the browser and set the
+pending action to archive deterministically (set, not toggle) — the agenthalf of the GUI Enter key:
+
+```bash
+hocket agent open_and_flag 123
+V=$(hocket agent get_state | jq .result.version)
+hocket agent wait_version --after "$V"
+hocket agent get_item 123 | jq .result.pending   # "archive"
+```
+
 **Tell the human what you are doing.** The status bar is shared with the
 TUI, so use it while you work:
 
@@ -133,7 +144,7 @@ hocket agent set_status "reviewing 40 unread bookmarks"
   `remove_reminder`. The reverse (`remove_reminder` on an item with no
   reminder) is rejected too. Reminders are always scheduled for the next day
   at 07:00 local, exactly like the `s` key.
-- **`select_item` needs a visible item**; `open_item` and `get_item` do not.
+- **`select_item` needs a visible item**; `open_item`, `open_and_flag`, and `get_item` do not.
 - **Status is single-lane.** `set_status` overwrites whatever the TUI was
   showing, and the TUI overwrites you.
 - **`execute` is not reversible.** It archives and sets reminders against

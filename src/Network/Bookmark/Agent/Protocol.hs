@@ -73,6 +73,7 @@ data WriteCmd
   | CmdSetShowFutureReminders !Bool
   | CmdSelectItem !BookmarkItemId
   | CmdOpenItem !BookmarkItemId
+  | CmdOpenAndFlag !BookmarkItemId
   | CmdSetStatus !Text
   deriving (Show, Eq)
 
@@ -133,6 +134,7 @@ decodeCmd method mparams = case method of
     AWrite . CmdSetShowFutureReminders <$> o .: "show"
   "select_item" -> withParams (fmap (AWrite . CmdSelectItem) . itemIdP)
   "open_item" -> withParams (fmap (AWrite . CmdOpenItem) . itemIdP)
+  "open_and_flag" -> withParams (fmap (AWrite . CmdOpenAndFlag) . itemIdP)
   "set_status" -> withParams $ \o -> AWrite . CmdSetStatus <$> o .: "text"
   other -> Left ("unknown method: " <> other)
   where
@@ -172,6 +174,7 @@ encodeCmd = \case
     ("set_show_future_reminders", object ["show" .= b])
   AWrite (CmdSelectItem bid) -> ("select_item", itemIdParams bid)
   AWrite (CmdOpenItem bid) -> ("open_item", itemIdParams bid)
+  AWrite (CmdOpenAndFlag bid) -> ("open_and_flag", itemIdParams bid)
   AWrite (CmdSetStatus t) -> ("set_status", object ["text" .= t])
   where
     itemIdParams bid = object ["id" .= itemIdText bid]
@@ -217,6 +220,7 @@ validateWrite snap cmd = case cmd of
       then Right cmd
       else Left ("item is not visible under the current filters: " <> itemIdText bid)
   CmdOpenItem bid -> lookupItem bid >> Right cmd
+  CmdOpenAndFlag bid -> lookupItem bid >> Right cmd
   _ -> Right cmd
   where
     lookupItem bid = maybe (Left (unknownItem bid)) Right (findItem snap bid)
