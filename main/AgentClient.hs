@@ -13,10 +13,12 @@
 module AgentClient
   ( callAgent,
     runAgentCommand,
+    isChannelFullError,
   )
 where
 
 import AgentServer (resolveAgentSocketPath)
+import Control.Concurrent (threadDelay)
 import Control.Exception (IOException, bracket, bracketOnError, try)
 import Data.Aeson (Value, eitherDecodeStrict, encode, object, withObject, (.:), (.=))
 import Data.Aeson.Types (parseMaybe)
@@ -65,16 +67,53 @@ callAgent path cmd = do
 -- | CLI entry point: resolve the socket path, make the call, print the raw
 -- response line to stdout (one line, jq-friendly) and exit with 0 for
 -- @ok: true@, 1 for @ok: false@, 2 when the socket could not be reached.
+--
+-- The only failure treated as transient is the TUI's event channel being
+-- full (the server answers @ok:false@ / "event channel full, retry"), which
+-- happens when writes land faster than the render loop can drain the BChan.
+-- Everything else -- a validation rejection, a malformed reply, a dead
+-- socket -- fails immediately: waiting would not cure those.
 runAgentCommand :: Maybe FilePath -> AgentCmd -> IO ()
 runAgentCommand mpath cmd = do
   path <- maybe resolveAgentSocketPath pure mpath
-  callAgent path cmd >>= \case
+  callAgentWithRetry path cmd >>= \case
     Left err -> do
       hPutStrLn stderr (T.unpack err)
       exitWith (ExitFailure 2)
     Right v -> do
       BSL.putStrLn (encode v)
       if responseOk v then exitSuccess else exitWith (ExitFailure 1)
+
+-- | Bounded back-pressure retry for the one genuinely transient server
+-- response. Rather than yielding to the 'retry' package's 'RetryPolicyM'
+-- machinery for a single fixed short sleep, this is a plain count: up to
+-- six attempts with a 20ms pause between them (~0.1s total budget). Six
+-- rapid-fire @agent open_item@ calls therefore no longer fail the moment
+-- the channel cap is hit. Non-channel responses pass straight through.
+callAgentWithRetry :: FilePath -> AgentCmd -> IO (Either Text Value)
+callAgentWithRetry path cmd = go (0 :: Int)
+  where
+    go attempts = do
+      res <- callAgent path cmd
+      case res of
+        Right v
+          | isChannelFullError v && attempts < maxAttempts -> do
+              threadDelay retryDelayUs
+              go (attempts + 1)
+        _ -> pure res
+
+    maxAttempts = 6 -- initial attempt plus five retries
+    retryDelayUs = 20000
+
+-- | @ok:false@ carrying the server's channel-cap message is the only shape
+-- worth retrying; a genuine rejection is final and must not be re-sent.
+-- Requiring @ok:false@ also guards against ever retrying (and thus
+-- re-injecting) a response that actually succeeded.
+isChannelFullError :: Value -> Bool
+isChannelFullError v =
+  case parseMaybe (withObject "response" $ \o -> (,) <$> o .: "ok" <*> o .: "error") v of
+    Just (ok, e) -> not ok && (e :: Text) == "event channel full, retry"
+    Nothing -> False
 
 requestFor :: AgentCmd -> Value
 requestFor cmd =

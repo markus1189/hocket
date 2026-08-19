@@ -2,7 +2,7 @@
 {-# LANGUAGE ScopedTypeVariables #-}
 {-# LANGUAGE TypeApplications #-}
 
-import AgentClient (callAgent)
+import AgentClient (callAgent, isChannelFullError)
 import AgentServer (AgentEnv (..), runAgentServer)
 import Brick.BChan (BChan, newBChan, readBChan, writeBChan)
 import qualified Brick.Widgets.List as L
@@ -972,6 +972,15 @@ agentServerIntegrationTests =
       testCase "the shipped client reports an unreachable socket" $ do
         res <- callAgent "/nonexistent/hocket-agent-absent.sock" (ARead CmdGetState)
         assertBool "expected a transport error" (isLeft res),
+      testCase "isChannelFullError recognizes the channel-cap reply" $ do
+        let chan v = A.Object (KM.fromList [(AKey.fromText "ok", A.Bool v), (AKey.fromText "error", A.String "event channel full, retry")])
+        assertBool "should match the server's channel-full reply" $ isChannelFullError (chan False)
+        assertBool "should reject an ok:true reply" $ not (isChannelFullError (chan True))
+        assertBool "should reject a genuine validation error" $ not (isChannelFullError (A.Object (KM.fromList [(AKey.fromText "ok", A.Bool False), (AKey.fromText "error", A.String "bad request: unknown item")])))
+        assertBool "should reject a non-object and a non-string error" $ not (isChannelFullError (A.String "event channel full, retry")),
+      testCase "isChannelFullError ignores an error absent or different message" $ do
+        assertBool "error absent" $ not (isChannelFullError (A.Object (KM.fromList [(AKey.fromText "ok", A.Bool False)])))
+        assertBool "different message does not match" $ not (isChannelFullError (A.Object (KM.fromList [(AKey.fromText "ok", A.Bool False), (AKey.fromText "error", A.String "something else")]))),
       testCase "binding into a pre-existing directory leaves its mode alone" $ do
         -- An explicit --agent-socket-path may point into a directory we did
         -- not create (/tmp, $HOME). Tightening it to 0700 would either fail
