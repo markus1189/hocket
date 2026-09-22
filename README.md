@@ -155,7 +155,7 @@ hocket add https://example.com --collection 12345 --tag rust --tag cli
 - `↑/↓` or `j/k` - Move up/down in the list
 - `J/K` - Jump to next/previous flagged item (skip unflagged items)
 - `/` - Live fuzzy text filter over title, domain, excerpt and note (case-insensitive). The query is split on spaces into terms; every term must fuzzy-match (subsequence) a single word, and all terms must match (AND). While filtering, `Up`/`Down` scroll the narrowed results. `Esc` cancels and restores the full list; `Enter` locks the filter in. Stacks with the video filter and future-reminder hiding, and persists across refresh/sync.
-- `q` - Quit application
+- `Q` - Quit application
 
 #### Item Actions
 - `Space` - Open selected item in browser

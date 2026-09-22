@@ -506,9 +506,9 @@ vtyEventHandlerNormal es (EvKey (KChar 'y') []) = do
 vtyEventHandlerNormal _ (EvKey (KChar '/') []) =
   -- Flip into filter mode synchronously so the very next keystroke is already
   -- seen under the editing guard; routing this through the BChan would leave a
-  -- one-event window where a fast 'q'/paste leaks to normal mode and quits.
+  -- one-event window where a fast 'Q'/paste leaks to normal mode and quits.
   id %= enterFilterMode
-vtyEventHandlerNormal _ (EvKey (KChar 'q') []) = halt
+vtyEventHandlerNormal _ (EvKey (KChar 'Q') []) = halt
 vtyEventHandlerNormal _ e = do
   zoom itemList (handleListEventVi handleListEvent e)
 
@@ -982,7 +982,7 @@ drawGui tz s = [w]
                    )
                   (hsNumItems s)
             )
-            "spc:Browse ent:Browse+flag e:Edit y:Copied URL r:Refresh S:Toggle future reminders v:Video filter V:Hide videos /:Filter X:Execute Flags a:Archive flag s:Reminder flag u:Unflag J/K:Jump U:Unflag all q:Quit",
+            "spc:Browse ent:Browse+flag e:Edit y:Copied URL r:Refresh S:Toggle future reminders v:Video filter V:Hide videos /:Filter X:Execute Flags a:Archive flag s:Reminder flag u:Unflag J/K:Jump U:Unflag all Q:Quit",
           hBorder,
           hBar
             ( maybe
