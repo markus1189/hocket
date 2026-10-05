@@ -15,7 +15,7 @@ build-type:          Simple
 cabal-version:       >=1.8
 
 library
-  ghc-options:         -Wall -Werror
+  ghc-options:         -Wall -Wunused-packages -Werror
   hs-source-dirs:      src
   exposed-modules:     Network.Raindrop
                      , Network.Raindrop.Api
@@ -25,41 +25,24 @@ library
                      , Network.Bookmark.Ui.State
                      , Network.Bookmark.Ui.Widgets
   Build-depends:       aeson
-                     , async
-                     , attoparsec
                      , base
                      , brick
-                     , bytestring
                      , containers
-                     , data-default
                      , dhall
-                     , directory
-                     , formatting
-                     , http-client
                      , http-client-tls
                      , http-types
                      , lens
-                     , lens-action
-                     , microlens
                      , monad-logger
-                     , mtl
-                     , network-uri
-                     , old-locale
-                     , process
                      , retry
                      , servant
                      , servant-client
                      , sorted-list
-                     , split
                      , text
                      , time
-                     , transformers
-                     , unordered-containers
                      , vector
-                     , vty
 
 executable hocket
-  ghc-options:         -Wall -threaded -Werror
+  ghc-options:         -Wall -Wunused-packages -threaded -Werror
   main-is:             hocket.hs
   hs-source-dirs:      main
   other-modules:       AgentClient
@@ -72,30 +55,23 @@ executable hocket
                      , bytestring
                      , case-insensitive
                      , containers
-                     , data-default
                      , dhall
                      , directory
                      , filepath
                      , formatting
                      , hocket
-                     , http-client
                      , lens
-                     , lens-action
-                     , microlens
                      , monad-logger
                      , monad-loops
                      , exceptions
-                     , mtl
                      , network
                      , network-uri
                      , optparse-applicative
                      , process
-                     , retry
                      , servant-client
                      , stm
                      , text
                      , time
-                     , transformers
                      , unix
                      , vector
                      , vty-unix
@@ -113,39 +89,20 @@ test-suite test
   build-depends:       base
                      , aeson
                      , async
-                     , attoparsec
                      , brick
                      , bytestring
                      , containers
-                     , data-default
-                     , dhall
                      , directory
                      , filepath
-                     , formatting
                      , hocket == 0.2.0.0
-                     , http-client
-                     , http-client-tls
-                     , http-types
                      , lens
-                     , lens-action
-                     , microlens
-                     , mtl
                      , network
-                     , network-uri
-                     , old-locale
-                     , process
                      , stm
                      , unix
-                     , sorted-list
-                     , split
                      , tasty
                      , tasty-golden
-                     , tasty-hspec
                      , tasty-hunit
                      , tasty-quickcheck
                      , text
                      , time
-                     , transformers
-                     , unordered-containers
                      , vector
-                     , vty
