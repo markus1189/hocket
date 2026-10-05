@@ -38,6 +38,7 @@ library
                      , servant-client
                      , sorted-list
                      , text
+                     , text-zipper
                      , time
                      , vector
 
@@ -71,6 +72,7 @@ executable hocket
                      , servant-client
                      , stm
                      , text
+                     , text-zipper
                      , time
                      , unix
                      , vector
@@ -104,5 +106,6 @@ test-suite test
                      , tasty-hunit
                      , tasty-quickcheck
                      , text
+                     , text-zipper
                      , time
                      , vector

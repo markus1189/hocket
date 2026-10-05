@@ -2,7 +2,6 @@ module Events
   ( HocketEvent (..),
     AsyncCommand (..),
     UiCommand (..),
-    FilterInput (..),
     fetchItemsEvt,
     fetchedItemsEvt,
     executeBatchEvt,
@@ -23,11 +22,6 @@ module Events
     toggleRemindersEvt,
     toggleVideoFilterEvt,
     toggleInvertedVideoFilterEvt,
-    enterFilterModeEvt,
-    lockFilterEvt,
-    cancelFilterEvt,
-    filterCharEvt,
-    filterBackspaceEvt,
     setPendingActionEvt,
     setFilterQueryEvt,
     setVideoFilterModeEvt,
@@ -75,7 +69,6 @@ data UiCommand
   | ToggleReminders
   | ToggleVideoFilter
   | ToggleInvertedVideoFilter
-  | FilterInput !FilterInput
   | -- Agent-socket commands: idempotent variants of the keyboard toggles.
     SetPendingAction !BookmarkItemId !PendingAction
   | SetFilterQuery !Text
@@ -86,14 +79,6 @@ data UiCommand
   | OpenAndFlagItem !BookmarkItemId
   | SetAgentClients !Int
   | SetAgentError !(Maybe Text)
-  deriving (Show, Eq)
-
-data FilterInput
-  = EnterFilter
-  | LockFilter
-  | DoCancelFilter
-  | FilterChar !Char
-  | FilterBackspace
   deriving (Show, Eq)
 
 fetchItemsEvt :: HocketEvent
@@ -155,21 +140,6 @@ toggleVideoFilterEvt = HocketUi ToggleVideoFilter
 
 toggleInvertedVideoFilterEvt :: HocketEvent
 toggleInvertedVideoFilterEvt = HocketUi ToggleInvertedVideoFilter
-
-enterFilterModeEvt :: HocketEvent
-enterFilterModeEvt = HocketUi (FilterInput EnterFilter)
-
-lockFilterEvt :: HocketEvent
-lockFilterEvt = HocketUi (FilterInput LockFilter)
-
-cancelFilterEvt :: HocketEvent
-cancelFilterEvt = HocketUi (FilterInput DoCancelFilter)
-
-filterCharEvt :: Char -> HocketEvent
-filterCharEvt c = HocketUi (FilterInput (FilterChar c))
-
-filterBackspaceEvt :: HocketEvent
-filterBackspaceEvt = HocketUi (FilterInput FilterBackspace)
 
 setPendingActionEvt :: BookmarkItemId -> PendingAction -> HocketEvent
 setPendingActionEvt bid act = HocketUi (SetPendingAction bid act)

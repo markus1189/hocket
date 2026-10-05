@@ -32,6 +32,7 @@ import Brick
     halt,
     padLeft,
     padRight,
+    showCursorNamed,
     txt,
     vBox,
     withAttr,
@@ -41,6 +42,7 @@ import Brick
 import Brick.BChan (BChan, newBChan, writeBChan, writeBChanNonBlocking)
 import qualified Brick.Focus as Focus
 import Brick.Widgets.Border (hBorder)
+import Brick.Widgets.Edit (applyEdit, editFocusedAttr, handleEditorEvent, renderEditor)
 import Brick.Widgets.List (handleListEvent, handleListEventVi)
 import qualified Brick.Widgets.List as L
 import Control.Applicative ((<|>))
@@ -75,6 +77,7 @@ import Data.Maybe (fromMaybe, isJust, mapMaybe)
 import Data.Text (Text)
 import qualified Data.Text as T
 import qualified Data.Text.Encoding as T
+import Data.Text.Zipper.Generic.Words (deletePrevWord)
 import Data.Time (UTCTime, addDays, getCurrentTime)
 import Data.Time.Clock.POSIX (POSIXTime, posixSecondsToUTCTime, utcTimeToPOSIXSeconds)
 import Data.Time.Format (defaultTimeLocale, formatTime)
@@ -92,13 +95,11 @@ import qualified Data.Vector as V
 import Dhall (auto, input)
 import Events
   ( AsyncCommand (..),
-    FilterInput (..),
     HocketEvent (..),
     UiCommand (..),
     archivedItemsEvt,
     asyncActionFailedEvt,
     browseItemEvt,
-    cancelFilterEvt,
     clearAllFlagsEvt,
     copyUrlEvt,
     editItemInBrowserEvt,
@@ -106,9 +107,6 @@ import Events
     executeBatchEvt,
     fetchItemsEvt,
     fetchedItemsEvt,
-    filterBackspaceEvt,
-    filterCharEvt,
-    lockFilterEvt,
     remindersRemovedEvt,
     remindersSetEvt,
     setAgentErrorEvt,
@@ -122,9 +120,9 @@ import Events
 import Formatting (sformat, (%))
 import qualified Formatting as F
 import qualified Formatting.Time as F
-import Graphics.Vty (Event (EvKey), Key (KChar, KDown, KUp))
+import Graphics.Vty (Event (EvKey), Key (KChar, KDown, KUp), Modifier (MCtrl))
 import qualified Graphics.Vty as Vty
-import Graphics.Vty.Input.Events (Key (KBS, KEnter, KEsc))
+import Graphics.Vty.Input.Events (Key (KEnter, KEsc))
 import Graphics.Vty.Platform.Unix (mkVty)
 import Network.Bookmark.Agent.Protocol
   ( AgentCmd (..),
@@ -160,8 +158,6 @@ import Network.Bookmark.Ui.State
     HocketState,
     Name (..),
     VideoFilterMode (..),
-    appendFilterChar,
-    backspaceFilter,
     batchStepsWithWork,
     cancelFilter,
     clearAllFlags,
@@ -174,6 +170,7 @@ import Network.Bookmark.Ui.State
     hsContents,
     hsCredentials,
     hsFilterActive,
+    hsFilterEditor,
     hsFilterQuery,
     hsLastUpdated,
     hsNumItems,
@@ -423,13 +420,15 @@ vtyEventHandler es e = do
   s <- use id
   if s ^. hsFilterActive
     then case e of
-      EvKey KEsc [] -> liftIO $ es `trigger` cancelFilterEvt
-      EvKey KEnter [] -> liftIO $ es `trigger` lockFilterEvt
-      EvKey KBS [] -> liftIO $ es `trigger` filterBackspaceEvt
-      EvKey (KChar c) [] -> liftIO $ es `trigger` filterCharEvt c
+      -- Handled here, not via the BChan, so they stay ordered with the
+      -- keystrokes the editor already applied synchronously.
+      EvKey KEsc [] -> id %= cancelFilter
+      EvKey KEnter [] -> id %= lockFilter
       EvKey KUp [] -> zoom itemList (handleListEventVi handleListEvent e)
       EvKey KDown [] -> zoom itemList (handleListEventVi handleListEvent e)
-      _ -> pure ()
+      -- Brick's editor has no Ctrl-W.
+      EvKey (KChar 'w') [MCtrl] -> hsFilterEditor %= applyEdit deletePrevWord
+      _ -> zoom hsFilterEditor (handleEditorEvent (VtyEvent e))
     else vtyEventHandlerNormal es e
 
 vtyEventHandlerNormal ::
@@ -685,13 +684,6 @@ uiCommandEventHandler _ ToggleVideoFilter = do
 uiCommandEventHandler _ ToggleInvertedVideoFilter = do
   id %= toggleInvertedVideoFilter
   id %= syncForRender
-uiCommandEventHandler _ (FilterInput fi) =
-  id %= case fi of
-    EnterFilter -> enterFilterMode
-    LockFilter -> lockFilter
-    DoCancelFilter -> cancelFilter
-    FilterChar c -> appendFilterChar c
-    FilterBackspace -> backspaceFilter
 uiCommandEventHandler _ (SetPendingAction bid act) = id %= setPendingAction bid act
 uiCommandEventHandler _ (SetFilterQuery q) = do
   id %= setFilterQuery q
@@ -881,7 +873,10 @@ app :: TimeZone -> BChan HocketEvent -> Maybe (TVar AgentSnapshot) -> App Hocket
 app tz events mSnapVar =
   App
     { appDraw = drawGui tz,
-      appChooseCursor = Focus.focusRingCursor (view focusRing),
+      appChooseCursor = \s ->
+        if s ^. hsFilterActive
+          then showCursorNamed FilterEditorName
+          else Focus.focusRingCursor (view focusRing) s,
       appHandleEvent = \e -> do
         myEventHandler events e
         id %= syncForRender
@@ -913,8 +908,13 @@ hocketAttrMap =
       (attrName "list" <> attrName "reminderRemovalSelected", reminderRemovalSelectedFg),
       (attrName "list" <> attrName "favoriteItem", favoriteYellowFg),
       (attrName "list" <> attrName "favoriteSelected", favoriteYellowSelectedFg),
-      (attrName "bar", Vty.defAttr `Vty.withBackColor` Vty.black `Vty.withForeColor` Vty.white)
+      (attrName "bar", barAttr),
+      -- The editor sets its own attr, which would drop the bar's colours.
+      (editFocusedAttr, barAttr)
     ]
+
+barAttr :: Vty.Attr
+barAttr = Vty.defAttr `Vty.withBackColor` Vty.black `Vty.withForeColor` Vty.white
 
 getDisplayContent :: BookmarkItem -> Text
 getDisplayContent item =
@@ -1002,7 +1002,9 @@ drawGui tz s = [w]
                   )
               ),
           if s ^. hsFilterActive
-            then hBar (sanitizeForDisplay ("/" <> s ^. hsFilterQuery <> "_"))
+            then
+              withAttr (attrName "bar") . padRight Max $
+                txt "/" <+> renderEditor (txt . sanitizeForDisplay . T.concat) True (s ^. hsFilterEditor)
             else txt (fromMaybe " " (s ^. hsStatus))
         ]
 

@@ -125,7 +125,7 @@ event exists yet:
   so" flagging. The agent says *flag for archive*; if it's already flagged
   nothing changes. This is the workhorse; toggle events stay for the keyboard.
 - `SetFilterQuery !Text` — set/replace the fuzzy filter wholesale (the
-  keyboard builds it char-by-char via `FilterInput`; an agent shouldn't).
+  keyboard edits it in place via the filter editor; an agent shouldn't).
 - `SetVideoFilter !VideoFilterMode` / `SetShowFutureReminders !Bool` —
   idempotent variants of the toggles.
 - `SelectItem !BookmarkItemId` — move the TUI selection so the user can

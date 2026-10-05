@@ -5,6 +5,7 @@
 import AgentClient (callAgent, isChannelFullError)
 import AgentServer (AgentEnv (..), runAgentServer)
 import Brick.BChan (BChan, newBChan, readBChan, writeBChan)
+import Brick.Widgets.Edit (applyEdit)
 import qualified Brick.Widgets.List as L
 import Control.Concurrent (forkIO, threadDelay)
 import Control.Concurrent.Async (withAsync)
@@ -28,6 +29,8 @@ import Data.Ord
 import Data.Ratio ((%))
 import Data.Text (Text)
 import qualified Data.Text as T
+import qualified Data.Text.Zipper as Z
+import Data.Text.Zipper.Generic.Words (deletePrevWord)
 import Data.Time.Calendar (toGregorian)
 import Data.Time.Clock (DiffTime, UTCTime (..))
 import Data.Time.Clock.POSIX (POSIXTime)
@@ -113,6 +116,9 @@ itemWithHighlights hs = case A.decode @A.Value (LBS.pack fixtureItem) of
   _ -> A.Null
   where
     fixtureItem = "{\"_id\":1,\"link\":\"https://example.com\",\"excerpt\":\"\",\"note\":\"\",\"type\":\"link\",\"tags\":[],\"removed\":false,\"created\":\"2026-01-01T00:00:00.000Z\",\"lastUpdate\":\"2026-01-01T00:00:00.000Z\",\"domain\":\"example.com\",\"title\":\"t\",\"sort\":0,\"collection\":{\"$id\":-1},\"important\":false}"
+
+typeInFilter :: Text -> HocketState -> HocketState
+typeInFilter t = hsFilterEditor %~ applyEdit (Z.insertMany t)
 
 sanitizeForDisplayTests :: TestTree
 sanitizeForDisplayTests =
@@ -458,14 +464,15 @@ filterStateTests =
         fuzzyMatch "zzqtag" (bookmarkSearchText filterTestBookmark) @?= False,
       testCase "enterFilterMode sets hsFilterActive" $
         view hsFilterActive (enterFilterMode testState) @?= True,
-      testCase "backspace undoes appendFilterChar" $
-        view hsFilterQuery (backspaceFilter (appendFilterChar 'x' testState))
-          @?= view hsFilterQuery testState,
+      testCase "typing after a set query appends at the end" $
+        view hsFilterQuery (typeInFilter "x" (testState & hsFilterQuery .~ "ab")) @?= "abx",
+      testCase "ctrl-w deletes the previous word" $
+        view hsFilterQuery (testState & hsFilterQuery .~ "foo bar" & hsFilterEditor %~ applyEdit deletePrevWord) @?= "foo ",
       testCase "cancelFilter clears query and exits editing" $
-        let s = cancelFilter (appendFilterChar 'x' (enterFilterMode testState))
+        let s = cancelFilter (typeInFilter "x" (enterFilterMode testState))
          in (view hsFilterActive s, view hsFilterQuery s) @?= (False, ""),
       testCase "lockFilter exits editing but preserves query" $
-        let s = lockFilter (appendFilterChar 'x' (enterFilterMode testState))
+        let s = lockFilter (typeInFilter "x" (enterFilterMode testState))
          in (view hsFilterActive s, view hsFilterQuery s) @?= (False, "x"),
       testCase "syncForRender applies fuzzy text filter" $
         let base = insertItems [filterTestBookmark, filterOtherBookmark] testState

@@ -25,6 +25,7 @@ module Network.Bookmark.Ui.State
     hsVideoFilter,
     hsFilterActive,
     hsFilterQuery,
+    hsFilterEditor,
     ItemCounts,
     icNone,
     icToBeArchived,
@@ -55,8 +56,6 @@ module Network.Bookmark.Ui.State
     enterFilterMode,
     lockFilter,
     cancelFilter,
-    appendFilterChar,
-    backspaceFilter,
     bookmarkSearchText,
     updateItemsWithReminder,
     updateItemsWithStoredReminderTimes,
@@ -68,10 +67,12 @@ module Network.Bookmark.Ui.State
 where
 
 import qualified Brick.Focus as F
+import Brick.Widgets.Edit (Editor, applyEdit, editorText, getEditContents)
 import Brick.Widgets.List (List)
 import qualified Brick.Widgets.List as L
 import Control.Applicative ((<|>))
 import Control.Lens
+import qualified Data.Text.Zipper as Z
 #if !MIN_VERSION_base(4,20,0)
 import Data.Foldable (foldl')
 #endif
@@ -92,7 +93,7 @@ import qualified Data.Vector as V
 import Network.Bookmark.Types
 import Network.Bookmark.Ui.Widgets
 
-data Name = ItemListName deriving (Show, Eq, Ord)
+data Name = ItemListName | FilterEditorName deriving (Show, Eq, Ord)
 
 -- | The async operations the TUI may start. Only one is ever in flight at a
 -- time (single-slot lock). The identity is recorded so the lock can be tested
@@ -119,7 +120,7 @@ data HocketState = HocketState
     _hsShowFutureReminders :: !Bool,
     _hsVideoFilter :: !VideoFilterMode,
     _hsFilterActive :: !Bool,
-    _hsFilterQuery :: !Text,
+    _hsFilterEditor :: !(Editor Text Name),
     _hsAgentClients :: !Int,
     -- | Set when the agent socket server died; the shared status line is
     -- overwritten within a frame, so the header carries this instead.
@@ -127,6 +128,11 @@ data HocketState = HocketState
   }
 
 makeLenses ''HocketState
+
+-- | The filter text held by 'hsFilterEditor'. Setting it puts the cursor at
+-- the end, so typing after an agent's 'setFilterQuery' appends.
+hsFilterQuery :: Lens' HocketState Text
+hsFilterQuery = hsFilterEditor . lens (T.concat . getEditContents) (\ed q -> applyEdit (const (Z.gotoEOL (Z.textZipper [q] (Just 1)))) ed)
 
 asyncOpRunning :: HocketState -> Bool
 asyncOpRunning s = case s ^. hsAsyncOp of
@@ -224,7 +230,7 @@ initialState creds =
     False
     NoVideoFilter
     False
-    T.empty
+    (editorText FilterEditorName (Just 1) "")
     0
     Nothing
 
@@ -333,12 +339,6 @@ lockFilter = hsFilterActive .~ False
 
 cancelFilter :: HocketState -> HocketState
 cancelFilter = (hsFilterActive .~ False) . (hsFilterQuery .~ T.empty)
-
-appendFilterChar :: Char -> HocketState -> HocketState
-appendFilterChar c = hsFilterQuery %~ (<> T.singleton c)
-
-backspaceFilter :: HocketState -> HocketState
-backspaceFilter = hsFilterQuery %~ T.dropEnd 1
 
 bookmarkSearchText :: BookmarkItem -> Text
 bookmarkSearchText bi =
