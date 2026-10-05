@@ -260,11 +260,9 @@ import System.Process
   ( CreateProcess,
     createProcess,
     proc,
-    shell,
     waitForProcess,
   )
 import System.Process.Internals (StdStream (CreatePipe))
-import Text.Printf (printf)
 
 makeLensesFor [("std_in", "stdIn"), ("std_err", "stdErr"), ("std_out", "stdOut")] ''CreateProcess
 
@@ -727,7 +725,7 @@ uiCommandEventHandler es (OpenAndFlagItem bid) = do
 uiCommandEventHandler _ (SetAgentClients n) = id %= setAgentClients n
 uiCommandEventHandler _ (SetAgentError e) = id %= setAgentError e
 uiCommandEventHandler es (BrowseItem bit) = do
-  res <- liftIO . try @SomeException $ browseItem "firefox '%s'" (URL . T.unpack $ view biLink bit)
+  res <- liftIO . try @SomeException $ browseItem "firefox" (URL . T.unpack $ view biLink bit)
   case res of
     Left e -> liftIO $ es `trigger` setStatusEvt (Just (T.pack $ show e))
     Right () -> pure ()
@@ -740,7 +738,7 @@ uiCommandEventHandler es (CopyUrl bit) = do
 uiCommandEventHandler es (EditItemInBrowser bit) = do
   let itemId = view biId bit ^. _BookmarkItemId
       editUrl = "https://app.raindrop.io/my/-1/item/" <> T.unpack itemId <> "/edit"
-  res <- liftIO . try @SomeException $ browseItem "xdg-open '%s'" (URL editUrl)
+  res <- liftIO . try @SomeException $ browseItem "xdg-open" (URL editUrl)
   case res of
     Left e -> liftIO $ es `trigger` setStatusEvt (Just (T.pack $ show e))
     Right () -> pure ()
@@ -1277,10 +1275,10 @@ replace old new = go
 cleanUrl :: String -> String
 cleanUrl s = foldl' (\acc (old, new) -> replace old new acc) s urlReplacements
 
-browseItem :: String -> URL -> IO ()
-browseItem shellCmd (URL url) = do
-  let cleanedUrl = cleanUrl url
-      spec = shell $ printf shellCmd cleanedUrl
+-- | 'proc', not 'shell': the URL comes from Raindrop and may contain quotes.
+browseItem :: FilePath -> URL -> IO ()
+browseItem program (URL url) = do
+  let spec = proc program [cleanUrl url]
   (_, _, _, ph) <- createProcess $ spec & stdOut .~ CreatePipe & stdErr .~ CreatePipe
   void . waitForProcess $ ph
 
