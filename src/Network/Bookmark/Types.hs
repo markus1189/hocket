@@ -44,7 +44,7 @@ where
 import Control.Applicative ((<|>))
 import Control.Lens (makeLenses, makePrisms, (^.))
 import Control.Monad (mzero)
-import Data.Aeson (FromJSON (parseJSON), ToJSON (toJSON), Value (Object), object, (.!=), (.:), (.:?), (.=))
+import Data.Aeson (FromJSON (parseJSON), ToJSON (toJSON), Value (Object, String), object, withObject, (.!=), (.:), (.:?), (.=))
 import Data.Aeson.Types (Parser)
 import Data.Text (Text)
 import qualified Data.Text as Text
@@ -136,7 +136,7 @@ instance FromJSON BookmarkItem where
       <*> o .: "domain"
       <*> o .: "title"
       <*> o .: "sort"
-      <*> o .: "highlights"
+      <*> (o .: "highlights" >>= traverse highlightText)
       <*> ((o .: "collection") >>= (.: "$id"))
       <*> (o .:? "important" .!= False)
       <*> ( ( do
@@ -151,6 +151,11 @@ instance FromJSON BookmarkItem where
               <|> pure Nothing
           )
   parseJSON _ = mzero
+
+-- | Raindrop sends highlight objects; plain strings are what our own 'ToJSON' writes.
+highlightText :: Value -> Parser Text
+highlightText (String t) = pure t
+highlightText v = withObject "highlight" (.: "text") v
 
 instance ToJSON BookmarkItem where
   toJSON item =

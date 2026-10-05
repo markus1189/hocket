@@ -95,13 +95,24 @@ raindropApiBodyTests =
         (\(Created i) -> i) <$> A.decode "{\"result\":true,\"item\":{\"_id\":123}}" @?= Just 123,
       testCase "result false is a value, missing result is a decode failure" $ do
         (\(ApiResult b) -> b) <$> A.decode "{\"result\":false}" @?= Just False
-        isLeft ((\(ApiResult b) -> b) <$> A.eitherDecode "{}") @? "expected decode failure",
+        isLeft (A.eitherDecode @ApiResult "{}") @? "expected decode failure",
+      testCase "highlight objects decode to their text" $
+        view biHighlights <$> parseMaybe A.parseJSON (itemWithHighlights [A.object ["text" A..= ("quoted" :: Text), "color" A..= ("yellow" :: Text)]])
+          @?= Just ["quoted"],
       testCase "list response decodes count and items" $ do
         jsonLBS <- LBS.readFile "test/raindrop-items1.json"
         case A.eitherDecode jsonLBS of
           Left e -> assertFailure e
           Right (Items count items) -> (count, length items) @?= (18, 18)
     ]
+
+-- | The first item of the list fixture, with its highlights replaced.
+itemWithHighlights :: [A.Value] -> A.Value
+itemWithHighlights hs = case A.decode @A.Value (LBS.pack fixtureItem) of
+  Just (A.Object o) -> A.Object (KM.insert "highlights" (A.toJSON hs) o)
+  _ -> A.Null
+  where
+    fixtureItem = "{\"_id\":1,\"link\":\"https://example.com\",\"excerpt\":\"\",\"note\":\"\",\"type\":\"link\",\"tags\":[],\"removed\":false,\"created\":\"2026-01-01T00:00:00.000Z\",\"lastUpdate\":\"2026-01-01T00:00:00.000Z\",\"domain\":\"example.com\",\"title\":\"t\",\"sort\":0,\"collection\":{\"$id\":-1},\"important\":false}"
 
 sanitizeForDisplayTests :: TestTree
 sanitizeForDisplayTests =
