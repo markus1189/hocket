@@ -62,7 +62,7 @@ import Control.Lens.Operators
 import Control.Monad (mfilter, unless, void, when)
 import qualified Control.Monad.Catch as Catch
 import Control.Monad.IO.Class (liftIO)
-import Control.Monad.Logger (logErrorN, logInfoN, runStdoutLoggingT)
+import Control.Monad.Logger (LoggingT, logErrorN, logInfoN, runFileLoggingT, runStdoutLoggingT)
 import Control.Monad.Loops (unfoldrM)
 import qualified Data.CaseInsensitive as CI
 import Data.Foldable (for_)
@@ -1106,7 +1106,7 @@ hBarWithHints leftText rightText =
 retrieveItems :: BookmarkCredentials -> Maybe Text -> RaindropCollectionId -> IO (Either HttpException [BookmarkItemBatch])
 retrieveItems cred searchParam collectionId = do
   tryHttpException $
-    runStdoutLoggingT $
+    runTuiLoggingT $
       unfoldrM
         ( \currentPage -> do
             (_, items) <- raindrop cred (RetrieveBookmarks currentPage collectionId searchParam)
@@ -1125,14 +1125,14 @@ retrieveItems cred searchParam collectionId = do
 
 performArchive :: BookmarkCredentials -> [BookmarkItem] -> IO (Either HttpException [(BookmarkItem, Bool)])
 performArchive cred items = do
-  tryHttpException $ runStdoutLoggingT $ do
+  tryHttpException $ runTuiLoggingT $ do
     let itemIds = map (view biId) items
     success <- raindrop cred (BatchArchiveBookmarks itemIds)
     pure $ map (,success) items
 
 performSetReminders :: BookmarkCredentials -> [(BookmarkItem, UTCTime)] -> IO (Either HttpException [(BookmarkItem, Bool)])
 performSetReminders cred itemsWithTimes = do
-  tryHttpException $ runStdoutLoggingT $ do
+  tryHttpException $ runTuiLoggingT $ do
     traverse
       ( \(item, reminderTime) -> do
           success <- raindrop cred (SetReminder (view biId item) reminderTime)
@@ -1142,13 +1142,20 @@ performSetReminders cred itemsWithTimes = do
 
 performRemoveReminders :: BookmarkCredentials -> [BookmarkItem] -> IO (Either HttpException [(BookmarkItem, Bool)])
 performRemoveReminders cred items = do
-  tryHttpException $ runStdoutLoggingT $ do
+  tryHttpException $ runTuiLoggingT $ do
     traverse
       ( \item -> do
           success <- raindrop cred (RemoveReminder (view biId item))
           pure (item, success)
       )
       items
+
+-- | vty owns the terminal while the TUI runs, so stdout logging would draw over it.
+runTuiLoggingT :: LoggingT IO a -> IO a
+runTuiLoggingT act = do
+  dir <- getXdgDirectory XdgState "hocket"
+  createDirectoryIfMissing True dir
+  runFileLoggingT (dir </> "hocket.log") act
 
 tryHttpException :: IO a -> IO (Either HttpException a)
 tryHttpException = try @HttpException
