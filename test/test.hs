@@ -39,6 +39,7 @@ import Network.Bookmark.Agent.Snapshot
 import Network.Bookmark.Types
 import Network.Bookmark.Ui.State
 import Network.Bookmark.Ui.Widgets (fuzzyFilterMatch, fuzzyMatch, sanitizeForDisplay)
+import Network.Raindrop.Api (ApiResult (..), BatchMove (..), Created (..), Items (..), NewRaindrop (..), RaindropPatch (..))
 import Network.Socket
   ( Family (AF_UNIX),
     SockAddr (SockAddrUnix),
@@ -70,7 +71,37 @@ import Test.Tasty.QuickCheck as QC
 main = defaultMain tests
 
 tests :: TestTree
-tests = testGroup "Tests" [xKeyBatchConcurrencyTests, hocketStateTests, raindropParsingTests, dateTimeParsingTests, jsonRoundtripTests, sanitizeForDisplayTests, fuzzyMatchTests, fuzzyFilterMatchTests, filterStateTests, filterTuningTests, agentSnapshotTests, agentProtocolTests, agentServerIntegrationTests]
+tests = testGroup "Tests" [xKeyBatchConcurrencyTests, hocketStateTests, raindropParsingTests, raindropApiBodyTests, dateTimeParsingTests, jsonRoundtripTests, sanitizeForDisplayTests, fuzzyMatchTests, fuzzyFilterMatchTests, filterStateTests, filterTuningTests, agentSnapshotTests, agentProtocolTests, agentServerIntegrationTests]
+
+-- Expected bodies are what the pre-servant wreq client sent.
+raindropApiBodyTests :: TestTree
+raindropApiBodyTests =
+  testGroup
+    "Raindrop API bodies"
+    [ testCase "move to collection" $
+        A.toJSON (MoveTo 7) @?= A.object ["collection" A..= A.object ["$id" A..= (7 :: Int)]],
+      testCase "set reminder keeps millisecond Z format" $
+        A.toJSON (SetReminderAt (UTCTime (read "2026-10-06") 18000))
+          @?= A.object ["reminder" A..= A.object ["date" A..= ("2026-10-06T05:00:00.000Z" :: Text)]],
+      testCase "clear reminder sends null" $
+        A.toJSON ClearReminder @?= A.object ["reminder" A..= A.Null],
+      testCase "batch move keeps ids as strings" $
+        A.toJSON (BatchMove ["1", "2"] 7)
+          @?= A.object ["ids" A..= (["1", "2"] :: [Text]), "collection" A..= A.object ["$id" A..= (7 :: Int)]],
+      testCase "new raindrop" $
+        A.toJSON (NewRaindrop "https://example.com" "-1" ["t"])
+          @?= A.object ["link" A..= ("https://example.com" :: Text), "collection" A..= ("-1" :: Text), "tags" A..= (["t"] :: [Text]), "pleaseParse" A..= A.object []],
+      testCase "created id is decoded" $
+        (\(Created i) -> i) <$> A.decode "{\"result\":true,\"item\":{\"_id\":123}}" @?= Just 123,
+      testCase "result false is a value, missing result is a decode failure" $ do
+        (\(ApiResult b) -> b) <$> A.decode "{\"result\":false}" @?= Just False
+        isLeft ((\(ApiResult b) -> b) <$> A.eitherDecode "{}") @? "expected decode failure",
+      testCase "list response decodes count and items" $ do
+        jsonLBS <- LBS.readFile "test/raindrop-items1.json"
+        case A.eitherDecode jsonLBS of
+          Left e -> assertFailure e
+          Right (Items count items) -> (count, length items) @?= (18, 18)
+    ]
 
 sanitizeForDisplayTests :: TestTree
 sanitizeForDisplayTests =

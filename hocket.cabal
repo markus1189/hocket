@@ -18,6 +18,7 @@ library
   ghc-options:         -Wall -Werror
   hs-source-dirs:      src
   exposed-modules:     Network.Raindrop
+                     , Network.Raindrop.Api
                      , Network.Bookmark.Agent.Protocol
                      , Network.Bookmark.Agent.Snapshot
                      , Network.Bookmark.Types
@@ -39,7 +40,6 @@ library
                      , http-types
                      , lens
                      , lens-action
-                     , lens-aeson
                      , microlens
                      , monad-logger
                      , mtl
@@ -47,6 +47,8 @@ library
                      , old-locale
                      , process
                      , retry
+                     , servant
+                     , servant-client
                      , sorted-list
                      , split
                      , text
@@ -55,7 +57,6 @@ library
                      , unordered-containers
                      , vector
                      , vty
-                     , wreq
 
 executable hocket
   ghc-options:         -Wall -threaded -Werror
@@ -80,7 +81,6 @@ executable hocket
                      , http-client
                      , lens
                      , lens-action
-                     , lens-aeson
                      , microlens
                      , monad-logger
                      , monad-loops
@@ -91,6 +91,7 @@ executable hocket
                      , optparse-applicative
                      , process
                      , retry
+                     , servant-client
                      , stm
                      , text
                      , time
@@ -127,7 +128,6 @@ test-suite test
                      , http-types
                      , lens
                      , lens-action
-                     , lens-aeson
                      , microlens
                      , mtl
                      , network
@@ -149,4 +149,3 @@ test-suite test
                      , unordered-containers
                      , vector
                      , vty
-                     , wreq

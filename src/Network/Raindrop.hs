@@ -1,106 +1,68 @@
 {-# LANGUAGE GADTs #-}
 {-# LANGUAGE OverloadedStrings #-}
-{-# LANGUAGE TypeApplications #-}
 
-module Network.Raindrop where
+module Network.Raindrop
+  ( raindrop,
+  )
+where
 
-import Control.Exception (SomeException, try)
-import Control.Lens (view, (&), (.~), (^?))
-import Control.Lens.Operators ((^.), (^..))
+import Control.Exception (throwIO)
+import Control.Lens (view, (^.))
 import Control.Monad.IO.Class (MonadIO, liftIO)
-import Control.Monad.Logger (MonadLogger, logErrorN)
-import Control.Retry (RetryPolicy, RetryStatus, exponentialBackoff, limitRetries, retrying)
-import qualified Data.Aeson as A
-import Data.Aeson.Lens (AsJSON (_JSON), AsValue (_Bool), key, values, _Integral)
+import Control.Monad.Logger (MonadLogger, logWarnN)
+import Control.Retry (RetryPolicyM, RetryStatus (rsIterNumber), exponentialBackoff, limitRetries, retrying)
 import Data.Maybe (fromMaybe)
 import qualified Data.Text as T
-import qualified Data.Text.Encoding as TE
-import Data.Time.Format (defaultTimeLocale, formatTime)
 import Network.Bookmark.Types (BookmarkCredentials, BookmarkItemId (..), BookmarkRequest (..), RaindropCollectionId (RaindropCollectionId), RaindropToken (..), archiveCollectionId, raindropToken, _BookmarkItemId)
-import qualified Network.HTTP.Client as HC
-import qualified Network.HTTP.Client.TLS as HCTLS (tlsManagerSettings)
-import Network.Wreq (param)
-import qualified Network.Wreq as W
-import Numeric.Natural (Natural)
+import Network.HTTP.Types.Status (statusCode)
+import Network.Raindrop.Api
+import Servant.Client (ClientError (..), ClientM, ResponseF (responseStatusCode), runClientM)
 
-commonOpts :: RaindropToken -> W.Options
-commonOpts (RaindropToken t) =
-  W.defaults
-    & W.manager .~ Left (HCTLS.tlsManagerSettings {HC.managerResponseTimeout = HC.responseTimeoutDefault})
-    & W.header "Authorization" .~ ["Bearer " <> TE.encodeUtf8 t]
-
-retryPolicy :: RetryPolicy
+retryPolicy :: (MonadIO m) => RetryPolicyM m
 retryPolicy = exponentialBackoff 100000 <> limitRetries 3
 
-shouldRetry :: RetryStatus -> Either SomeException a -> IO Bool
-shouldRetry _ (Left _) = return True
-shouldRetry _ (Right _) = return False
+-- | Worth retrying: the request may not have reached Raindrop, or Raindrop
+-- asked us to back off. Auth and decode errors would fail identically again.
+isTransient :: ClientError -> Bool
+isTransient (ConnectionError _) = True
+isTransient (FailureResponse _ r) = let c = statusCode (responseStatusCode r) in c == 429 || c >= 500
+isTransient _ = False
 
+-- | Run a call, retrying transient failures; the final failure is thrown.
+runRetrying :: (MonadIO m, MonadLogger m) => ClientM a -> m a
+runRetrying act = do
+  env <- liftIO raindropEnv
+  result <- retrying retryPolicy shouldRetry (const (liftIO (runClientM act env)))
+  either (liftIO . throwIO) pure result
+  where
+    shouldRetry st (Left e)
+      | isTransient e = do
+          logWarnN $ "raindrop: transient failure on attempt " <> T.pack (show (rsIterNumber st + 1)) <> ": " <> T.pack (show e)
+          pure True
+    shouldRetry _ _ = pure False
+
+-- | For non-idempotent calls: a retry after a lost response would repeat the effect.
+runOnce :: (MonadIO m) => ClientM a -> m a
+runOnce act = liftIO $ do
+  env <- raindropEnv
+  runClientM act env >>= either throwIO pure
+
+-- | Failures are thrown as 'ClientError'; @result: false@ answers come back as 'False'.
 raindrop :: (MonadIO m, MonadLogger m) => BookmarkCredentials -> BookmarkRequest a -> m a
-raindrop creds (AddBookmark link mCollection tags) = do
-  let rt = view raindropToken creds
-      collection = fromMaybe "-1" mCollection
-      payload =
-        A.object
-          [ "link" A..= link,
-            "collection" A..= collection,
-            "tags" A..= tags,
-            "pleaseParse" A..= A.object []
-          ]
-  result <- liftIO $ retrying retryPolicy shouldRetry $ \_ -> do
-    try $ do
-      resp <- W.postWith (commonOpts rt) "https://api.raindrop.io/rest/v1/raindrop" payload
-      pure (BookmarkItemId . T.pack . show <$> resp ^? W.responseBody . key "item" . key "_id" . _Integral @_ @Int)
-  case result of
-    Left ex -> do
-      logErrorN $ "Failed to add bookmark after retries: " <> T.pack (show ex)
-      pure Nothing
-    Right value -> pure value
-raindrop creds (ArchiveBookmark bid) = do
-  let rt = view raindropToken creds
-      archiveId = view archiveCollectionId creds
-  resp <-
-    liftIO $
-      W.putWith (commonOpts rt) ("https://api.raindrop.io/rest/v1/raindrop/" <> T.unpack (bid ^. _BookmarkItemId)) $
-        A.object
-          [ "collection" A..= A.object ["$id" A..= archiveId]
-          ]
-  pure ((== Just True) $ resp ^? W.responseBody . key "result" . _Bool)
-raindrop creds (BatchArchiveBookmarks bids) = do
-  let rt = view raindropToken creds
-      archiveId = view archiveCollectionId creds
-      payload =
-        A.object
-          [ "ids" A..= map (^. _BookmarkItemId) bids,
-            "collection" A..= A.object ["$id" A..= archiveId]
-          ]
-  resp <- liftIO $ W.putWith (commonOpts rt) "https://api.raindrop.io/rest/v1/raindrops/-1" payload
-  pure ((== Just True) $ resp ^? W.responseBody . key "result" . _Bool)
-raindrop creds (SetReminder bid reminderTime) = do
-  let rt = view raindropToken creds
-      formattedTime = T.pack $ formatTime defaultTimeLocale "%Y-%m-%dT%H:%M:%S.%03qZ" reminderTime
-  resp <-
-    liftIO $
-      W.putWith (commonOpts rt) ("https://api.raindrop.io/rest/v1/raindrop/" <> T.unpack (bid ^. _BookmarkItemId)) $
-        A.object
-          [ "reminder" A..= A.object ["date" A..= formattedTime]
-          ]
-  pure ((== Just True) $ resp ^? W.responseBody . key "result" . _Bool)
-raindrop creds (RemoveReminder bid) = do
-  let rt = view raindropToken creds
-  resp <-
-    liftIO $
-      W.putWith (commonOpts rt) ("https://api.raindrop.io/rest/v1/raindrop/" <> T.unpack (bid ^. _BookmarkItemId)) $
-        A.object
-          [ "reminder" A..= A.Null
-          ]
-  pure ((== Just True) $ resp ^? W.responseBody . key "result" . _Bool)
-raindrop creds (RetrieveBookmarks page (RaindropCollectionId cid) mSearchParam) = do
-  let rt = view raindropToken creds
-      baseOpts = commonOpts rt & param "page" .~ [T.pack $ show page] & param "perpage" .~ ["50"]
-      opts = case mSearchParam of
-        Nothing -> baseOpts
-        Just searchParam -> baseOpts & param "search" .~ [searchParam]
-  resp <- liftIO $ W.getWith opts ("https://api.raindrop.io/rest/v1/raindrops/" <> T.unpack cid)
-  let count = resp ^? W.responseBody . key "count" . _Integral @_ @Natural
-  pure (fromMaybe 0 count, resp ^.. W.responseBody . key "items" . values . _JSON)
+raindrop creds req = case req of
+  AddBookmark link mCollection tags -> do
+    Created i <- runOnce (addItem api (NewRaindrop link (fromMaybe "-1" mCollection) tags))
+    pure (Just (BookmarkItemId (T.pack (show i))))
+  ArchiveBookmark bid -> ok (updateItem api (rawId bid) (MoveTo archiveId))
+  BatchArchiveBookmarks bids -> ok (moveItems api (BatchMove (map rawId bids) archiveId))
+  SetReminder bid t -> ok (updateItem api (rawId bid) (SetReminderAt t))
+  RemoveReminder bid -> ok (updateItem api (rawId bid) ClearReminder)
+  RetrieveBookmarks page (RaindropCollectionId cid) search -> do
+    Items count items <- runRetrying (listItems api cid page 50 search)
+    pure (count, items)
+  where
+    RaindropToken token = view raindropToken creds
+    api = raindropApi token
+    archiveId = view archiveCollectionId creds
+    rawId = (^. _BookmarkItemId)
+    ok call = (\(ApiResult b) -> b) <$> runRetrying call

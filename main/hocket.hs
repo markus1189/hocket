@@ -207,12 +207,6 @@ import Network.Bookmark.Ui.State
     updateItemsWithStoredReminderTimes,
   )
 import Network.Bookmark.Ui.Widgets (sanitizeForDisplay)
-import Network.HTTP.Client
-  ( HttpException (HttpExceptionRequest),
-    HttpExceptionContent (StatusCodeException),
-    responseHeaders,
-    responseStatus,
-  )
 import Network.Raindrop (raindrop)
 import qualified Network.Raindrop as R
 import Network.URI
@@ -251,6 +245,7 @@ import Options.Applicative
     (<**>),
   )
 import qualified Options.Applicative as Opt
+import Servant.Client (ClientError (..), ResponseF (..))
 import System.Directory (XdgDirectory (..), createDirectoryIfMissing, doesFileExist, getXdgDirectory, removeFile, removePathForcibly)
 import System.Environment (lookupEnv)
 import System.Exit (ExitCode (..), exitFailure)
@@ -1103,9 +1098,9 @@ hBarWithHints :: Text -> Text -> Widget Name
 hBarWithHints leftText rightText =
   withAttr (attrName "bar") (txt leftText <+> padLeft Max (txt rightText))
 
-retrieveItems :: BookmarkCredentials -> Maybe Text -> RaindropCollectionId -> IO (Either HttpException [BookmarkItemBatch])
+retrieveItems :: BookmarkCredentials -> Maybe Text -> RaindropCollectionId -> IO (Either ClientError [BookmarkItemBatch])
 retrieveItems cred searchParam collectionId = do
-  tryHttpException $
+  tryClientError $
     runTuiLoggingT $
       unfoldrM
         ( \currentPage -> do
@@ -1123,16 +1118,16 @@ retrieveItems cred searchParam collectionId = do
         )
         0
 
-performArchive :: BookmarkCredentials -> [BookmarkItem] -> IO (Either HttpException [(BookmarkItem, Bool)])
+performArchive :: BookmarkCredentials -> [BookmarkItem] -> IO (Either ClientError [(BookmarkItem, Bool)])
 performArchive cred items = do
-  tryHttpException $ runTuiLoggingT $ do
+  tryClientError $ runTuiLoggingT $ do
     let itemIds = map (view biId) items
     success <- raindrop cred (BatchArchiveBookmarks itemIds)
     pure $ map (,success) items
 
-performSetReminders :: BookmarkCredentials -> [(BookmarkItem, UTCTime)] -> IO (Either HttpException [(BookmarkItem, Bool)])
+performSetReminders :: BookmarkCredentials -> [(BookmarkItem, UTCTime)] -> IO (Either ClientError [(BookmarkItem, Bool)])
 performSetReminders cred itemsWithTimes = do
-  tryHttpException $ runTuiLoggingT $ do
+  tryClientError $ runTuiLoggingT $ do
     traverse
       ( \(item, reminderTime) -> do
           success <- raindrop cred (SetReminder (view biId item) reminderTime)
@@ -1140,9 +1135,9 @@ performSetReminders cred itemsWithTimes = do
       )
       itemsWithTimes
 
-performRemoveReminders :: BookmarkCredentials -> [BookmarkItem] -> IO (Either HttpException [(BookmarkItem, Bool)])
+performRemoveReminders :: BookmarkCredentials -> [BookmarkItem] -> IO (Either ClientError [(BookmarkItem, Bool)])
 performRemoveReminders cred items = do
-  tryHttpException $ runTuiLoggingT $ do
+  tryClientError $ runTuiLoggingT $ do
     traverse
       ( \item -> do
           success <- raindrop cred (RemoveReminder (view biId item))
@@ -1157,8 +1152,8 @@ runTuiLoggingT act = do
   createDirectoryIfMissing True dir
   runFileLoggingT (dir </> "hocket.log") act
 
-tryHttpException :: IO a -> IO (Either HttpException a)
-tryHttpException = try @HttpException
+tryClientError :: IO a -> IO (Either ClientError a)
+tryClientError = try @ClientError
 
 txtDisplay :: BookmarkItem -> Widget Name
 txtDisplay bit =
@@ -1308,10 +1303,10 @@ runClipboardCmd cmd args text = do
   unless (exitCode == ExitSuccess) $
     ioError (userError (cmd <> " exited with code " <> show exitCode))
 
-errorMessageFromException :: HttpException -> Maybe Text
-errorMessageFromException (HttpExceptionRequest _ (StatusCodeException resp _)) = msg
+errorMessageFromException :: ClientError -> Maybe Text
+errorMessageFromException (FailureResponse _ resp) = xError <|> code
   where
-    msg = xError <|> code
     xError = T.decodeUtf8 . snd <$> find (\(k, _) -> k == CI.mk "x-error") (responseHeaders resp)
-    code = Just . T.pack $ "Got status: " <> (show . responseStatus $ resp)
+    code = Just . T.pack $ "Got status: " <> show (responseStatusCode resp)
+errorMessageFromException (DecodeFailure msg _) = Just ("Unexpected response from Raindrop: " <> msg)
 errorMessageFromException e = Just . T.pack $ show e
