@@ -18,7 +18,7 @@
           root = ./.;
           modifier = with pkgs.haskell.lib;
             drv:
-            dontHaddock (disableOptimization (disableLibraryProfiling drv));
+            doBenchmark (dontHaddock (disableOptimization (disableLibraryProfiling drv)));
         };
       in rec {
         apps.hocket = {

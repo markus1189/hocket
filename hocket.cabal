@@ -109,3 +109,18 @@ test-suite test
                      , text-zipper
                      , time
                      , vector
+
+benchmark bench
+  default-language:    Haskell2010
+  type:                exitcode-stdio-1.0
+  ghc-options:         -Wall -Wunused-packages -Werror -O2 -rtsopts "-with-rtsopts=-A32m"
+  hs-source-dirs:      bench
+  main-is:             Bench.hs
+  build-depends:       base
+                     , brick
+                     , deepseq
+                     , hocket
+                     , lens
+                     , tasty-bench
+                     , text
+                     , time
