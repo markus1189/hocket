@@ -76,19 +76,18 @@ import qualified Data.Text.Zipper as Z
 #if !MIN_VERSION_base(4,20,0)
 import Data.Foldable (foldl')
 #endif
-import Data.Foldable (maximumBy, toList)
+import Data.Foldable (maximumBy)
 import Data.Function (on)
 import Data.Functor (($>))
 import Data.Map (Map)
 import qualified Data.Map as Map
 import Data.Maybe (isJust)
 import Data.Ord (Down (..), comparing)
-import Data.SortedList (SortedList)
 import qualified Data.SortedList as SL
 import Data.Text (Text)
 import qualified Data.Text as T
 import Data.Time (UTCTime)
-import Data.Time.Clock.POSIX (POSIXTime, posixSecondsToUTCTime)
+import Data.Time.Clock.POSIX (POSIXTime)
 import qualified Data.Vector as V
 import Network.Bookmark.Types
 import Network.Bookmark.Ui.Widgets
@@ -162,43 +161,27 @@ getSortDate item = case _biReminder item of
   Just reminderDate -> reminderDate
   Nothing -> _biCreated item
 
--- Normalize PendingAction for grouping - all ToBeReminded times become ToBeReminded with epoch
-normalizePendingAction :: PendingAction -> PendingAction
-normalizePendingAction (ToBeReminded _) = ToBeReminded (posixSecondsToUTCTime 0)
-normalizePendingAction other = other
-
-partitionItems :: HocketState -> Map PendingAction (SortedList SortByUpdated)
-partitionItems =
-  Map.fromListWith (<>)
-    . over (mapped . _1) normalizePendingAction
-    . over (mapped . _2) (SL.singleton . SBU)
-    . toList
-    . view hsContents
-
 data ItemCounts = ItemCounts
-  { _icNone :: Int,
-    _icToBeArchived :: Int,
-    _icToBeReminded :: Int,
-    _icReminderToBeRemoved :: Int,
-    _icFutureReminders :: Int
+  { _icNone :: !Int,
+    _icToBeArchived :: !Int,
+    _icToBeReminded :: !Int,
+    _icReminderToBeRemoved :: !Int,
+    _icFutureReminders :: !Int
   }
 
 makeLenses ''ItemCounts
 
 hsNumItems :: HocketState -> ItemCounts
-hsNumItems s =
-  ItemCounts
-    { _icNone = length $ partitioned ^. at None . non (SL.toSortedList []),
-      _icToBeArchived = length $ partitioned ^. at ToBeArchived . non (SL.toSortedList []),
-      _icToBeReminded = length $ partitioned ^. at (ToBeReminded (posixSecondsToUTCTime 0)) . non (SL.toSortedList []),
-      _icReminderToBeRemoved = length $ partitioned ^. at ReminderToBeRemoved . non (SL.toSortedList []),
-      _icFutureReminders =
-        if s ^. hsShowFutureReminders
-          then 0
-          else length $ filter (isJust . view biReminder . snd) $ Map.elems (s ^. hsContents)
-    }
+hsNumItems s = foldl' step (ItemCounts 0 0 0 0 0) (s ^. hsContents)
   where
-    partitioned = partitionItems s
+    countFuture = not (s ^. hsShowFutureReminders)
+    step c (action, item) =
+      (if countFuture && isJust (item ^. biReminder) then icFutureReminders +~ 1 else id) $
+        case action of
+          None -> c & icNone +~ 1
+          ToBeArchived -> c & icToBeArchived +~ 1
+          ToBeReminded _ -> c & icToBeReminded +~ 1
+          ReminderToBeRemoved -> c & icReminderToBeRemoved +~ 1
 
 data BatchStep
   = StepArchive
