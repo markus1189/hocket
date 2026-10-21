@@ -8,6 +8,7 @@ import Data.Text (Text)
 import qualified Data.Text as T
 import Data.Time.Clock (addUTCTime)
 import Data.Time.Clock.POSIX (posixSecondsToUTCTime)
+import Network.Bookmark.Agent.Protocol (FlagAction (..), WriteCmd (..), validateWrite)
 import Network.Bookmark.Agent.Snapshot (asItems, siVisible, takeSnapshot)
 import Network.Bookmark.Types
 import Network.Bookmark.Ui.State
@@ -84,6 +85,16 @@ mkState n =
   syncForRender $
     insertItems (map mkItem [1 .. n]) (initialState (BookmarkCredentials (RaindropToken "") 0))
 
+itemId :: Int -> BookmarkItemId
+itemId = BookmarkItemId . T.pack . show
+
+flagMany :: [Int] -> HocketState -> HocketState
+flagMany is s0 = foldl' step s0 is
+  where
+    step st i = case validateWrite (takeSnapshot 0 st) (CmdSetFlag (itemId i) FlagArchive) of
+      Left e -> error (T.unpack e)
+      Right _ -> syncForRender (setPendingAction (itemId i) ToBeArchived st)
+
 sizes :: [Int]
 sizes = [1000, 5000, 20000]
 
@@ -102,6 +113,20 @@ main =
             "syncForRender"
             [ bench name $ nf (visibleCount . syncForRender . setFilterQuery q) s
             | (name, q) <- queries
+            ],
+          bgroup
+            "videoFilter"
+            [ bench name $ nf (visibleCount . syncForRender . setVideoFilterMode m) s
+            | (name, m) <- [("only", ShowOnlyVideos), ("hide", HideVideos)]
+            ],
+          bgroup
+            "agent"
+            [ bench "validateWrite first" $ nf (either (const 0) (const 1 :: WriteCmd -> Int) . validateWrite (takeSnapshot 0 s)) (CmdSetFlag (itemId n) FlagArchive),
+              bench "validateWrite last" $ nf (either (const 0) (const 1 :: WriteCmd -> Int) . validateWrite (takeSnapshot 0 s)) (CmdSetFlag (itemId 1) FlagArchive),
+              -- What the server + TUI do per flag write: validate against the
+              -- current snapshot, apply, re-render, re-snapshot.
+              bench "flag 100 (validate+sync)" $ nf (visibleCount . flagMany [1 .. 100]) s,
+              bench "flag 100 (sync only)" $ nf (visibleCount . foldl' (\st i -> syncForRender (setPendingAction (itemId i) ToBeArchived st)) s) [1 .. 100]
             ],
           bench "hsNumItems" $ nf (\st -> let c = hsNumItems st in c ^. icNone + c ^. icFutureReminders) s,
           -- SnapshotItem fields are strict, so WHNF of each list cell forces the projection.
