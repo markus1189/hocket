@@ -75,19 +75,24 @@ sanitizeForDisplay = T.concatMap replaceChar . T.filter (not . isComposing)
 -- Case-insensitive fzf-style subsequence match: every char of the query
 -- appears in the haystack in order (gaps allowed). Empty query matches all.
 fuzzyMatch :: Text -> Text -> Bool
-fuzzyMatch query haystack = go (T.unpack (T.toLower query)) (T.toLower haystack)
-  where
-    go [] _ = True
-    go (q : qs) hs = case T.uncons (T.dropWhile (/= q) hs) of
-      Just (_, rest) -> go qs rest
-      Nothing -> False
+fuzzyMatch query haystack = subsequenceOf (T.unpack (T.toLower query)) (T.toLower haystack)
+
+-- Both arguments must already be lowercased.
+subsequenceOf :: String -> Text -> Bool
+subsequenceOf [] _ = True
+subsequenceOf (q : qs) hs = case T.uncons (T.dropWhile (/= q) hs) of
+  Just (_, rest) -> subsequenceOf qs rest
+  Nothing -> False
 
 -- Stricter filter match: split the query into whitespace-separated terms;
 -- every term must fuzzy-subsequence-match at least one word of the haystack
 -- (AND across terms, no matching across word boundaries). An empty /
 -- all-whitespace query matches everything.
 fuzzyFilterMatch :: Text -> Text -> Bool
-fuzzyFilterMatch query haystack =
-  all (\term -> any (fuzzyMatch term) haystackWords) (T.words query)
+fuzzyFilterMatch query = \haystack ->
+  let haystackWords = T.words (T.toLower haystack)
+   in all (\term -> any (subsequenceOf term) haystackWords) terms
   where
-    haystackWords = T.words haystack
+    -- Bound outside the lambda so a partial application
+    -- (`filter (fuzzyFilterMatch q . ...)`) prepares the query once, not per item.
+    terms = map T.unpack (T.words (T.toLower query))
