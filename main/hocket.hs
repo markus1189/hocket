@@ -41,7 +41,6 @@ import Brick.BChan (BChan, newBChan, writeBChanNonBlocking)
 import qualified Brick.Focus as Focus
 import Brick.Widgets.Border (hBorder)
 import Brick.Widgets.Edit (applyEdit, editFocusedAttr, handleEditorEvent, renderEditor)
-import Brick.Widgets.List (handleListEvent, handleListEventVi)
 import qualified Brick.Widgets.List as L
 import Control.Applicative ((<|>))
 import Control.Concurrent.Async (async)
@@ -64,10 +63,12 @@ import Data.Foldable (for_, traverse_)
 import Data.IORef (newIORef, readIORef)
 import Signals (exitOnTerminated, unwindOnTermination)
 #if MIN_VERSION_base(4,20,0)
-import Data.List (find, findIndex, isPrefixOf)
+import Data.List (find, isPrefixOf)
 #else
-import Data.List (find, findIndex, foldl', isPrefixOf)
+import Data.List (find, foldl', isPrefixOf)
 #endif
+import Brick.Main (lookupViewport)
+import Brick.Types (vpSize)
 import Data.Maybe (fromMaybe, isJust)
 import Data.Text (Text)
 import qualified Data.Text as T
@@ -81,7 +82,6 @@ import Data.Time.LocalTime
     utcToLocalTime,
   )
 import Data.Traversable (for)
-import qualified Data.Vector as V
 import Dhall (auto, input)
 import Fixture (FixtureOpts (..), fixtureParser, fixtureStore)
 import Formatting (sformat, (%))
@@ -101,7 +101,8 @@ import Network.Bookmark.Agent.Protocol
   )
 import Network.Bookmark.Agent.Snapshot (AgentSnapshot, asVersion, emptySnapshot, takeSnapshot)
 import Network.Bookmark.App.Effect (Effect (..))
-import Network.Bookmark.App.Msg (Intent (Refresh), Msg (..), Now (..))
+import Network.Bookmark.App.Msg (Intent (Navigate, Refresh), Msg (..), Now (..))
+import Network.Bookmark.App.Nav (Nav (..))
 import Network.Bookmark.App.Update (update)
 import Network.Bookmark.Fake (encodeFixtureDump, fakePort)
 import Network.Bookmark.Port (RaindropPort (..))
@@ -128,7 +129,6 @@ import Network.Bookmark.Ui.State
     enterFilterMode,
     focusRing,
     focusedItem,
-    focusedList,
     getPendingActionForItem,
     hsAgentClients,
     hsAgentError,
@@ -137,7 +137,6 @@ import Network.Bookmark.Ui.State
     hsFilterQuery,
     hsLastUpdated,
     hsNumItems,
-    hsSelected,
     hsStatus,
     hsVideoFilter,
     icFutureReminders,
@@ -146,7 +145,6 @@ import Network.Bookmark.Ui.State
     icToBeArchived,
     icToBeReminded,
     initialState,
-    isReminderAction,
     itemList,
     lockFilter,
     settle,
@@ -357,14 +355,15 @@ vtyEventHandler env e = do
       -- keystrokes the editor already applied synchronously.
       EvKey KEsc [] -> id %= cancelFilter
       EvKey KEnter [] -> id %= lockFilter
-      EvKey KUp [] -> zoom itemList (handleListEventVi handleListEvent e) >> followList
-      EvKey KDown [] -> zoom itemList (handleListEventVi handleListEvent e) >> followList
+      EvKey KUp [] -> listHeight >>= \h -> applyMsg env (Intent (Navigate h Up))
+      EvKey KDown [] -> listHeight >>= \h -> applyMsg env (Intent (Navigate h Down))
       -- Brick's editor has no Ctrl-W.
       EvKey (KChar 'w') [MCtrl] -> hsFilterEditor %= applyEdit deletePrevWord
       _ -> zoom hsFilterEditor (handleEditorEvent (VtyEvent e))
     else do
       now <- liftIO (Now <$> getCurrentTime <*> getCurrentTimeZone)
-      case keyIntents now e s of
+      height <- listHeight
+      case keyIntents now height e s of
         Just intents -> traverse_ (applyMsg env . Intent) intents
         -- Navigation and the switch to filter mode stay with the shell.
         Nothing -> vtyEventHandlerNormal e
@@ -382,32 +381,17 @@ applyMsg env m = do
 vtyEventHandlerNormal ::
   Event ->
   EventM Name HocketState ()
-vtyEventHandlerNormal (EvKey (KChar 'J') []) = do
-  s <- use id
-  case findNextFlaggedItem s of
-    Just newIdx -> (itemList %= L.listMoveTo newIdx) >> followList
-    Nothing -> pure ()
-vtyEventHandlerNormal (EvKey (KChar 'K') []) = do
-  s <- use id
-  case findPrevFlaggedItem s of
-    Just newIdx -> (itemList %= L.listMoveTo newIdx) >> followList
-    Nothing -> pure ()
 vtyEventHandlerNormal (EvKey (KChar '/') []) =
   -- Flip into filter mode synchronously so the very next keystroke is already
   -- seen under the editing guard; routing this through the BChan would leave a
   -- one-event window where a fast 'Q'/paste leaks to normal mode and quits.
   id %= enterFilterMode
-vtyEventHandlerNormal e = do
-  zoom itemList (handleListEventVi handleListEvent e)
-  followList
+vtyEventHandlerNormal _ = pure ()
 
--- | Until the keymap moves the selection itself (Navigate), brick's list
--- moves the cursor and the selection follows it once, right after; settle
--- then derives the list from the selection again.
-followList :: EventM Name HocketState ()
-followList = do
-  l <- use itemList
-  hsSelected .= (view biId . snd <$> L.listSelectedElement l)
+-- | The list viewport's height in rows, as brick's page moves measure it;
+-- 0 before the list was first drawn, which makes a page move no move.
+listHeight :: EventM Name HocketState Int
+listHeight = maybe 0 (snd . view vpSize) <$> lookupViewport ItemListName
 
 myEventHandler ::
   Env ->
@@ -832,25 +816,3 @@ trimURI uri =
       if prefix `isPrefixOf` s
         then drop (length prefix) s
         else s
-
--- Find next flagged item
-findNextFlaggedItem :: HocketState -> Maybe Int
-findNextFlaggedItem s = do
-  list <- focusedList s
-  currentIdx <- view L.listSelectedL list
-  let items = V.toList $ view L.listElementsL list
-      remainingItems = drop (currentIdx + 1) items
-  case findIndex (\item -> let action = getPendingActionForItem (view biId item) s in action == ToBeArchived || isReminderAction action) remainingItems of
-    Just relativeIdx -> Just (currentIdx + 1 + relativeIdx)
-    Nothing -> Nothing
-
--- Find previous flagged item
-findPrevFlaggedItem :: HocketState -> Maybe Int
-findPrevFlaggedItem s = do
-  list <- focusedList s
-  currentIdx <- view L.listSelectedL list
-  let items = V.toList $ view L.listElementsL list
-      precedingItems = reverse $ take currentIdx items
-  case findIndex (\item -> let action = getPendingActionForItem (view biId item) s in action == ToBeArchived || isReminderAction action) precedingItems of
-    Just relativeIdx -> Just (currentIdx - 1 - relativeIdx)
-    Nothing -> Nothing

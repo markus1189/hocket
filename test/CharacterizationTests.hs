@@ -186,7 +186,7 @@ keyNow = Now (read "2026-11-01 12:00:00 UTC") (minutesToTimeZone 60)
 -- | Press a key the way the shell does: its intents through 'update' within
 -- one event, then the render sync. Returns the opened item ids.
 press :: ItemKey -> HocketState -> (HocketState, [Text])
-press key s0 = case keyIntents keyNow (keyEvent key) start of
+press key s0 = case keyIntents keyNow 10 (keyEvent key) start of
   Nothing -> error ("not a keymap key: " <> show key)
   Just intents ->
     let (s, effects) = foldl apply (start, []) intents

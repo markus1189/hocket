@@ -19,6 +19,7 @@ import Network.Bookmark.Agent.Intent (toIntent)
 import Network.Bookmark.Agent.Protocol (FlagAction (..), WriteCmd (..))
 import Network.Bookmark.App.Effect
 import Network.Bookmark.App.Msg
+import Network.Bookmark.App.Nav (Nav (..))
 import Network.Bookmark.App.Plan (BatchPlan (..))
 import Network.Bookmark.App.Update
 import Network.Bookmark.Batch (ErrorScope (..), StepOutcome, runItems)
@@ -132,6 +133,18 @@ updateTests =
             finished summary = (\(s', fx) -> (fx, s' ^. hsAsyncOp, s' ^. hsStatus)) (update (BatchFinished summary) running)
         finished (Just "archive 0/1 (1 failed: 404)") @?= ([], Nothing, Just "archive 0/1 (1 failed: 404)")
         finished Nothing @?= ([], Nothing, Nothing),
+      testCase "Navigate moves the selection by id over what is visible" $ do
+        let five = settle (insertItems [item i (-1) & biCreated .~ read ("2026-01-0" <> show n <> " 12:00:00 UTC") | (i, n) <- zip ["a", "b", "c", "d", "e"] [9 :: Int, 8, 7, 6, 5]] emptyState)
+            moved h n s' = after (Intent (Navigate h n)) s' ^. hsSelected
+            onB = five & hsSelected ?~ BookmarkItemId "b"
+        moved 3 Down five @?= Just (BookmarkItemId "b")
+        moved 3 Up five @?= Just (BookmarkItemId "a")
+        moved 3 Bottom five @?= Just (BookmarkItemId "e")
+        moved 3 (Page 1) onB @?= Just (BookmarkItemId "e")
+        -- Nothing drawn yet: a page move is no move.
+        moved 0 (Page 1) onB @?= Just (BookmarkItemId "b")
+        let flaggedD = onB & setPendingAction (BookmarkItemId "d") ToBeArchived
+        moved 3 NextFlagged flaggedD @?= Just (BookmarkItemId "d"),
       testCase "SystemFailed and Copied go to the status line" $ do
         after (SystemFailed "no firefox") emptyState ^. hsStatus @?= Just "no firefox"
         after (Copied "https://example.com/a") emptyState ^. hsStatus @?= Just "Copied: https://example.com/a"

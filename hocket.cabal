@@ -94,7 +94,6 @@ executable hocket
                      , text-zipper
                      , time
                      , unix
-                     , vector
                      , vty-unix
                      , vty
 

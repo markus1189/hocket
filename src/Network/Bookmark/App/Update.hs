@@ -12,6 +12,7 @@ import qualified Data.Vector as V
 import Network.Bookmark.Agent.Protocol (FlagAction (..))
 import Network.Bookmark.App.Effect
 import Network.Bookmark.App.Msg
+import Network.Bookmark.App.Nav (navigate)
 import Network.Bookmark.App.Plan (planBatch)
 import Network.Bookmark.Batch (soOk)
 import Network.Bookmark.Reminder (reminderPolicy)
@@ -46,6 +47,7 @@ update msg s = case msg of
   Intent ToggleFutureReminders -> refilter toggleShowFutureReminders
   Intent (SetShowFutureReminders b) -> refilter (setShowFutureReminders b)
   Intent (SetStatus t) -> (s & hsStatus ?~ t, [])
+  Intent (Navigate height nav) -> (s & hsSelected .~ navigate height nav (s ^. hsVisible) (`getPendingActionForItem` s) (s ^. hsSelected), [])
   AgentClients n -> (setAgentClients n s, [])
   -- The status line is overwritten within a frame, so the header keeps it.
   AgentServerDied err -> (s & hsStatus ?~ ("agent socket failed: " <> err) & setAgentError (Just err), [])

@@ -3,9 +3,10 @@ module KeyIntentTests (keyIntentTests) where
 import Control.Lens ((&), (.~))
 import Data.Foldable (for_)
 import Data.Time (utc)
-import Graphics.Vty (Event (EvKey), Key (..))
+import Graphics.Vty (Event (EvKey), Key (..), Modifier (MCtrl))
 import Keys (keyIntents)
 import Network.Bookmark.App.Msg
+import Network.Bookmark.App.Nav (Nav (..))
 import Network.Bookmark.Ui.State
 import Test.Tasty (TestTree, testGroup)
 import Test.Tasty.HUnit (testCase, (@?=))
@@ -34,8 +35,28 @@ rows =
     (key 'S', [ToggleFutureReminders]),
     (key 'v', [ToggleVideoOnly]),
     (key 'V', [ToggleHideVideos]),
-    (key 'Q', [Quit])
+    (key 'Q', [Quit]),
+    (key 'k', [Navigate height Up]),
+    (EvKey KUp [], [Navigate height Up]),
+    (key 'j', [Navigate height Down]),
+    (EvKey KDown [], [Navigate height Down]),
+    (key 'g', [Navigate height Top]),
+    (EvKey KHome [], [Navigate height Top]),
+    (key 'G', [Navigate height Bottom]),
+    (EvKey KEnd [], [Navigate height Bottom]),
+    (EvKey (KChar 'f') [MCtrl], [Navigate height (Page 1)]),
+    (EvKey KPageDown [], [Navigate height (Page 1)]),
+    (EvKey (KChar 'b') [MCtrl], [Navigate height (Page (-1))]),
+    (EvKey KPageUp [], [Navigate height (Page (-1))]),
+    (EvKey (KChar 'd') [MCtrl], [Navigate height (HalfPage 1)]),
+    (EvKey (KChar 'u') [MCtrl], [Navigate height (HalfPage (-1))]),
+    (key 'J', [Navigate height NextFlagged]),
+    (key 'K', [Navigate height PrevFlagged])
   ]
+
+-- | The list viewport's rows, as the shell would pass them.
+height :: Int
+height = 7
 
 keyIntentTests :: TestTree
 keyIntentTests =
@@ -43,13 +64,13 @@ keyIntentTests =
     "keyIntents"
     [ testCase "every action key yields its Intents" $
         for_ rows $
-          \(e, is) -> (e, keyIntents now e initialState) @?= (e, Just is),
-      testCase "navigation, J/K and / stay with the shell" $
-        for_ ([key 'j', key 'k', key 'J', key 'K', key 'g', key 'G', key '/'] <> map (`EvKey` []) [KUp, KDown, KPageUp, KPageDown, KHome, KEnd]) $ \e ->
-          (e, keyIntents now e initialState) @?= (e, Nothing),
+          \(e, is) -> (e, keyIntents now height e initialState) @?= (e, Just is),
+      testCase "/ and unknown keys stay with the shell" $
+        for_ [key '/', key 'x', EvKey (KChar 'j') [MCtrl]] $ \e ->
+          (e, keyIntents now height e initialState) @?= (e, Nothing),
       testCase "the keymap is not asked while the filter editor has focus" $
         for_ (map fst rows) $
-          \e -> (e, keyIntents now e filtering) @?= (e, Nothing),
+          \e -> (e, keyIntents now height e filtering) @?= (e, Nothing),
       testCase "Q typed into a filter is never Quit" $
-        keyIntents now (key 'Q') filtering @?= Nothing
+        keyIntents now height (key 'Q') filtering @?= Nothing
     ]

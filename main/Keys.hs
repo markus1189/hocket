@@ -4,9 +4,10 @@ module Keys
 where
 
 import Control.Lens ((^.))
-import Graphics.Vty (Event (EvKey), Key (KChar, KEnter))
+import Graphics.Vty (Event (EvKey), Key (..), Modifier (MCtrl))
 import Network.Bookmark.App.Msg (Intent, Now)
 import qualified Network.Bookmark.App.Msg as I
+import Network.Bookmark.App.Nav (Nav (..))
 import Network.Bookmark.Ui.State
 
 -- | Normal-mode keys as Intents. 'Nothing' is a key the shell keeps:
@@ -14,8 +15,8 @@ import Network.Bookmark.Ui.State
 -- mode synchronously), and every key while the filter editor has focus, so
 -- @Q@ typed into a filter never quits. Flag guards such as @a@ on an archived
 -- item are 'update''s, so action keys always yield their Intent.
-keyIntents :: Now -> Event -> HocketState -> Maybe [Intent]
-keyIntents now e s
+keyIntents :: Now -> Int -> Event -> HocketState -> Maybe [Intent]
+keyIntents now height e s
   | s ^. hsFilterActive = Nothing
   | otherwise = case e of
       EvKey (KChar ' ') [] -> Just [I.Open I.Selected]
@@ -32,4 +33,23 @@ keyIntents now e s
       EvKey (KChar 'v') [] -> Just [I.ToggleVideoOnly]
       EvKey (KChar 'V') [] -> Just [I.ToggleHideVideos]
       EvKey (KChar 'Q') [] -> Just [I.Quit]
+      -- brick's list keys (handleListEvent, handleListEventVi), plus J/K.
+      EvKey (KChar 'k') [] -> nav Up
+      EvKey KUp [] -> nav Up
+      EvKey (KChar 'j') [] -> nav Down
+      EvKey KDown [] -> nav Down
+      EvKey (KChar 'g') [] -> nav Top
+      EvKey KHome [] -> nav Top
+      EvKey (KChar 'G') [] -> nav Bottom
+      EvKey KEnd [] -> nav Bottom
+      EvKey (KChar 'f') [MCtrl] -> nav (Page 1)
+      EvKey KPageDown [] -> nav (Page 1)
+      EvKey (KChar 'b') [MCtrl] -> nav (Page (-1))
+      EvKey KPageUp [] -> nav (Page (-1))
+      EvKey (KChar 'd') [MCtrl] -> nav (HalfPage 1)
+      EvKey (KChar 'u') [MCtrl] -> nav (HalfPage (-1))
+      EvKey (KChar 'J') [] -> nav NextFlagged
+      EvKey (KChar 'K') [] -> nav PrevFlagged
       _ -> Nothing
+  where
+    nav n = Just [I.Navigate height n]

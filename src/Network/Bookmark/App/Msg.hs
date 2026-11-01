@@ -14,6 +14,7 @@ where
 import Data.Text (Text)
 import Data.Time (TimeZone, UTCTime)
 import Network.Bookmark.Agent.Protocol (FlagAction)
+import Network.Bookmark.App.Nav (Nav)
 import Network.Bookmark.Batch (StepOutcome)
 import Network.Bookmark.Types (BookmarkItemBatch, BookmarkItemId)
 import Network.Bookmark.Ui.State (BatchStep, VideoFilterMode)
@@ -54,6 +55,9 @@ data Intent
   | ToggleFutureReminders
   | SetShowFutureReminders !Bool
   | SetStatus !Text
+  | -- | Move the selection; the shell supplies the list viewport's height in
+    -- rows, which page moves are measured in.
+    Navigate !Int !Nav
   | Quit
   deriving (Show, Eq)
 
