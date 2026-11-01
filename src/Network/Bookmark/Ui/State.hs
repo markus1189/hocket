@@ -12,6 +12,10 @@ module Network.Bookmark.Ui.State
     VideoFilterMode (..),
     AsyncOp (..),
     BatchStep (..),
+    BatchProgress (BatchProgress),
+    bpPlanned,
+    bpRan,
+    hsBatch,
     hsAsyncOp,
     tryAcquireAsyncOp,
     completeAsyncOp,
@@ -92,6 +96,7 @@ import Data.Time (UTCTime)
 import Data.Time.Clock.POSIX (POSIXTime)
 import qualified Data.Vector as V
 import qualified Network.Bookmark.App.Nav as Nav
+import Network.Bookmark.Batch (StepOutcome)
 import Network.Bookmark.Types
 import Network.Bookmark.Ui.Widgets
 
@@ -111,9 +116,26 @@ data VideoFilterMode
   | HideVideos
   deriving (Show, Eq)
 
+data BatchStep
+  = StepArchive
+  | StepSetReminders
+  | StepRemoveReminders
+  deriving (Show, Eq)
+
+-- | A running batch: its steps, and the outcomes 'StepDone' brought so far,
+-- from which update writes the summary.
+data BatchProgress = BatchProgress
+  { _bpPlanned :: ![BatchStep],
+    _bpRan :: ![(BatchStep, StepOutcome () Text)]
+  }
+  deriving (Show, Eq)
+
+makeLenses ''BatchProgress
+
 data HocketState = HocketState
   { _hsLastUpdated :: !(Maybe POSIXTime),
     _hsAsyncOp :: !(Maybe AsyncOp),
+    _hsBatch :: !(Maybe BatchProgress),
     _hsStatus :: !(Maybe Text),
     _hsContents :: !(Map BookmarkItemId (PendingAction, BookmarkItem)),
     _hsShowFutureReminders :: !Bool,
@@ -184,12 +206,6 @@ hsNumItems s = foldl' step (ItemCounts 0 0 0 0 0) (s ^. hsContents)
           ToBeReminded _ -> c & icToBeReminded +~ 1
           ReminderToBeRemoved -> c & icReminderToBeRemoved +~ 1
 
-data BatchStep
-  = StepArchive
-  | StepSetReminders
-  | StepRemoveReminders
-  deriving (Show, Eq)
-
 -- | The non-empty 'X' sub-buckets, in the order the batch op runs them.
 batchStepsWithWork :: HocketState -> [BatchStep]
 batchStepsWithWork s =
@@ -204,6 +220,7 @@ batchStepsWithWork s =
 initialState :: HocketState
 initialState =
   HocketState
+    Nothing
     Nothing
     Nothing
     Nothing

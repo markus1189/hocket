@@ -31,7 +31,7 @@ import Network.Bookmark.Ui.State (BatchStep (..))
 import Network.Bookmark.Ui.Sync (SyncKind (IncrementalAll), spCollection, spKind, spSearch)
 import Servant.Client.Core (ClientError)
 import System (browseItem, cleanUrl, copyToClipboard)
-import Worker (errorMessageFromException, exceptionMessage, fetchResult, runBatch, runCalls, runStep, trySync)
+import Worker (errorMessageFromException, exceptionMessage, fetchResult, runCalls, runStep, runSteps, trySync)
 
 -- | Where to post events, and Raindrop.
 data Env = Env {envEvents :: !(BChan Msg), envPort :: !RaindropPort}
@@ -106,8 +106,8 @@ batchWorker post port plan = do
         StepArchive -> runStep post StepArchive Archived (performArchive port (bpArchive plan))
         StepSetReminders -> runStep post StepSetReminders RemindersSetAt (performSetReminders port (bpSetReminders plan))
         StepRemoveReminders -> runStep post StepRemoveReminders RemindersRemoved (performRemoveReminders port (bpRemoveReminders plan))
-  r <- trySync (runBatch run (planSteps plan)) `onException` post (BatchFinished (Just "batch interrupted"))
-  post (BatchFinished (either (Just . exceptionMessage) id r))
+  r <- trySync (runSteps run (planSteps plan)) `onException` post (BatchFinished (Just "batch interrupted"))
+  post (BatchFinished (either (Just . exceptionMessage) (const Nothing) r))
 
 tryClientError :: IO a -> IO (Either ClientError a)
 tryClientError = try @ClientError

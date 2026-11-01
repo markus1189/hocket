@@ -8,8 +8,6 @@ module Worker
   ( fetchResult,
     postOutcome,
     runSteps,
-    runBatch,
-    batchStatus,
     runCalls,
     runStep,
     describeError,
@@ -22,14 +20,14 @@ where
 
 import Control.Applicative ((<|>))
 import Control.Exception (SomeAsyncException, SomeException (..), displayException, fromException)
-import Control.Lens (view, (^.))
+import Control.Lens ((^.))
 import Control.Monad (mfilter)
 import Control.Monad.Catch (MonadCatch, throwM, try)
 import Data.Bifunctor (first, second)
 import qualified Data.CaseInsensitive as CI
 import Data.Char (isControl)
-import Data.List (find, nub)
-import Data.Maybe (fromMaybe, isJust, isNothing, listToMaybe, mapMaybe)
+import Data.List (find)
+import Data.Maybe (isJust)
 import Data.Text (Text)
 import qualified Data.Text as T
 import qualified Data.Text.Encoding as T
@@ -68,41 +66,6 @@ runSteps run (step : rest) = do
   if isJust (outcome ^. soAborted)
     then pure [(step, outcome)]
     else ((step, outcome) :) <$> runSteps run rest
-
--- | The batch worker without its IO: run the steps, which post their
--- outcomes, and answer the summary for the one 'BatchFinished' the caller
--- posts, the only message that frees the batch slot.
-runBatch :: (Monad m) => (BatchStep -> m (StepOutcome () Text)) -> [BatchStep] -> m (Maybe Text)
-runBatch run steps = batchStatus steps <$> runSteps run steps
-
--- | The D6 status line, e.g.
--- @archive ok · reminders 3/5 (2 failed: 404) · remove-reminders skipped: offline@;
--- 'Nothing' when every step went through cleanly.
-batchStatus :: [BatchStep] -> [(BatchStep, StepOutcome () Text)] -> Maybe Text
-batchStatus planned ran
-  | all (clean . snd) ran = Nothing
-  | otherwise = Just (T.intercalate " · " (map ranText ran <> map skippedText (drop (length ran) planned)))
-  where
-    clean o = null (o ^. soFailed) && isNothing (o ^. soAborted)
-    abortReason = fromMaybe "" (listToMaybe (mapMaybe (view soAborted . snd) ran))
-    skippedText step = stepName step <> " skipped: " <> abortReason
-    ranText (step, o)
-      | clean o = stepName step <> " ok"
-      | otherwise = stepName step <> " " <> count (o ^. soOk) <> "/" <> count (total o) <> " (" <> T.intercalate "; " (problems o) <> ")"
-    total o = (o ^. soOk) <> map fst (o ^. soFailed) <> (o ^. soSkipped)
-    problems o =
-      [count fs <> " failed: " <> T.intercalate ", " (nub (map (failureText . snd) fs)) | let fs = o ^. soFailed, not (null fs)]
-        <> ["aborted: " <> e | Just e <- [o ^. soAborted]]
-    count :: [x] -> Text
-    count = T.pack . show . length
-    failureText ResultFalse = "result: false"
-    failureText (CallFailed err) = err
-
-stepName :: BatchStep -> Text
-stepName = \case
-  StepArchive -> "archive"
-  StepSetReminders -> "reminders"
-  StepRemoveReminders -> "remove-reminders"
 
 -- | Catch what the action itself threw, so a worker can still post its
 -- terminal message; asynchronous exceptions (a cancel) are rethrown.

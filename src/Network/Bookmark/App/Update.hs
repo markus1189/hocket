@@ -3,18 +3,23 @@
 
 -- | The TUI core as one pure function: every message, from the keyboard,
 -- the agent or a worker, and what the shell should do about it.
-module Network.Bookmark.App.Update (update) where
+module Network.Bookmark.App.Update (update, batchStatus) where
 
+import Control.Applicative ((<|>))
 import Control.Lens
+import Data.Bifunctor (first)
+import Data.List (nub)
+import Data.Maybe (fromMaybe, isNothing, listToMaybe, mapMaybe)
 import Data.Text (Text)
+import qualified Data.Text as T
 import Data.Time (UTCTime)
 import qualified Data.Vector as V
 import Network.Bookmark.Agent.Protocol (FlagAction (..))
 import Network.Bookmark.App.Effect
 import Network.Bookmark.App.Msg
 import Network.Bookmark.App.Nav (navigate)
-import Network.Bookmark.App.Plan (planBatch)
-import Network.Bookmark.Batch (soOk)
+import Network.Bookmark.App.Plan (planBatch, planSteps)
+import Network.Bookmark.Batch (Failure (..), StepOutcome, soAborted, soFailed, soOk, soSkipped)
 import Network.Bookmark.Reminder (reminderPolicy)
 import Network.Bookmark.Types
 import Network.Bookmark.Ui.State
@@ -63,11 +68,12 @@ update msg s = case msg of
   FetchFailed err -> (completeAsyncOp s & hsStatus ?~ ("failed" <> maybe "<no err>" (": " <>) err), [])
   -- Nothing to send, or an async op already running: dropped, as before.
   Intent Execute -> case (planBatch s, tryAcquireAsyncOp OpExecuteBatch s) of
-    (Just plan, Just running) -> (running, [StartBatch plan])
+    (Just plan, Just running) -> (running & hsBatch ?~ BatchProgress (planSteps plan) [], [StartBatch plan])
     _ -> (s, [])
   BatchStepStarted step -> (s & hsStatus ?~ stepLabel step, [])
-  StepDone result -> (applyStep result s, [])
-  BatchFinished summary -> (completeAsyncOp s & hsStatus .~ summary, [])
+  StepDone result -> (applyStep result s & hsBatch . _Just . bpRan <>~ [ranStep result], [])
+  -- An error that ended the batch early replaces the summary, as before.
+  BatchFinished err -> (completeAsyncOp s & hsBatch .~ Nothing & hsStatus .~ (err <|> (s ^. hsBatch >>= summary)), [])
   SystemFailed err -> (s & hsStatus ?~ err, [])
   Copied url -> (s & hsStatus ?~ ("Copied: " <> url), [])
   where
@@ -82,6 +88,7 @@ update msg s = case msg of
         f : _ -> (f s, [])
         [] -> (s, [])
       Nothing -> (s, [])
+    summary p = batchStatus (p ^. bpPlanned) (p ^. bpRan)
     editUrl bit = "https://app.raindrop.io/my/-1/item/" <> bit ^. biId . _BookmarkItemId <> "/edit"
 
 stepLabel :: BatchStep -> Text
@@ -89,6 +96,44 @@ stepLabel = \case
   StepArchive -> "archiving"
   StepSetReminders -> "setting reminders"
   StepRemoveReminders -> "removing reminders"
+
+-- | A step's outcome as the summary counts it.
+ranStep :: StepResult -> (BatchStep, StepOutcome () Text)
+ranStep = \case
+  Archived o -> (StepArchive, erase o)
+  RemindersSetAt o -> (StepSetReminders, erase o)
+  RemindersRemoved o -> (StepRemoveReminders, erase o)
+  where
+    erase = first (const ())
+
+-- | The D6 status line, e.g.
+-- @archive ok · reminders 3/5 (2 failed: 404) · remove-reminders skipped: offline@;
+-- 'Nothing' when every step went through cleanly.
+batchStatus :: [BatchStep] -> [(BatchStep, StepOutcome () Text)] -> Maybe Text
+batchStatus planned ran
+  | all (clean . snd) ran = Nothing
+  | otherwise = Just (T.intercalate " · " (map ranText ran <> map skippedText (drop (length ran) planned)))
+  where
+    clean o = null (o ^. soFailed) && isNothing (o ^. soAborted)
+    abortReason = fromMaybe "" (listToMaybe (mapMaybe (view soAborted . snd) ran))
+    skippedText step = stepName step <> " skipped: " <> abortReason
+    ranText (step, o)
+      | clean o = stepName step <> " ok"
+      | otherwise = stepName step <> " " <> count (o ^. soOk) <> "/" <> count (total o) <> " (" <> T.intercalate "; " (problems o) <> ")"
+    total o = (o ^. soOk) <> map fst (o ^. soFailed) <> (o ^. soSkipped)
+    problems o =
+      [count fs <> " failed: " <> T.intercalate ", " (nub (map (failureText . snd) fs)) | let fs = o ^. soFailed, not (null fs)]
+        <> ["aborted: " <> e | Just e <- [o ^. soAborted]]
+    count :: [x] -> Text
+    count = T.pack . show . length
+    failureText ResultFalse = "result: false"
+    failureText (CallFailed err) = err
+
+stepName :: BatchStep -> Text
+stepName = \case
+  StepArchive -> "archive"
+  StepSetReminders -> "reminders"
+  StepRemoveReminders -> "remove-reminders"
 
 -- | Only what the server accepted changes locally; failed and skipped items
 -- keep their flags.

@@ -128,11 +128,12 @@ updateTests =
         let flagged = twoItems & setPendingAction (BookmarkItemId "a") ToBeArchived & setPendingAction (BookmarkItemId "b") ToBeArchived
             (s', fx) = update (StepDone (Archived (outcome [("a", Right True), ("b", Left "404")]))) flagged
         (fx, Map.keys (s' ^. hsContents), flagOf "b" s') @?= ([], [BookmarkItemId "b"], Just ToBeArchived),
-      testCase "BatchFinished frees the slot and shows the summary, or clears the status" $ do
-        let Just running = tryAcquireAsyncOp OpExecuteBatch (twoItems & hsStatus ?~ "archiving")
-            finished summary = (\(s', fx) -> (fx, s' ^. hsAsyncOp, s' ^. hsStatus)) (update (BatchFinished summary) running)
-        finished (Just "archive 0/1 (1 failed: 404)") @?= ([], Nothing, Just "archive 0/1 (1 failed: 404)")
-        finished Nothing @?= ([], Nothing, Nothing),
+      testCase "BatchFinished frees the slot: the summary of the steps, or the error that ended the batch" $ do
+        let flagged = twoItems & setPendingAction (BookmarkItemId "a") ToBeArchived & hsStatus ?~ "archiving"
+            failedA = after (StepDone (Archived (outcome [("a", Left "404")]))) (after (Intent Execute) flagged)
+            finished err = (\(s', fx) -> (fx, s' ^. hsAsyncOp, s' ^. hsBatch, s' ^. hsStatus)) (update (BatchFinished err) failedA)
+        finished Nothing @?= ([], Nothing, Nothing, Just "archive 0/1 (1 failed: 404)")
+        finished (Just "batch interrupted") @?= ([], Nothing, Nothing, Just "batch interrupted"),
       testCase "Navigate moves the selection by id over what is visible" $ do
         let five = settle (insertItems [item i (-1) & biCreated .~ read ("2026-01-0" <> show n <> " 12:00:00 UTC") | (i, n) <- zip ["a", "b", "c", "d", "e"] [9 :: Int, 8, 7, 6, 5]] emptyState)
             moved h n s' = after (Intent (Navigate h n)) s' ^. hsSelected

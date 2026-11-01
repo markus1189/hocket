@@ -27,7 +27,7 @@ import Data.Time (UTCTime)
 import Interpret (batchWorker)
 import Network.Bookmark.App.Msg (Intent (Execute, Refresh), Msg (..), StepResult (..))
 import Network.Bookmark.App.Plan (BatchPlan (..))
-import Network.Bookmark.App.Update (update)
+import Network.Bookmark.App.Update (batchStatus, update)
 import Network.Bookmark.Batch
 import Network.Bookmark.Port (RaindropPort (..))
 import Network.Bookmark.Types (BookmarkItemBatch (..), BookmarkItemId (..), PendingAction (..))
@@ -142,9 +142,9 @@ batchTrace = map (\s -> (asyncOpRunning s, s ^. hsStatus)) . drop 1 . scanl deli
 -- | What the batch worker posts for these step results, ending with its
 -- one BatchFinished.
 batchMsgs :: StepOutcome BookmarkItemId T.Text -> StepOutcome (BookmarkItemId, UTCTime) T.Text -> [Msg]
-batchMsgs archive reminders = posted <> [BatchFinished summary]
+batchMsgs archive reminders = posted <> [BatchFinished Nothing]
   where
-    (summary, posted) = runState (runBatch run [StepArchive, StepSetReminders]) []
+    posted = execState (runSteps run [StepArchive, StepSetReminders]) []
     post m = modify (<> [m])
     run = \case
       StepArchive -> runStep post StepArchive Archived (pure archive)

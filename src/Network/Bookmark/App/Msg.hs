@@ -87,8 +87,9 @@ data Msg
   | -- | A batch step begins; its name goes to the status line.
     BatchStepStarted !BatchStep
   | StepDone !StepResult
-  | -- | The batch's one terminal message, with its summary ('Nothing' when
-    -- every step was clean). The only thing that frees the batch slot.
+  | -- | The batch's one terminal message, with the error that ended it early
+    -- (an exception, a cancel); update writes the summary from the
+    -- 'StepDone's. The only thing that frees the batch slot.
     BatchFinished !(Maybe Text)
   deriving (Show, Eq)
 
