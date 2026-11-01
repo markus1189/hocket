@@ -5,8 +5,6 @@
 
 module Network.Bookmark.Ui.State
   ( HocketState,
-    itemList,
-    focusRing,
     hsNumItems,
     hsLastUpdated,
     hsContents,
@@ -24,9 +22,6 @@ module Network.Bookmark.Ui.State
     hsVideoFilter,
     hsFilterActive,
     hsFilterQuery,
-    hsFilterEditor,
-    editorQuery,
-    reconcileEditor,
     ItemCounts,
     icNone,
     icToBeArchived,
@@ -53,7 +48,6 @@ module Network.Bookmark.Ui.State
     clearToBeRemindedFlags,
     isToBeReminded,
     isReminderAction,
-    focusedList,
     focusedItem,
     getPendingActionForItem,
     shiftItem,
@@ -80,12 +74,7 @@ module Network.Bookmark.Ui.State
   )
 where
 
-import qualified Brick.Focus as F
-import Brick.Widgets.Edit (Editor, applyEdit, editorText, getEditContents)
-import Brick.Widgets.List (List)
-import qualified Brick.Widgets.List as L
 import Control.Lens
-import qualified Data.Text.Zipper as Z
 #if MIN_VERSION_base(4,20,0)
 import Data.Foldable (maximumBy)
 #else
@@ -123,16 +112,13 @@ data VideoFilterMode
   deriving (Show, Eq)
 
 data HocketState = HocketState
-  { _itemList :: !(List Name BookmarkItem),
-    _focusRing :: !(F.FocusRing Name),
-    _hsLastUpdated :: !(Maybe POSIXTime),
+  { _hsLastUpdated :: !(Maybe POSIXTime),
     _hsAsyncOp :: !(Maybe AsyncOp),
     _hsStatus :: !(Maybe Text),
     _hsContents :: !(Map BookmarkItemId (PendingAction, BookmarkItem)),
     _hsShowFutureReminders :: !Bool,
     _hsVideoFilter :: !VideoFilterMode,
     _hsFilterActive :: !Bool,
-    _hsFilterEditor :: !(Editor Text Name),
     -- | The filter text (plan D3): the core's; the editor only edits it.
     _hsFilterQuery :: !Text,
     _hsAgentClients :: !Int,
@@ -147,18 +133,6 @@ data HocketState = HocketState
   }
 
 makeLenses ''HocketState
-
--- | What the filter editor holds now; the shell reports it as 'FilterText'.
-editorQuery :: HocketState -> Text
-editorQuery = T.concat . getEditContents . view hsFilterEditor
-
--- | Write the query into the editor only when they differ (an agent's
--- set_filter, a cancel), cursor at the end, so typing keeps its cursor and
--- typing after set_filter appends.
-reconcileEditor :: HocketState -> HocketState
-reconcileEditor s
-  | editorQuery s == s ^. hsFilterQuery = s
-  | otherwise = s & hsFilterEditor %~ applyEdit (const (Z.gotoEOL (Z.textZipper [s ^. hsFilterQuery] (Just 1))))
 
 asyncOpRunning :: HocketState -> Bool
 asyncOpRunning s = case s ^. hsAsyncOp of
@@ -230,8 +204,6 @@ batchStepsWithWork s =
 initialState :: HocketState
 initialState =
   HocketState
-    (L.list ItemListName V.empty 1)
-    (F.focusRing [ItemListName])
     Nothing
     Nothing
     Nothing
@@ -239,7 +211,6 @@ initialState =
     False
     NoVideoFilter
     False
-    (editorText FilterEditorName (Just 1) "")
     T.empty
     0
     Nothing
@@ -282,9 +253,6 @@ togglePendingActionToReminder bid reminderTime s =
             ToBeArchived -> if hasExistingReminder then ReminderToBeRemoved else ToBeReminded reminderTime
        in s & hsContents . at bid ?~ (newAction, item)
     Nothing -> s
-
-focusedList :: HocketState -> Maybe (L.List Name BookmarkItem)
-focusedList s = s ^? itemList
 
 focusedItem :: HocketState -> Maybe BookmarkItem
 focusedItem s = s ^. hsSelected >>= \bid -> s ^? hsContents . ix bid . _2
@@ -445,14 +413,12 @@ removeReminderFromItems bids s =
 -- | Recompute what is visible and keep the selection valid (plan D2): the
 -- selected item stays selected while it is visible; when it disappears the
 -- item now at its index takes over (clamped at the end); with no selection
--- the first item is selected. The brick list is derived from both.
+-- the first item is selected.
 settle :: HocketState -> HocketState
 settle s =
   s
     & hsVisible .~ visible
     & hsSelected .~ selected
-    & itemList . L.listElementsL .~ visible
-    & itemList . L.listSelectedL .~ (selected >>= indexIn visible)
   where
     visible = visibleItems (s ^. hsShowFutureReminders) (s ^. hsVideoFilter) (s ^. hsFilterQuery) (s ^. hsContents)
     indexIn items bid = V.findIndex ((== bid) . view biId) items

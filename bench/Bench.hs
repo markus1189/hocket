@@ -1,7 +1,6 @@
 {-# LANGUAGE OverloadedStrings #-}
 {-# OPTIONS_GHC -Wno-orphans #-}
 
-import qualified Brick.Widgets.List as L
 import Control.DeepSeq (NFData (..))
 import Control.Lens (view, (^.))
 import Data.Text (Text)
@@ -102,7 +101,7 @@ queries :: [(String, Text)]
 queries = [("empty", ""), ("1 word", "haskell"), ("3 words", "haskell lens tui"), ("miss", "zzqx")]
 
 visibleCount :: HocketState -> Int
-visibleCount = length . view (itemList . L.listElementsL)
+visibleCount = length . view hsVisible
 
 main :: IO ()
 main =

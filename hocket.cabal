@@ -32,6 +32,7 @@ library
                      , Network.Bookmark.Fake
                      , Network.Bookmark.Reminder
                      , Network.Bookmark.Types
+                     , Network.Bookmark.Ui.Reconcile
                      , Network.Bookmark.Ui.State
                      , Network.Bookmark.Ui.Sync
                      , Network.Bookmark.Ui.Widgets
@@ -168,7 +169,6 @@ benchmark bench
   hs-source-dirs:      bench
   main-is:             Bench.hs
   build-depends:       base
-                     , brick
                      , deepseq
                      , hocket
                      , lens

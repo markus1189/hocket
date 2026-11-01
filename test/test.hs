@@ -50,6 +50,7 @@ import Network.Bookmark.Agent.Protocol
 import Network.Bookmark.Agent.Snapshot
 import qualified Network.Bookmark.App.Msg as I
 import Network.Bookmark.Types
+import Network.Bookmark.Ui.Reconcile
 import Network.Bookmark.Ui.State
 import Network.Bookmark.Ui.Widgets (fuzzyFilterMatch, fuzzyMatch, sanitizeForDisplay)
 import Network.Raindrop.Api (ApiResult (..), BatchMove (..), Created (..), Items (..), NewRaindrop (..), RaindropPatch (..))
@@ -139,8 +140,8 @@ itemWithHighlights hs = case A.decode @A.Value (LBS.pack fixtureItem) of
   where
     fixtureItem = "{\"_id\":1,\"link\":\"https://example.com\",\"excerpt\":\"\",\"note\":\"\",\"type\":\"link\",\"tags\":[],\"removed\":false,\"created\":\"2026-01-01T00:00:00.000Z\",\"lastUpdate\":\"2026-01-01T00:00:00.000Z\",\"domain\":\"example.com\",\"title\":\"t\",\"sort\":0,\"collection\":{\"$id\":-1},\"important\":false}"
 
-typeInFilter :: Text -> HocketState -> HocketState
-typeInFilter t = hsFilterEditor %~ applyEdit (Z.insertMany t)
+typeInFilter :: Text -> UiState -> UiState
+typeInFilter t = uiEditor %~ applyEdit (Z.insertMany t)
 
 sanitizeForDisplayTests :: TestTree
 sanitizeForDisplayTests =
@@ -427,7 +428,7 @@ runTuning :: Text -> [BookmarkItem]
 runTuning q =
   let base = insertItems tuningBookmarks testState
       filtered = settle (base & hsFilterQuery .~ q)
-   in V.toList (view (itemList . L.listElementsL) filtered)
+   in V.toList (view hsVisible filtered)
 
 -- | True iff the list is in non-increasing order (the render invariant).
 isDescending :: (Ord a) => [a] -> Bool
@@ -487,14 +488,21 @@ filterStateTests =
       testCase "enterFilterMode sets hsFilterActive" $
         view hsFilterActive (enterFilterMode testState) @?= True,
       testCase "typing after a set query appends at the end" $
-        editorQuery (typeInFilter "x" (reconcileEditor (testState & hsFilterQuery .~ "ab"))) @?= "abx",
+        editorQuery (typeInFilter "x" (reconcile (testState & hsFilterQuery .~ "ab") initialUi)) @?= "abx",
       testCase "ctrl-w deletes the previous word" $
-        editorQuery (reconcileEditor (testState & hsFilterQuery .~ "foo bar") & hsFilterEditor %~ applyEdit deletePrevWord) @?= "foo ",
+        editorQuery (reconcile (testState & hsFilterQuery .~ "foo bar") initialUi & uiEditor %~ applyEdit deletePrevWord) @?= "foo ",
       testCase "the editor is written only when it differs from the query" $ do
         -- Mid-typing the two agree, so the cursor is left where it is.
-        let typing = typeInFilter "a" (reconcileEditor testState) & hsFilterQuery .~ "a"
-        view (hsFilterEditor . editContentsL . to Z.cursorPosition) (reconcileEditor typing) @?= view (hsFilterEditor . editContentsL . to Z.cursorPosition) typing
-        editorQuery (reconcileEditor (typing & hsFilterQuery .~ "agent")) @?= "agent",
+        let typing = typeInFilter "a" (reconcile testState initialUi)
+            typed = testState & hsFilterQuery .~ "a"
+            cursor = view (uiEditor . editContentsL . to Z.cursorPosition)
+        cursor (reconcile typed typing) @?= cursor typing
+        editorQuery (reconcile (typed & hsFilterQuery .~ "agent") typing) @?= "agent",
+      testCase "reconcile shows what is visible, with the selection on hsSelected" $ do
+        let model = settle (insertItems [filterTestBookmark, filterOtherBookmark] testState) & hsSelected ?~ BookmarkItemId "filter-other"
+            shown = reconcile model initialUi
+        V.toList (V.map _biId (shown ^. uiList . L.listElementsL)) @?= V.toList (V.map _biId (model ^. hsVisible))
+        fmap (_biId . snd) (L.listSelectedElement (shown ^. uiList)) @?= Just (BookmarkItemId "filter-other"),
       testCase "cancelFilter clears query and exits editing" $
         let s = cancelFilter (enterFilterMode testState & hsFilterQuery .~ "x")
          in (view hsFilterActive s, view hsFilterQuery s) @?= (False, ""),
@@ -504,7 +512,7 @@ filterStateTests =
       testCase "settle applies fuzzy text filter" $
         let base = insertItems [filterTestBookmark, filterOtherBookmark] testState
             filtered = settle (base & hsFilterQuery .~ "uniquetitle")
-            elems = view (itemList . L.listElementsL) filtered
+            elems = view hsVisible filtered
          in V.toList (V.map _biId elems) @?= [BookmarkItemId "filter-1"],
       testCase "text filter composes with video filter" $
         let base = insertItems [filterTestBookmark, filterVideoBookmark] testState
@@ -514,7 +522,7 @@ filterStateTests =
                     & hsVideoFilter .~ ShowOnlyVideos
                     & hsFilterQuery .~ "unique"
                 )
-            elems = view (itemList . L.listElementsL) filtered
+            elems = view hsVisible filtered
          in V.toList (V.map _biId elems) @?= [BookmarkItemId "filter-video"]
     ]
 

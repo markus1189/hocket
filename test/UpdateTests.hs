@@ -54,7 +54,7 @@ updateTests =
       testCase "SetFlag sets the agent's flag as is, with no move" $
         for_ [(FlagArchive, ToBeArchived), (FlagRemoveReminder, ReminderToBeRemoved), (FlagNone, None)] $ \(act, flag) -> do
           let (s', fx) = update (Intent (SetFlag (BookmarkItemId "b") act now0)) twoItems
-          (act, fx, flagOf "b" s', s' ^. itemList . L.listSelectedL) @?= (act, [], Just flag, twoItems ^. itemList . L.listSelectedL),
+          (act, fx, flagOf "b" s', s' ^. hsSelected) @?= (act, [], Just flag, twoItems ^. hsSelected),
       testCase "SetFlag reminder: 07:00 next local day at the request's offset" $ do
         -- The evening before the Europe/Berlin change, still at CEST (+02:00).
         let evening = Now (read "2026-10-24 21:00:00 UTC") (minutesToTimeZone 120)
@@ -170,7 +170,7 @@ t0 :: UTCTime
 t0 = read "2026-11-02 06:00:00 UTC"
 
 visibleIds :: HocketState -> [BookmarkItemId]
-visibleIds s = s ^.. itemList . L.listElementsL . traverse . biId
+visibleIds s = s ^.. hsVisible . traverse . biId
 
 -- | A step outcome from a script; errors starting with "5" are global.
 outcome :: [(Text, Either Text Bool)] -> StepOutcome BookmarkItemId Text

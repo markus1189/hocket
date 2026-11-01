@@ -207,14 +207,14 @@ keyTableTests =
       <> [ testCase "no focused item: every key changes nothing and opens nothing" $
              for_ [minBound .. maxBound] $ \k -> do
                let (after, browsed) = press k emptyState
-               (k, browsed, Map.null (after ^. hsContents), after ^. itemList . L.listSelectedL) @?= (k, [], True, Nothing)
+               (k, browsed, Map.null (after ^. hsContents), after ^. hsSelected) @?= (k, [], True, Nothing)
          ]
   where
     rowTest (Row k hasReminder from to moves) =
       testCase (show k <> (if hasReminder then " (has reminder) " else " ") <> show from <> " → " <> show to <> (if moves then " ↓" else "")) $ do
         let (after, browsed) = press k (keyState hasReminder from)
         flagOf "t" after @?= Just to
-        after ^. itemList . L.listSelectedL @?= Just (if moves then 1 else 0)
+        after ^. hsSelected @?= after ^? hsVisible . ix (if moves then 1 else 0) . biId
         browsed @?= ["t" | k `elem` [KeyEnter, KeySpace]]
     rows =
       [ Row KeyArchive False None ToBeArchived True,

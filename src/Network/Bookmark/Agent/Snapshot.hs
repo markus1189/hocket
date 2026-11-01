@@ -15,7 +15,6 @@ module Network.Bookmark.Agent.Snapshot
   )
 where
 
-import qualified Brick.Widgets.List as L
 import Control.Lens (view, (^.))
 import Data.Aeson (ToJSON (toJSON), Value, object, (.=))
 import qualified Data.Map as Map
@@ -48,10 +47,11 @@ import Network.Bookmark.Ui.State
     hsContents,
     hsFilterQuery,
     hsLastUpdated,
+    hsSelected,
     hsShowFutureReminders,
     hsStatus,
     hsVideoFilter,
-    itemList,
+    hsVisible,
   )
 
 data SnapshotItem = SnapshotItem
@@ -138,7 +138,7 @@ takeSnapshot v s =
   AgentSnapshot
     { asVersion = v,
       asItems = visibleItems <> hiddenItems,
-      asSelected = view biId . snd <$> L.listSelectedElement (s ^. itemList),
+      asSelected = s ^. hsSelected,
       asFilterQuery = s ^. hsFilterQuery,
       asVideoFilter = s ^. hsVideoFilter,
       asShowFutureReminders = s ^. hsShowFutureReminders,
@@ -147,7 +147,7 @@ takeSnapshot v s =
       asAsyncOp = s ^. hsAsyncOp
     }
   where
-    visibleBookmarks = V.toList (s ^. itemList . L.listElementsL)
+    visibleBookmarks = V.toList (s ^. hsVisible)
     visibleIdSet = Set.fromList (map (view biId) visibleBookmarks)
     visibleItems =
       mapMaybe

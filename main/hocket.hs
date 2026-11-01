@@ -5,6 +5,7 @@
 {-# LANGUAGE OverloadedStrings #-}
 {-# LANGUAGE RankNTypes #-}
 {-# LANGUAGE ScopedTypeVariables #-}
+{-# LANGUAGE TemplateHaskell #-}
 {-# LANGUAGE TypeApplications #-}
 {-# OPTIONS_GHC -Wno-deferred-out-of-scope-variables #-}
 
@@ -38,7 +39,6 @@ import Brick
     (<+>),
   )
 import Brick.BChan (BChan, newBChan, writeBChanNonBlocking)
-import qualified Brick.Focus as Focus
 import Brick.Widgets.Border (hBorder)
 import Brick.Widgets.Edit (applyEdit, editFocusedAttr, handleEditorEvent, renderEditor)
 import qualified Brick.Widgets.List as L
@@ -47,7 +47,7 @@ import Control.Concurrent.Async (async)
 import Control.Concurrent.STM (TVar, atomically, modifyTVar', newTVarIO)
 import Control.Exception (SomeException, bracket, finally)
 import Control.Exception.Base (try)
-import Control.Lens (view)
+import Control.Lens (makeLenses, uses, view)
 import Control.Lens.Combinators (use)
 import Control.Lens.Operators
   ( (%=),
@@ -121,18 +121,16 @@ import Network.Bookmark.Types
     biTitle,
     _BookmarkItemId,
   )
+import Network.Bookmark.Ui.Reconcile (UiState, editorQuery, initialUi, reconcile, uiEditor, uiList)
 import Network.Bookmark.Ui.State
   ( HocketState,
     Name (..),
     VideoFilterMode (..),
-    editorQuery,
-    focusRing,
     focusedItem,
     getPendingActionForItem,
     hsAgentClients,
     hsAgentError,
     hsFilterActive,
-    hsFilterEditor,
     hsFilterQuery,
     hsLastUpdated,
     hsNumItems,
@@ -144,8 +142,6 @@ import Network.Bookmark.Ui.State
     icToBeArchived,
     icToBeReminded,
     initialState,
-    itemList,
-    reconcileEditor,
     settle,
   )
 import Network.Bookmark.Ui.Widgets (sanitizeForDisplay)
@@ -190,6 +186,11 @@ import System.Directory (XdgDirectory (..), createDirectoryIfMissing, doesFileEx
 import System.Exit (exitFailure)
 import System.FilePath ((</>))
 import System.IO (BufferMode (LineBuffering), IOMode (AppendMode), hPutStrLn, hSetBuffering, stderr, withFile)
+
+-- | The model, and what the shell derives from it for brick (plan §4.3).
+data AppState = AppState {_model :: !HocketState, _ui :: !UiState}
+
+makeLenses ''AppState
 
 data HocketCommand
   = RunTUI !(Maybe AgentSocketOpt) !(Maybe FixtureOpts)
@@ -345,9 +346,9 @@ opts =
 vtyEventHandler ::
   Env ->
   Event ->
-  EventM Name HocketState ()
+  EventM Name AppState ()
 vtyEventHandler env e = do
-  s <- use id
+  s <- use model
   if s ^. hsFilterActive
     then case e of
       -- Handled here, not via the BChan, so they stay ordered with the
@@ -357,8 +358,8 @@ vtyEventHandler env e = do
       EvKey KUp [] -> listHeight >>= \h -> applyMsg env (Intent (Navigate h Up))
       EvKey KDown [] -> listHeight >>= \h -> applyMsg env (Intent (Navigate h Down))
       -- Brick's editor has no Ctrl-W.
-      EvKey (KChar 'w') [MCtrl] -> (hsFilterEditor %= applyEdit deletePrevWord) >> reportEditor env
-      _ -> zoom hsFilterEditor (handleEditorEvent (VtyEvent e)) >> reportEditor env
+      EvKey (KChar 'w') [MCtrl] -> (ui . uiEditor %= applyEdit deletePrevWord) >> reportEditor env
+      _ -> zoom (ui . uiEditor) (handleEditorEvent (VtyEvent e)) >> reportEditor env
     else do
       now <- liftIO (Now <$> getCurrentTime <*> getCurrentTimeZone)
       height <- listHeight
@@ -367,29 +368,30 @@ vtyEventHandler env e = do
 
 -- | Run one message through 'update', its effects through 'interpret', and
 -- what those answer right away through 'update' again.
-applyMsg :: Env -> Msg -> EventM Name HocketState ()
+applyMsg :: Env -> Msg -> EventM Name AppState ()
 applyMsg env m = do
-  (s', effects) <- update m <$> use id
-  id .= s'
+  (s', effects) <- update m <$> use model
+  model .= s'
   for_ effects $ \case
     Halt -> halt
     effect -> liftIO (interpret env effect) >>= traverse_ (applyMsg env)
 
 -- | The editor applied a key: tell update, which owns the query (plan D3).
-reportEditor :: Env -> EventM Name HocketState ()
+reportEditor :: Env -> EventM Name AppState ()
 reportEditor env = do
-  s <- use id
-  unless (editorQuery s == s ^. hsFilterQuery) $ applyMsg env (Intent (FilterText (editorQuery s)))
+  typed <- uses ui editorQuery
+  query <- use (model . hsFilterQuery)
+  unless (typed == query) $ applyMsg env (Intent (FilterText typed))
 
 -- | The list viewport's height in rows, as brick's page moves measure it;
 -- 0 before the list was first drawn, which makes a page move no move.
-listHeight :: EventM Name HocketState Int
+listHeight :: EventM Name AppState Int
 listHeight = maybe 0 (snd . view vpSize) <$> lookupViewport ItemListName
 
 myEventHandler ::
   Env ->
   BrickEvent Name Msg ->
-  EventM Name HocketState ()
+  EventM Name AppState ()
 myEventHandler env (VtyEvent e) = vtyEventHandler env e
 myEventHandler env (AppEvent m) = applyMsg env m
 myEventHandler _ _ = pure ()
@@ -467,7 +469,7 @@ runTui mAgentOpt isFixture port s0 = do
           (mkVty Vty.defaultConfig)
           (Just events)
           (app tz isFixture (Env events port) (snd <$> mAgent))
-          s0
+          (AppState s0 initialUi)
 
 -- | Bind the agent control socket and keep serving it in the background.
 -- Server failures surface in the TUI status bar instead of killing the app.
@@ -525,22 +527,24 @@ main = exitOnTerminated $ do
     AddBookmarkCmd url mCollection tags -> runAddCommand url mCollection tags
     AgentCall mpath agentCmd -> runAgentCommand mpath agentCmd
 
-app :: TimeZone -> Bool -> Env -> Maybe (TVar AgentSnapshot) -> App HocketState Msg Name
+app :: TimeZone -> Bool -> Env -> Maybe (TVar AgentSnapshot) -> App AppState Msg Name
 app tz isFixture env mSnapVar =
   App
     { appDraw = drawGui tz isFixture,
       appChooseCursor = \s ->
-        if s ^. hsFilterActive
+        if s ^. model . hsFilterActive
           then showCursorNamed FilterEditorName
-          else Focus.focusRingCursor (view focusRing) s,
+          else const Nothing,
       appHandleEvent = \e -> do
         myEventHandler env e
-        id %= reconcileEditor . settle
+        model %= settle
+        settled <- use model
+        ui %= reconcile settled
         -- Mirror the post-render state for the agent socket. Persistent
         -- data sharing keeps this cheap; the item projection is only fully
         -- forced by a server thread that actually serves it.
         for_ mSnapVar $ \snapVar -> do
-          s <- use id
+          s <- use model
           liftIO . atomically . modifyTVar' snapVar $ \old ->
             takeSnapshot (asVersion old + 1) s,
       appStartEvent = applyMsg env (Intent Refresh),
@@ -600,8 +604,8 @@ getDisplayContent item =
         (False, False, True) -> formattedExcerpt
         (False, False, False) -> " "
 
-drawGui :: TimeZone -> Bool -> HocketState -> [Widget Name]
-drawGui tz isFixture s = [w]
+drawGui :: TimeZone -> Bool -> AppState -> [Widget Name]
+drawGui tz isFixture (AppState s u) = [w]
   where
     fixtureTag = if isFixture then withAttr (attrName "bar" <> attrName "fixture") (txt " FIXTURE ") else emptyWidget
     w =
@@ -650,7 +654,7 @@ drawGui tz isFixture s = [w]
           L.renderList
             (listDrawElementWithAction s)
             True
-            (s ^. itemList),
+            (u ^. uiList),
           hBar " "
             <+> withAttr
               (attrName "bar")
@@ -667,7 +671,7 @@ drawGui tz isFixture s = [w]
           if s ^. hsFilterActive
             then
               withAttr (attrName "bar") . padRight Max $
-                txt "/" <+> renderEditor (txt . sanitizeForDisplay . T.concat) True (s ^. hsFilterEditor)
+                txt "/" <+> renderEditor (txt . sanitizeForDisplay . T.concat) True (u ^. uiEditor)
             else txt (fromMaybe " " (s ^. hsStatus))
         ]
 
