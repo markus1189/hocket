@@ -248,12 +248,7 @@ dispatch env rid = \case
     snap <- readTVarIO (aeSnapshot env)
     pure (either (errResponse rid) (okResponse rid) (serveRead snap r))
   AWait after timeoutMs -> do
-    let clampedMs = max 0 (min 60000 timeoutMs)
-    msnap <-
-      timeout (clampedMs * 1000) . atomically $ do
-        snap <- readTVar (aeSnapshot env)
-        check (asVersion snap > after)
-        pure snap
+    msnap <- awaitSnapshot (aeSnapshot env) timeoutMs ((> after) . asVersion)
     pure $ case msnap of
       Nothing -> errResponse rid "timeout waiting for state change"
       Just snap -> okResponse rid (stateView snap)
@@ -271,6 +266,18 @@ dispatch env rid = \case
                 rid
                 (object ["injected" .= True, "version" .= asVersion snap])
             else errResponse rid "event channel full, retry"
+
+-- | The first snapshot that passes, within the timeout clamped to
+-- [0, 60000] ms. Checked once before the timed wait: 'timeout' 0 gives up
+-- without running its action, and a timeout of 0 is how a client polls.
+awaitSnapshot :: TVar AgentSnapshot -> Int -> (AgentSnapshot -> Bool) -> IO (Maybe AgentSnapshot)
+awaitSnapshot snapVar timeoutMs ok = do
+  now <- readTVarIO snapVar
+  if ok now
+    then pure (Just now)
+    else timeout (max 0 (min 60000 timeoutMs) * 1000) . atomically $ do
+      snap <- readTVar snapVar
+      snap <$ check (ok snap)
 
 -- | A validated write as the Intent the keyboard would produce. The clock is
 -- sampled here, in the shell, once per write.

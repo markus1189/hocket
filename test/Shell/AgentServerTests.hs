@@ -17,6 +17,7 @@ import Control.Monad (void)
 import qualified Data.Aeson as A
 import qualified Data.Aeson.Key as AKey
 import qualified Data.Aeson.KeyMap as KM
+import Data.Aeson.Types (parseMaybe)
 import qualified Data.ByteString.Char8 as BSC
 import qualified Data.ByteString.Lazy.Char8 as LBS
 import Data.Either (isLeft)
@@ -238,6 +239,17 @@ latestCount ref = listToMaybe . mapMaybe count <$> readIORef ref
 waitFor :: Int -> IO Bool -> IO Bool
 waitFor n cond = cond >>= \ok -> if ok || n <= 0 then pure ok else threadDelay 20000 >> waitFor (n - 1) cond
 
+-- | A field of an ok answer's result, and an error answer's text.
+resultField :: (A.FromJSON a) => A.Key -> A.Value -> Maybe a
+resultField k = parseMaybe (A.withObject "response" (\o -> o A..: "result" >>= A.withObject "result" (A..: k)))
+
+errorText :: A.Value -> Maybe Text
+errorText = parseMaybe (A.withObject "response" (A..: "error"))
+
+-- | What a reader found in a call's answer, or the whole answer.
+answered :: (A.Value -> Maybe a) -> Either Text A.Value -> Either Text a
+answered reader = (>>= \v -> maybe (Left (T.pack (show v))) Right (reader v))
+
 reportsFailure :: I.Msg -> Bool
 reportsFailure (I.Intent (I.SetStatus t)) = "inject broke" `T.isInfixOf` t
 reportsFailure _ = False
@@ -329,6 +341,13 @@ agentServerIntegrationTests =
                   KM.lookup (AKey.fromText "version") r @?= Just (A.Number 6)
                 _ -> assertFailure "wait_version result missing"
             _ -> assertFailure "wait_version response not object",
+      testCase "wait_version with timeout_ms 0 polls: a passed version answers at once" $
+        withAgentServer $ \snapVar _events path -> do
+          atomically (modifyTVar' snapVar (const (buildTestSnapshot 4)))
+          res <- callAgent path (AWait 3 0)
+          answered (resultField "version") res @?= Right (4 :: Int)
+          stale <- callAgent path (AWait 4 0)
+          answered errorText stale @?= Right "timeout waiting for state change",
       testCase "the shipped client reads state over the socket" $
         withAgentServer $ \snapVar _events path -> do
           atomically (modifyTVar' snapVar (const (buildTestSnapshot 11)))
