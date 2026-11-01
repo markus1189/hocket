@@ -8,7 +8,7 @@ import Data.Foldable (for_)
 import qualified Data.Sequence as Seq
 import Data.String (fromString)
 import Gen (clientErrorRows, genClientErrorRow)
-import Hedgehog (cover, forAll, property, verifiedTermination, (===))
+import Hedgehog (cover, forAll, property, withTests, (===))
 import Network.HTTP.Types (http11, mkStatus)
 import Network.Raindrop (ErrorScope (..), classify)
 import Servant.Client.Core (BaseUrl (..), ClientError (..), Response, ResponseF (..), Scheme (Https), defaultRequest)
@@ -47,9 +47,10 @@ classifyTests =
         classify (UnsupportedContentType "text/html" (response 200)) @?= Global,
       testCase "global: invalid content-type header" $
         classify (InvalidContentTypeHeader (response 200)) @?= Global,
-      -- Each row is 1 in 10; verified termination judges coverage
-      -- statistically instead of failing on a low 100-sample draw.
-      testProperty "classify maps every generated ClientError to its labelled scope" $ verifiedTermination $ property $ do
+      -- Each row is 1 in 10. At 100 tests some row falls under 3% in about
+      -- 2% of runs (seen locally); at 1000 a row averages 100 hits
+      -- and the 30-hit floor is over 7 standard deviations away.
+      testProperty "classify maps every generated ClientError to its labelled scope" $ withTests 1000 $ property $ do
         (row, err, scope) <- forAll genClientErrorRow
         for_ clientErrorRows $ \(name, _, _) -> cover 3 (fromString name) (row == name)
         classify err === scope
