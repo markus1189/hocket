@@ -8,6 +8,8 @@ module System
     browseItem,
     copyToClipboard,
     runClipboardCmd,
+    systemPort,
+    systemNow,
   )
 where
 
@@ -20,6 +22,9 @@ import Data.List (isPrefixOf)
 import Data.List (foldl', isPrefixOf)
 #endif
 import Data.Maybe (isJust)
+import Data.Time (getCurrentTime, getCurrentTimeZone)
+import Network.Bookmark.App.Msg (Now (..))
+import Network.Bookmark.Port (SystemPort (..))
 import Network.Bookmark.Types (URL (..))
 import System.Environment (lookupEnv)
 import System.Exit (ExitCode (..))
@@ -45,6 +50,13 @@ replace old new = go
 
 cleanUrl :: String -> String
 cleanUrl s = foldl' (\acc (old, new) -> replace old new acc) s urlReplacements
+
+systemPort :: SystemPort
+systemPort = SystemPort browseItem copyToClipboard
+
+-- | The clock keys and agent writes are stamped with.
+systemNow :: IO Now
+systemNow = Now <$> getCurrentTime <*> getCurrentTimeZone
 
 -- | 'proc', not 'shell': the URL comes from Raindrop and may contain quotes.
 browseItem :: FilePath -> URL -> IO ()

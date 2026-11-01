@@ -2,16 +2,51 @@
 
 module SystemTests (systemTests) where
 
+import Brick.BChan (newBChan)
 import Control.Exception (throwIO)
-import Data.IORef (newIORef, readIORef, writeIORef)
-import Interpret (copyCleaned)
-import Network.Bookmark.App.Msg (Msg (..))
+import Data.IORef (IORef, modifyIORef', newIORef, readIORef, writeIORef)
+import Data.Time (utc)
+import Interpret (Env (..), copyCleaned, interpret)
+import Network.Bookmark.App.Effect (Effect (..), Opener (..))
+import Network.Bookmark.App.Msg (Msg (..), Now (..))
+import Network.Bookmark.Port (RaindropPort (..), SystemPort (..))
+import Network.Bookmark.Types (URL (..))
 import System (cleanUrl, urlReplacements)
 import Test.Tasty (TestTree, testGroup)
 import Test.Tasty.HUnit (testCase, (@?=))
 
 systemTests :: TestTree
-systemTests = testGroup "system" [cleanUrlTests, copyTests]
+systemTests = testGroup "system" [cleanUrlTests, copyTests, systemPortTests]
+
+-- | interpret reaches the desktop only through the SystemPort.
+systemPortTests :: TestTree
+systemPortTests =
+  testGroup
+    "SystemPort"
+    [ testCase "OpenUrl hands the program and the URL to sysOpenUrl" $ do
+        (env, calls) <- recordingEnv
+        msgs <- interpret env (OpenUrl Firefox "https://m.imdb.com/title/tt0111161/")
+        msgs @?= []
+        readIORef calls >>= (@?= ["open firefox https://m.imdb.com/title/tt0111161/"]),
+      testCase "a browser that fails is reported" $ do
+        (env, _) <- recordingEnv
+        msgs <- interpret env {envSystem = SystemPort (\_ _ -> throwIO (userError "no firefox")) (\_ -> pure ())} (OpenUrl XdgOpen "https://example.org/")
+        msgs @?= [SystemFailed "user error (no firefox)"],
+      testCase "CopyText copies the cleaned URL through sysCopy" $ do
+        (env, calls) <- recordingEnv
+        msgs <- interpret env (CopyText "https://m.imdb.com/title/tt0111161/")
+        msgs @?= [Copied "https://imdb.com/title/tt0111161/"]
+        readIORef calls >>= (@?= ["copy https://imdb.com/title/tt0111161/"])
+    ]
+
+-- | An Env whose desktop records its calls; Raindrop must not be reached.
+recordingEnv :: IO (Env, IORef [String])
+recordingEnv = do
+  calls <- newIORef []
+  events <- newBChan 1
+  let record c = modifyIORef' calls (<> [c])
+      system = SystemPort (\program (URL url) -> record ("open " <> program <> " " <> url)) (record . ("copy " <>))
+  pure (Env events (RaindropPort (\_ -> fail "no Raindrop here")) system (pure (Now (read "2026-11-01 12:00:00 UTC") utc)), calls)
 
 -- | The y key's path from CopyText to the clipboard, with the clipboard faked.
 copyTests :: TestTree

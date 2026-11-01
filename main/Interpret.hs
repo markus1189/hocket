@@ -25,16 +25,21 @@ import Network.Bookmark.App.Effect
 import Network.Bookmark.App.Msg
 import Network.Bookmark.App.Plan (BatchPlan (..), planSteps)
 import Network.Bookmark.Batch (StepOutcome, concatOutcome)
-import Network.Bookmark.Port (RaindropPort (..))
+import Network.Bookmark.Port (RaindropPort (..), SystemPort (..))
 import Network.Bookmark.Types (BookmarkItemBatch (..), BookmarkItemId, BookmarkRequest (..), RaindropCollectionId, URL (..), biLastUpdate)
 import Network.Bookmark.Ui.State (BatchStep (..))
 import Network.Bookmark.Ui.Sync (SyncKind (IncrementalAll), spCollection, spKind, spSearch)
 import Servant.Client.Core (ClientError)
-import System (browseItem, cleanUrl, copyToClipboard)
+import System (cleanUrl)
 import Worker (errorMessageFromException, exceptionMessage, fetchResult, runCalls, runStep, runSteps, trySync)
 
--- | Where to post events, and Raindrop.
-data Env = Env {envEvents :: !(BChan Msg), envPort :: !RaindropPort}
+-- | Where to post events, Raindrop, the desktop and the clock.
+data Env = Env
+  { envEvents :: !(BChan Msg),
+    envPort :: !RaindropPort,
+    envSystem :: !SystemPort,
+    envNow :: !(IO Now)
+  }
 
 -- | Run one effect. What the TUI waits for (browser, clipboard) answers
 -- with messages for the same event, so the status line is as quick as the
@@ -43,10 +48,10 @@ interpret :: Env -> Effect -> IO [Msg]
 interpret env = \case
   -- The shell halts the event loop itself.
   Halt -> pure []
-  OpenUrl opener url -> failed <$> try @SomeException (browseItem (program opener) (URL (T.unpack url)))
+  OpenUrl opener url -> failed <$> try @SomeException (sysOpenUrl (envSystem env) (program opener) (URL (T.unpack url)))
   StartFetch plan -> [] <$ async (fetch plan)
   StartBatch plan -> [] <$ async (batchWorker post (envPort env) plan)
-  CopyText link -> copyCleaned copyToClipboard link
+  CopyText link -> copyCleaned (sysCopy (envSystem env)) link
   where
     -- The fetch worker: exactly one terminal message, whatever happens short
     -- of a cancel (trySync rethrows asynchronous exceptions).

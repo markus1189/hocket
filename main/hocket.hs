@@ -38,7 +38,7 @@ import Brick
     zoom,
     (<+>),
   )
-import Brick.BChan (BChan, newBChan, writeBChanNonBlocking)
+import Brick.BChan (newBChan, writeBChanNonBlocking)
 import Brick.Widgets.Border (hBorder)
 import Brick.Widgets.Edit (applyEdit, editFocusedAttr, handleEditorEvent, renderEditor)
 import qualified Brick.Widgets.List as L
@@ -101,7 +101,7 @@ import Network.Bookmark.Agent.Protocol
   )
 import Network.Bookmark.Agent.Snapshot (AgentSnapshot, asVersion, emptySnapshot, takeSnapshot)
 import Network.Bookmark.App.Effect (Effect (..))
-import Network.Bookmark.App.Msg (Intent (FilterCancel, FilterLock, FilterText, Navigate, Refresh), Msg (..), Now (..))
+import Network.Bookmark.App.Msg (Intent (FilterCancel, FilterLock, FilterText, Navigate, Refresh), Msg (..))
 import Network.Bookmark.App.Nav (Nav (..))
 import Network.Bookmark.App.Update (update)
 import Network.Bookmark.Fake (encodeFixtureDump, fakePort)
@@ -182,6 +182,7 @@ import Options.Applicative
     (<**>),
   )
 import qualified Options.Applicative as Opt
+import System (systemNow, systemPort)
 import System.Directory (XdgDirectory (..), createDirectoryIfMissing, doesFileExist, getXdgDirectory)
 import System.Exit (exitFailure)
 import System.FilePath ((</>))
@@ -361,7 +362,7 @@ vtyEventHandler env e = do
       EvKey (KChar 'w') [MCtrl] -> (ui . uiEditor %= applyEdit deletePrevWord) >> reportEditor env
       _ -> zoom (ui . uiEditor) (handleEditorEvent (VtyEvent e)) >> reportEditor env
     else do
-      now <- liftIO (Now <$> getCurrentTime <*> getCurrentTimeZone)
+      now <- liftIO (envNow env)
       height <- listHeight
       -- Keys keyIntents does not know are none of hocket's.
       for_ (keyIntents now height e s) (traverse_ (applyMsg env . Intent))
@@ -453,13 +454,14 @@ runTuiApp mAgentOpt (Just fo) = do
 runTui :: Maybe AgentSocketOpt -> Bool -> RaindropPort -> HocketState -> IO ()
 runTui mAgentOpt isFixture port s0 = do
   events <- newBChan 10
+  let env = Env events port systemPort systemNow
   tz <- getCurrentTimeZone
   unwindOnTermination
   -- bracket, not finally around customMain: a signal during mkVty must
   -- still remove the socket, and one during startAgentServer is held off
   -- until the server is recorded for cleanup.
   bracket
-    (for mAgentOpt (startAgentServer events))
+    (for mAgentOpt (startAgentServer env))
     (traverse_ (\((path, ours, bound), _) -> cleanupAgentSocket bound ours path))
     $ \mAgent -> do
       vty <- mkVty Vty.defaultConfig
@@ -468,29 +470,30 @@ runTui mAgentOpt isFixture port s0 = do
           vty
           (mkVty Vty.defaultConfig)
           (Just events)
-          (app tz isFixture (Env events port) (snd <$> mAgent))
+          (app tz isFixture env (snd <$> mAgent))
           (AppState s0 initialUi)
 
 -- | Bind the agent control socket and keep serving it in the background.
 -- Server failures surface in the TUI status bar instead of killing the app.
 -- The path comes back with what cleanup needs: whether hocket owns its
 -- directory, and the socket it bound.
-startAgentServer :: BChan Msg -> AgentSocketOpt -> IO ((FilePath, Bool, BoundSocket), TVar AgentSnapshot)
-startAgentServer events opt = do
+startAgentServer :: Env -> AgentSocketOpt -> IO ((FilePath, Bool, BoundSocket), TVar AgentSnapshot)
+startAgentServer env opt = do
   path <- case opt of
     AgentSocketDefault -> resolveAgentSocketPath
     AgentSocketAt p -> pure p
   ours <- socketDirIsOurs path
   bound <- newBoundSocket
   snapVar <- newTVarIO emptySnapshot
-  let env =
+  let events = envEvents env
+      agentEnv =
         AgentEnv
           { aeSnapshot = snapVar,
             aeInject = writeBChanNonBlocking events,
-            aeNow = Now <$> getCurrentTime <*> getCurrentTimeZone
+            aeNow = envNow env
           }
   _ <- async $ do
-    r <- try @SomeException (runAgentServer bound path env)
+    r <- try @SomeException (runAgentServer bound path agentEnv)
     case r of
       Left e -> void (writeBChanNonBlocking events (AgentServerDied (T.pack (show e))))
       Right () -> pure ()
