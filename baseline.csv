@@ -1,0 +1,37 @@
+Name,Mean (ps),2*Stdev (ps)
+All.1000.syncForRender.empty,111131448,9336874
+All.1000.syncForRender.1 word,711360396,43099036
+All.1000.syncForRender.3 words,1044185525,66572368
+All.1000.syncForRender.miss,818305943,45116528
+All.1000.videoFilter.only,117116553,7422000
+All.1000.videoFilter.hide,213618691,14298152
+All.1000.agent.validateWrite first,6597,354
+All.1000.agent.validateWrite last,1466191,135460
+All.1000.agent.flag 100 (validate+sync),19071449412,647638572
+All.1000.agent.flag 100 (sync only),11439854550,783573450
+All.1000.hsNumItems,7385346,534516
+All.1000.takeSnapshot,249903587,12993472
+All.5000.syncForRender.empty,790350728,44464016
+All.5000.syncForRender.1 word,3956633050,393680002
+All.5000.syncForRender.3 words,5577092200,354843974
+All.5000.syncForRender.miss,4369096075,187830716
+All.5000.videoFilter.only,680190201,60058326
+All.5000.videoFilter.hide,1399061496,108599070
+All.5000.agent.validateWrite first,6544,376
+All.5000.agent.validateWrite last,8959420,683688
+All.5000.agent.flag 100 (validate+sync),134134152000,5414535748
+All.5000.agent.flag 100 (sync only),79992730200,5710400634
+All.5000.hsNumItems,38996263,3305514
+All.5000.takeSnapshot,1576812681,88122544
+All.20000.syncForRender.empty,5656886575,111365226
+All.20000.syncForRender.1 word,18744235750,1159950200
+All.20000.syncForRender.3 words,23922031400,1443358176
+All.20000.syncForRender.miss,18431519300,1772126804
+All.20000.videoFilter.only,3952627262,370172220
+All.20000.videoFilter.hide,8793363500,855725326
+All.20000.agent.validateWrite first,6689,636
+All.20000.agent.validateWrite last,73652006,5992840
+All.20000.agent.flag 100 (validate+sync),901757526000,21721938012
+All.20000.agent.flag 100 (sync only),551250639250,19584811570
+All.20000.hsNumItems,193470639,12910420
+All.20000.takeSnapshot,9357926650,749614062
