@@ -60,6 +60,7 @@ executable hocket
                      , Fixture
                      , Keys
                      , Signals
+                     , System
                      , Worker
   build-depends:       aeson
                      , async
@@ -112,8 +113,10 @@ test-suite test
                      , ReminderTests
                      , Keys
                      , Signals
+                     , System
                      , Worker
                      , Properties
+                     , SystemTests
                      , WorkerTests
   build-depends:       base
                      , aeson
@@ -134,6 +137,7 @@ test-suite test
                      , network
                      , optparse-applicative
                      , servant-client-core
+                     , process
                      , stm
                      , unix
                      , tasty

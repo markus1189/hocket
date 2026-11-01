@@ -5,10 +5,7 @@
 {-# LANGUAGE OverloadedStrings #-}
 {-# LANGUAGE RankNTypes #-}
 {-# LANGUAGE ScopedTypeVariables #-}
-{-# LANGUAGE TemplateHaskell #-}
-{-# LANGUAGE TupleSections #-}
 {-# LANGUAGE TypeApplications #-}
-{-# LANGUAGE ViewPatterns #-}
 {-# OPTIONS_GHC -Wno-deferred-out-of-scope-variables #-}
 
 module Main
@@ -51,13 +48,11 @@ import Control.Concurrent.Async (async)
 import Control.Concurrent.STM (TVar, atomically, modifyTVar', newTVarIO)
 import Control.Exception (SomeException, finally)
 import Control.Exception.Base (try)
-import Control.Lens (at, makeLensesFor, view)
+import Control.Lens (at, view)
 import Control.Lens.Combinators (use)
 import Control.Lens.Operators
   ( (%=),
-    (&),
     (.=),
-    (.~),
     (^.),
   )
 import Control.Monad (unless, void)
@@ -252,21 +247,12 @@ import Options.Applicative
   )
 import qualified Options.Applicative as Opt
 import Servant.Client (ClientError (..))
+import System (browseItem, cleanUrl, copyToClipboard)
 import System.Directory (XdgDirectory (..), createDirectoryIfMissing, doesFileExist, getXdgDirectory)
-import System.Environment (lookupEnv)
-import System.Exit (ExitCode (..), exitFailure)
+import System.Exit (exitFailure)
 import System.FilePath ((</>))
-import System.IO (BufferMode (LineBuffering), IOMode (AppendMode), hClose, hPutStr, hPutStrLn, hSetBuffering, stderr, withFile)
-import System.Process
-  ( CreateProcess,
-    createProcess,
-    proc,
-    waitForProcess,
-  )
-import System.Process.Internals (StdStream (CreatePipe))
+import System.IO (BufferMode (LineBuffering), IOMode (AppendMode), hPutStrLn, hSetBuffering, stderr, withFile)
 import Worker (errorMessageFromException, exceptionMessage, fetchResultEvents, runBatch, runCalls, runStep, trySync)
-
-makeLensesFor [("std_in", "stdIn"), ("std_err", "stdErr"), ("std_out", "stdOut")] ''CreateProcess
 
 data HocketCommand
   = RunTUI !(Maybe AgentSocketOpt) !(Maybe FixtureOpts)
@@ -1160,46 +1146,3 @@ findPrevFlaggedItem s = do
   case findIndex (\item -> let action = getPendingActionForItem (view biId item) s in action == ToBeArchived || isReminderAction action) precedingItems of
     Just relativeIdx -> Just (currentIdx - 1 - relativeIdx)
     Nothing -> Nothing
-
-urlReplacements :: [(String, String)]
-urlReplacements =
-  [ ("m.imdb.", "imdb."),
-    ("m.aliexpress.", "aliexpress.")
-  ]
-
-replace :: String -> String -> String -> String
-replace old new = go
-  where
-    go [] = []
-    go s@(x : xs)
-      | old `isPrefixOf` s = new ++ go (drop (length old) s)
-      | otherwise = x : go xs
-
-cleanUrl :: String -> String
-cleanUrl s = foldl' (\acc (old, new) -> replace old new acc) s urlReplacements
-
--- | 'proc', not 'shell': the URL comes from Raindrop and may contain quotes.
-browseItem :: FilePath -> URL -> IO ()
-browseItem program (URL url) = do
-  let spec = proc program [cleanUrl url]
-  (_, _, _, ph) <- createProcess $ spec & stdOut .~ CreatePipe & stdErr .~ CreatePipe
-  void . waitForProcess $ ph
-
--- | Copy text to the system clipboard via the native tool: wl-copy on
--- Wayland, else xclip.
-copyToClipboard :: String -> IO ()
-copyToClipboard text = do
-  wayland <- isJust <$> lookupEnv "WAYLAND_DISPLAY"
-  if wayland
-    then runClipboardCmd "wl-copy" [] text
-    else runClipboardCmd "xclip" ["-selection", "clipboard"] text
-
--- | Spawn a tool, feed @text@ on stdin, close it for EOF, and wait; fail on
--- a nonzero exit.
-runClipboardCmd :: String -> [String] -> String -> IO ()
-runClipboardCmd cmd args text = do
-  (mIn, _, _, ph) <- createProcess (proc cmd args & stdIn .~ CreatePipe)
-  for_ mIn $ \h -> hPutStr h text >> hClose h
-  exitCode <- waitForProcess ph
-  unless (exitCode == ExitSuccess) $
-    ioError (userError (cmd <> " exited with code " <> show exitCode))

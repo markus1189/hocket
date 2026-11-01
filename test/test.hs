@@ -78,6 +78,7 @@ import System.Posix.Process (getProcessID)
 import System.Posix.Signals (Handler (Default), installHandler, raiseSignal, sigHUP, sigTERM)
 import System.Posix.Time (epochTime)
 import System.Timeout (timeout)
+import SystemTests (systemTests)
 import Test.Tasty
 import Test.Tasty.Golden (goldenVsString)
 import Test.Tasty.HUnit
@@ -86,7 +87,7 @@ import WorkerTests (workerTests)
 main = defaultMain tests
 
 tests :: TestTree
-tests = testGroup "Tests" [xKeyBatchConcurrencyTests, propertyTests, fakeTests, fixtureTests, reminderTests, hocketStateTests, raindropParsingTests, raindropApiBodyTests, classifyTests, characterizationTests, workerTests, batchTests, dateTimeParsingTests, jsonRoundtripTests, sanitizeForDisplayTests, fuzzyMatchTests, fuzzyFilterMatchTests, filterStateTests, filterTuningTests, agentSnapshotTests, agentProtocolTests, agentServerIntegrationTests]
+tests = testGroup "Tests" [xKeyBatchConcurrencyTests, propertyTests, systemTests, fakeTests, fixtureTests, reminderTests, hocketStateTests, raindropParsingTests, raindropApiBodyTests, classifyTests, characterizationTests, workerTests, batchTests, dateTimeParsingTests, jsonRoundtripTests, sanitizeForDisplayTests, fuzzyMatchTests, fuzzyFilterMatchTests, filterStateTests, filterTuningTests, agentSnapshotTests, agentProtocolTests, agentServerIntegrationTests]
 
 -- Expected bodies are what the pre-servant wreq client sent.
 raindropApiBodyTests :: TestTree
