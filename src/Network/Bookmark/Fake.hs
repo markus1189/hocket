@@ -47,15 +47,17 @@ module Network.Bookmark.Fake
     seedFake,
     encodeFixtureDump,
     serveFake,
+    fakePort,
     parseFixtureFail,
   )
 where
 
-import Control.Exception (toException)
+import Control.Exception (throwIO, toException)
 import Control.Lens
 import Data.Aeson (eitherDecode)
 import qualified Data.Aeson as A
 import qualified Data.ByteString.Lazy as LBS
+import Data.IORef (IORef, atomicModifyIORef')
 import Data.List (find, sortOn)
 import Data.Map (Map)
 import qualified Data.Map as Map
@@ -65,6 +67,7 @@ import Data.Text (Text)
 import qualified Data.Text as T
 import qualified Data.Text.Read as TR
 import Data.Time (Day, UTCTime (utctDay), defaultTimeLocale, parseTimeM)
+import Network.Bookmark.Port (RaindropPort (..))
 import Network.Bookmark.Types
 import Network.HTTP.Types (http11, mkStatus)
 import Network.Raindrop.Api (Items (..))
@@ -136,6 +139,14 @@ serveFake now req fr = case stepOf req of
      in case find matches (fr ^. frRules) of
           Just r -> (Left (statusError (frStatus r)), counted)
           Nothing -> serve now req counted
+
+-- | The shell wrapper: 'serveFake' over an 'IORef', throwing failures as
+-- the port contract requires.
+fakePort :: IO UTCTime -> IORef FakeRaindrop -> RaindropPort
+fakePort clock ref = RaindropPort $ \req -> do
+  now <- clock
+  r <- atomicModifyIORef' ref (\fr -> let (res, fr') = serveFake now req fr in (fr', res))
+  either throwIO pure r
 
 serve :: UTCTime -> BookmarkRequest a -> FakeRaindrop -> (Either ClientError a, FakeRaindrop)
 serve now req fr = case req of

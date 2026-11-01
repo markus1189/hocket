@@ -1,12 +1,15 @@
 {-# LANGUAGE GADTs #-}
 {-# LANGUAGE OverloadedStrings #-}
+{-# LANGUAGE TypeApplications #-}
 
 module FakeTests (fakeTests) where
 
+import Control.Exception (try)
 import Control.Lens
 import Data.Bifunctor (bimap)
 import qualified Data.ByteString.Lazy as LBS
 import Data.Either (isLeft)
+import Data.IORef (IORef, atomicModifyIORef', newIORef, readIORef)
 import Data.List (sort)
 import qualified Data.Map as Map
 import Data.Text (Text)
@@ -17,11 +20,12 @@ import Hedgehog (Gen, Property, annotateShow, assert, forAll, property, (===))
 import qualified Hedgehog.Gen as Gen
 import qualified Hedgehog.Range as Range
 import Network.Bookmark.Fake
+import Network.Bookmark.Port (RaindropPort (..))
 import Network.Bookmark.Types
 import Network.Raindrop (ErrorScope (..), classify)
 import Servant.Client.Core (ClientError (..))
 import Test.Tasty (TestTree, testGroup)
-import Test.Tasty.HUnit (assertFailure, testCase, (@?=))
+import Test.Tasty.HUnit (Assertion, assertFailure, testCase, (@?=))
 import Test.Tasty.Hedgehog (testProperty)
 
 archive :: Int
@@ -76,7 +80,7 @@ withRule :: Text -> FakeRaindrop -> FakeRaindrop
 withRule spec fr = either (error . T.unpack) (\r -> fr & frRules %~ (<> [r])) (parseFixtureFail spec)
 
 fakeTests :: TestTree
-fakeTests = testGroup "Fake Raindrop" [requestTests, failureTests, parserTests, seedTests, emptySeedTest, dumpTest, fakeProperties]
+fakeTests = testGroup "Fake Raindrop" [requestTests, failureTests, parserTests, seedTests, emptySeedTest, dumpTest, portTests, fakeProperties]
 
 requestTests :: TestTree
 requestTests =
@@ -195,6 +199,53 @@ dumpTest =
       Right fr -> do
         Map.size (fr ^. frItems) @?= 18
         fmap (^. frItems) (seedFake archive (encodeFixtureDump fr)) @?= Right (fr ^. frItems)
+
+-- | A port over a fresh copy of 'store' whose clock ticks t0+1s, t0+2s, …
+newPort :: FakeRaindrop -> IO (RaindropPort, IORef FakeRaindrop)
+newPort fr = do
+  ref <- newIORef fr
+  ticks <- newIORef (0 :: Int)
+  let clock = atomicModifyIORef' ticks (\n -> (n + 1, addUTCTime (fromIntegral (n + 1)) t0))
+  pure (fakePort clock ref, ref)
+
+-- | The port answers and stores exactly what 'serveFake' does at tick 1.
+samePort :: (Eq a, Show a) => BookmarkRequest a -> Assertion
+samePort req = do
+  (port, ref) <- newPort store
+  let (expected, fr') = serveFake (addUTCTime 1 t0) req store
+  v <- either (assertFailure . show) pure expected
+  runRaindrop port req >>= (@?= v)
+  readIORef ref >>= (@?= fr')
+
+portTests :: TestTree
+portTests =
+  testGroup
+    "fakePort"
+    [ testCase "every request answers like serveFake" $ do
+        samePort (AddBookmark "https://new" Nothing [])
+        samePort (ArchiveBookmark (BookmarkItemId "1"))
+        samePort (BatchArchiveBookmarks (map BookmarkItemId ["1", "2"]))
+        samePort (SetReminder (BookmarkItemId "2") t1)
+        samePort (RemoveReminder (BookmarkItemId "2"))
+        samePort (RetrieveBookmarks 0 (RaindropCollectionId "0") Nothing),
+      testCase "a failure rule throws a ClientError with its scope; only frCalls changes" $ do
+        let failing = withRule "set-reminders=503" store
+        (port, ref) <- newPort failing
+        r <- try @ClientError (runRaindrop port (SetReminder (BookmarkItemId "1") t1))
+        either (Just . classify) (const Nothing) r @?= Just Global
+        readIORef ref >>= (@?= (failing & frCalls . at StepSetReminders ?~ 1)),
+      testCase "an item error throws an item-scoped ClientError" $ do
+        (port, _) <- newPort store
+        r <- try @ClientError (runRaindrop port (ArchiveBookmark (BookmarkItemId "404")))
+        either (Just . classify) (const Nothing) r @?= Just ItemScoped,
+      testCase "writes are stamped with the logical clock and see each other" $ do
+        (port, ref) <- newPort store
+        _ <- runRaindrop port (SetReminder (BookmarkItemId "1") t1)
+        _ <- runRaindrop port (ArchiveBookmark (BookmarkItemId "1"))
+        fr <- readIORef ref
+        fmap (\i -> (i ^. biReminder, i ^. biCollectionId, i ^. biLastUpdate)) (itemAt "1" fr)
+          @?= Just (Just t1, archive, addUTCTime 2 t0)
+    ]
 
 -- | The B1 E2E seed: an empty account.
 emptySeedTest :: TestTree
