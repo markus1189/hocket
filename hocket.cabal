@@ -57,6 +57,7 @@ executable hocket
   other-modules:       AgentClient
                      , AgentServer
                      , Events
+                     , Fixture
                      , Keys
                      , Worker
   build-depends:       aeson
@@ -103,7 +104,9 @@ test-suite test
                      , CharacterizationTests
                      , ClassifyTests
                      , Events
+                     , Fixture
                      , FakeTests
+                     , FixtureTests
                      , Gen
                      , ReminderTests
                      , Keys
@@ -127,6 +130,7 @@ test-suite test
                      , lens
                      , mtl
                      , network
+                     , optparse-applicative
                      , servant-client-core
                      , stm
                      , unix

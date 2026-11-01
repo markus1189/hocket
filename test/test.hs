@@ -41,6 +41,7 @@ import Data.Time.Format.ISO8601 (iso8601ParseM)
 import qualified Data.Vector as V
 import Events
 import FakeTests (fakeTests)
+import FixtureTests (fixtureTests)
 import Network.Bookmark.Agent.Protocol
 import Network.Bookmark.Agent.Snapshot
 import Network.Bookmark.Types
@@ -81,7 +82,7 @@ import WorkerTests (workerTests)
 main = defaultMain tests
 
 tests :: TestTree
-tests = testGroup "Tests" [xKeyBatchConcurrencyTests, propertyTests, fakeTests, reminderTests, hocketStateTests, raindropParsingTests, raindropApiBodyTests, classifyTests, characterizationTests, workerTests, batchTests, dateTimeParsingTests, jsonRoundtripTests, sanitizeForDisplayTests, fuzzyMatchTests, fuzzyFilterMatchTests, filterStateTests, filterTuningTests, agentSnapshotTests, agentProtocolTests, agentServerIntegrationTests]
+tests = testGroup "Tests" [xKeyBatchConcurrencyTests, propertyTests, fakeTests, fixtureTests, reminderTests, hocketStateTests, raindropParsingTests, raindropApiBodyTests, classifyTests, characterizationTests, workerTests, batchTests, dateTimeParsingTests, jsonRoundtripTests, sanitizeForDisplayTests, fuzzyMatchTests, fuzzyFilterMatchTests, filterStateTests, filterTuningTests, agentSnapshotTests, agentProtocolTests, agentServerIntegrationTests]
 
 -- Expected bodies are what the pre-servant wreq client sent.
 raindropApiBodyTests :: TestTree

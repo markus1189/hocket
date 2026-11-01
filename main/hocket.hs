@@ -28,6 +28,7 @@ import Brick
     attrMap,
     attrName,
     customMain,
+    emptyWidget,
     hLimit,
     halt,
     padLeft,
@@ -65,7 +66,9 @@ import Control.Monad.IO.Class (liftIO)
 import Control.Monad.Logger (LoggingT, defaultOutput, logErrorN, logInfoN, runLoggingT, runStdoutLoggingT)
 import Control.Monad.Loops (unfoldrM)
 import Data.Bifunctor (first)
+import qualified Data.ByteString.Lazy as LBS
 import Data.Foldable (for_)
+import Data.IORef (newIORef, readIORef)
 #if MIN_VERSION_base(4,20,0)
 import Data.List (find, findIndex, isPrefixOf)
 #else
@@ -107,6 +110,7 @@ import Events
     toggleRemindersEvt,
     toggleVideoFilterEvt,
   )
+import Fixture (FixtureOpts (..), fixtureParser, fixtureStore)
 import Formatting (sformat, (%))
 import qualified Formatting as F
 import qualified Formatting.Time as F
@@ -123,15 +127,18 @@ import Network.Bookmark.Agent.Protocol
   )
 import Network.Bookmark.Agent.Snapshot (AgentSnapshot, asVersion, emptySnapshot, takeSnapshot)
 import Network.Bookmark.Batch (StepOutcome, concatOutcome, soOk)
+import Network.Bookmark.Fake (encodeFixtureDump, fakePort)
 import Network.Bookmark.Port (RaindropPort (..))
 import Network.Bookmark.Reminder (reminderPolicy)
 import Network.Bookmark.Types
-  ( BookmarkItem,
+  ( BookmarkCredentials (..),
+    BookmarkItem,
     BookmarkItemBatch (..),
     BookmarkItemId (..),
     BookmarkRequest (AddBookmark, BatchArchiveBookmarks, RemoveReminder, RetrieveBookmarks, SetReminder),
     PendingAction (..),
     RaindropCollectionId,
+    RaindropToken (..),
     URL (..),
     biCreated,
     biExcerpt,
@@ -263,7 +270,7 @@ import Worker (errorMessageFromException, exceptionMessage, fetchResultEvents, r
 makeLensesFor [("std_in", "stdIn"), ("std_err", "stdErr"), ("std_out", "stdOut")] ''CreateProcess
 
 data HocketCommand
-  = RunTUI !(Maybe AgentSocketOpt)
+  = RunTUI !(Maybe AgentSocketOpt) !(Maybe FixtureOpts)
   | AddBookmarkCmd !Text !(Maybe Text) ![Text]
   | -- | Speak one request to a running TUI's control socket and exit.
     AgentCall !(Maybe FilePath) !AgentCmd
@@ -275,7 +282,7 @@ data AgentSocketOpt = AgentSocketDefault | AgentSocketAt !FilePath
 
 tuiCommandParser :: Mod CommandFields HocketCommand
 tuiCommandParser =
-  command "tui" (info (RunTUI <$> agentSocketParser) (progDesc "Run the Hocket Terminal User Interface"))
+  command "tui" (info (RunTUI <$> agentSocketParser <*> optional fixtureParser) (progDesc "Run the Hocket Terminal User Interface"))
 
 agentSocketParser :: Parser (Maybe AgentSocketOpt)
 agentSocketParser =
@@ -707,25 +714,36 @@ ensureSchemaFile = do
         writeFile xdgSchemaPath legacyContent
       else writeFile xdgSchemaPath "{ _raindropToken : Text, _archiveCollectionId : Natural }\n"
 
-runTuiApp :: Maybe AgentSocketOpt -> IO ()
-runTuiApp mAgentOpt = do
+runTuiApp :: Maybe AgentSocketOpt -> Maybe FixtureOpts -> IO ()
+runTuiApp mAgentOpt Nothing = do
   ensureSchemaFile
   configPath <- getConfigPath
   cred <- input auto (T.pack configPath)
-  withTuiLog $ \runLog -> do
-    events <- newBChan 10
-    tz <- getCurrentTimeZone
-    mAgent <- for mAgentOpt (startAgentServer events)
-    vty <- mkVty Vty.defaultConfig
-    void
-      ( customMain
-          vty
-          (mkVty Vty.defaultConfig)
-          (Just events)
-          (app tz (Env events (servantPort runLog cred)) (snd <$> mAgent))
-          (initialState cred)
-      )
-      `finally` cleanupAgentSocket mAgent
+  withTuiLog $ \runLog -> runTui mAgentOpt False (servantPort runLog cred) (initialState cred)
+-- Fixture mode never reads the config or credentials, so it cannot reach
+-- the real account.
+runTuiApp mAgentOpt (Just fo) = do
+  seed <- LBS.readFile (foSeed fo)
+  store <- either (\e -> hPutStrLn stderr ("hocket: bad fixture " <> foSeed fo <> ": " <> e) >> exitFailure) pure (fixtureStore fo seed)
+  ref <- newIORef store
+  runTui mAgentOpt True (fakePort getCurrentTime ref) (initialState (BookmarkCredentials (RaindropToken "") 0))
+    `finally` for_ (foDump fo) (\out -> readIORef ref >>= LBS.writeFile out . encodeFixtureDump)
+
+runTui :: Maybe AgentSocketOpt -> Bool -> RaindropPort -> HocketState -> IO ()
+runTui mAgentOpt isFixture port s0 = do
+  events <- newBChan 10
+  tz <- getCurrentTimeZone
+  mAgent <- for mAgentOpt (startAgentServer events)
+  vty <- mkVty Vty.defaultConfig
+  void
+    ( customMain
+        vty
+        (mkVty Vty.defaultConfig)
+        (Just events)
+        (app tz isFixture (Env events port) (snd <$> mAgent))
+        s0
+    )
+    `finally` cleanupAgentSocket mAgent
 
 -- | On graceful exit, remove the socket file and then the (now-empty)
 -- containing directory so we do not accumulate stale shells. Wrapped in
@@ -796,14 +814,14 @@ main :: IO ()
 main = do
   cmd <- execParser opts
   case cmd of
-    RunTUI mAgentOpt -> runTuiApp mAgentOpt
+    RunTUI mAgentOpt mFixture -> runTuiApp mAgentOpt mFixture
     AddBookmarkCmd url mCollection tags -> runAddCommand url mCollection tags
     AgentCall mpath agentCmd -> runAgentCommand mpath agentCmd
 
-app :: TimeZone -> Env -> Maybe (TVar AgentSnapshot) -> App HocketState HocketEvent Name
-app tz env mSnapVar =
+app :: TimeZone -> Bool -> Env -> Maybe (TVar AgentSnapshot) -> App HocketState HocketEvent Name
+app tz isFixture env mSnapVar =
   App
-    { appDraw = drawGui tz,
+    { appDraw = drawGui tz isFixture,
       appChooseCursor = \s ->
         if s ^. hsFilterActive
           then showCursorNamed FilterEditorName
@@ -840,9 +858,14 @@ hocketAttrMap =
       (attrName "list" <> attrName "favoriteItem", favoriteYellowFg),
       (attrName "list" <> attrName "favoriteSelected", favoriteYellowSelectedFg),
       (attrName "bar", barAttr),
+      (attrName "bar" <> attrName "fixture", fixtureAttr),
       -- The editor sets its own attr, which would drop the bar's colours.
       (editFocusedAttr, barAttr)
     ]
+
+-- | Loud on purpose: a fixture session must not pass for the real account.
+fixtureAttr :: Vty.Attr
+fixtureAttr = Vty.defAttr `Vty.withBackColor` flaggedRed `Vty.withForeColor` Vty.white `Vty.withStyle` Vty.bold
 
 barAttr :: Vty.Attr
 barAttr = Vty.defAttr `Vty.withBackColor` Vty.black `Vty.withForeColor` Vty.white
@@ -870,43 +893,45 @@ getDisplayContent item =
         (False, False, True) -> formattedExcerpt
         (False, False, False) -> " "
 
-drawGui :: TimeZone -> HocketState -> [Widget Name]
-drawGui tz s = [w]
+drawGui :: TimeZone -> Bool -> HocketState -> [Widget Name]
+drawGui tz isFixture s = [w]
   where
+    fixtureTag = if isFixture then withAttr (attrName "bar" <> attrName "fixture") (txt " FIXTURE ") else emptyWidget
     w =
       vBox
-        [ hBarWithHints
-            ( ( case (s ^. hsAgentError, s ^. hsAgentClients > 0) of
-                  (Just _, _) -> "[agent: socket failed] "
-                  (Nothing, True) -> "[agent] "
-                  (Nothing, False) -> ""
+        [ fixtureTag
+            <+> hBarWithHints
+              ( ( case (s ^. hsAgentError, s ^. hsAgentClients > 0) of
+                    (Just _, _) -> "[agent: socket failed] "
+                    (Nothing, True) -> "[agent] "
+                    (Nothing, False) -> ""
+                )
+                  <> "Hocket"
+                  <> ( case s ^. hsVideoFilter of
+                         NoVideoFilter -> ""
+                         ShowOnlyVideos -> " (+V)"
+                         HideVideos -> " (-V)"
+                     )
+                  <> ( if T.null (s ^. hsFilterQuery)
+                         then ""
+                         else " (/" <> sanitizeForDisplay (s ^. hsFilterQuery) <> ")"
+                     )
+                  <> ": "
+                  <> ( \counts ->
+                         let base =
+                               sformat
+                                 ("(" % F.int % "|" % F.int % ")")
+                                 (counts ^. icNone)
+                                 (counts ^. icToBeArchived + counts ^. icToBeReminded + counts ^. icReminderToBeRemoved)
+                             reminderPart =
+                               if counts ^. icFutureReminders > 0
+                                 then sformat (" (" % F.int % ")") (counts ^. icFutureReminders)
+                                 else ""
+                          in base <> reminderPart
+                     )
+                    (hsNumItems s)
               )
-                <> "Hocket"
-                <> ( case s ^. hsVideoFilter of
-                       NoVideoFilter -> ""
-                       ShowOnlyVideos -> " (+V)"
-                       HideVideos -> " (-V)"
-                   )
-                <> ( if T.null (s ^. hsFilterQuery)
-                       then ""
-                       else " (/" <> sanitizeForDisplay (s ^. hsFilterQuery) <> ")"
-                   )
-                <> ": "
-                <> ( \counts ->
-                       let base =
-                             sformat
-                               ("(" % F.int % "|" % F.int % ")")
-                               (counts ^. icNone)
-                               (counts ^. icToBeArchived + counts ^. icToBeReminded + counts ^. icReminderToBeRemoved)
-                           reminderPart =
-                             if counts ^. icFutureReminders > 0
-                               then sformat (" (" % F.int % ")") (counts ^. icFutureReminders)
-                               else ""
-                        in base <> reminderPart
-                   )
-                  (hsNumItems s)
-            )
-            "spc:Browse ent:Browse+flag e:Edit y:Copied URL r:Refresh S:Toggle future reminders v:Video filter V:Hide videos /:Filter X:Execute Flags a:Archive flag s:Reminder flag u:Unflag J/K:Jump U:Unflag all Q:Quit",
+              "spc:Browse ent:Browse+flag e:Edit y:Copied URL r:Refresh S:Toggle future reminders v:Video filter V:Hide videos /:Filter X:Execute Flags a:Archive flag s:Reminder flag u:Unflag J/K:Jump U:Unflag all Q:Quit",
           hBorder,
           hBar
             ( maybe
