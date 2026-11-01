@@ -11,6 +11,7 @@ module Interpret
     tookMsg,
     step,
     publish,
+    publishSTM,
     interpret,
     copyCleaned,
     batchWorker,
@@ -59,11 +60,15 @@ data Env = Env
 newEnv :: RaindropPort -> SystemPort -> IO Now -> IO Env
 newEnv port system now = Env <$> newBChan 10 <*> newTVarIO 0 <*> pure port <*> pure system <*> pure now
 
--- | Post, waiting while the channel is full (the workers).
+-- | Post, waiting while the channel is full (the workers). Counts before
+-- writing, so a message in the channel is always pending: loopIdle relies
+-- on it, and brick's channel hides its queue, so the count and the write
+-- cannot share a transaction.
 postMsg :: Env -> Msg -> IO ()
 postMsg env m = atomically (modifyTVar' (envPending env) (+ 1)) >> writeBChan (envEvents env) m
 
 -- | Post unless the channel is full (the agent socket); whether it was.
+-- Counts before writing, as 'postMsg' does.
 injectMsg :: Env -> Msg -> IO Bool
 injectMsg env m = do
   atomically (modifyTVar' (envPending env) (+ 1))
@@ -91,7 +96,12 @@ step env m s0 = foldM run (s1, False) effects
 -- Persistent data sharing keeps this cheap; the item projection is only
 -- fully forced by a server thread that actually serves it.
 publish :: TVar AgentSnapshot -> HocketState -> IO ()
-publish snapVar s = atomically . modifyTVar' snapVar $ \old -> takeSnapshot (asVersion old + 1) s
+publish snapVar = atomically . publishSTM snapVar
+
+-- | 'publish' inside a transaction, for a loop that must change more in
+-- the same step.
+publishSTM :: TVar AgentSnapshot -> HocketState -> STM ()
+publishSTM snapVar s = modifyTVar' snapVar $ \old -> takeSnapshot (asVersion old + 1) s
 
 -- | Run one effect. What the TUI waits for (browser, clipboard) answers
 -- with messages for the same event, so the status line is as quick as the

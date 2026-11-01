@@ -13,7 +13,7 @@ where
 import Brick.BChan (readBChan)
 import Control.Concurrent.STM
 import Data.Maybe (isNothing)
-import Interpret (Env (..), publish, step, tookMsg)
+import Interpret (Env (..), publishSTM, step, tookMsg)
 import Network.Bookmark.Agent.Snapshot (AgentSnapshot, asAsyncOp, emptySnapshot)
 import Network.Bookmark.App.Msg (Intent (Refresh), Msg (Intent))
 import Network.Bookmark.Ui.State (HocketState, settle)
@@ -31,7 +31,10 @@ newLoop = Loop <$> newTVarIO emptySnapshot <*> newTVarIO True
 -- | Nothing posted and untaken, nothing in hand, and no fetch or batch
 -- running: a worker frees the slot only through its terminal message,
 -- which counts as pending until the loop has taken it, and as in hand until
--- the loop has published what it did.
+-- the loop has published what it did. Not covered: the agent server's
+-- client count, which its poster thread posts on its own schedule (retrying
+-- every 50 ms while the channel is full), so hsAgentClients may still lag
+-- behind an idle loop.
 loopIdle :: Env -> Loop -> STM Bool
 loopIdle env loop = do
   empty <- (== 0) <$> readTVar (envPending env)
@@ -47,8 +50,9 @@ runHeadless env loop = run (Intent Refresh)
     run m s = do
       (s', halted) <- step env m s
       let settled = settle s'
-      publish (loopSnapshot loop) settled
-      atomically (writeTVar (loopBusy loop) False)
+      -- One transaction: no observer sees busy cleared with the old
+      -- snapshot (an Execute's async_op not yet published).
+      atomically (publishSTM (loopSnapshot loop) settled >> writeTVar (loopBusy loop) False)
       if halted
         then pure settled
         else do
