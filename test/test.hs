@@ -11,7 +11,8 @@ import qualified Brick.Widgets.List as L
 import CharacterizationTests (characterizationTests)
 import ClassifyTests (classifyTests)
 import Control.Concurrent (forkIO, threadDelay)
-import Control.Concurrent.Async (poll, withAsync)
+import Control.Concurrent.Async (async, cancel, poll, withAsync)
+import Control.Concurrent.MVar (newEmptyMVar, putMVar, readMVar)
 import Control.Concurrent.STM (TVar, atomically, modifyTVar', newTVarIO)
 import Control.Exception (IOException, SomeException, displayException, finally, throwIO, try)
 import Control.Lens (ix, to, view, _1, _2)
@@ -25,10 +26,11 @@ import qualified Data.ByteString.Char8 as BSC
 import qualified Data.ByteString.Lazy.Char8 as LBS
 import Data.Either (isLeft)
 import Data.Foldable (for_)
-import Data.IORef (atomicModifyIORef', newIORef, readIORef, writeIORef)
+import Data.IORef (IORef, atomicModifyIORef', newIORef, readIORef, writeIORef)
 import Data.List (find, head, intercalate, isInfixOf, last)
 import Data.Map (Map)
 import qualified Data.Map as Map
+import Data.Maybe (listToMaybe, mapMaybe)
 import Data.Ord
 import Data.Ratio ((%))
 import Data.Text (Text)
@@ -970,6 +972,21 @@ reachableOr what path instances = do
       ids <- traverse (\(n, b) -> (\i -> n <> " = " <> show i) <$> boundSocketId b) instances
       assertFailure (what <> "; path holds " <> at' <> "; " <> intercalate ", " ids <> "; " <> unwords (lines (displayException e)))
 
+failCountPosts :: I.Msg -> IO ()
+failCountPosts (I.AgentClients _) = throwIO (userError "post failed")
+failCountPosts _ = pure ()
+
+-- | The newest AgentClients count posted so far.
+latestCount :: IORef [I.Msg] -> IO (Maybe Int)
+latestCount ref = listToMaybe . mapMaybe count <$> readIORef ref
+  where
+    count (I.AgentClients n) = Just n
+    count _ = Nothing
+
+-- | Polls every 20 ms; whether the condition held within the budget.
+waitFor :: Int -> IO Bool -> IO Bool
+waitFor n cond = cond >>= \ok -> if ok || n <= 0 then pure ok else threadDelay 20000 >> waitFor (n - 1) cond
+
 reportsFailure :: I.Msg -> Bool
 reportsFailure (I.Intent (I.SetStatus t)) = "inject broke" `T.isInfixOf` t
 reportsFailure _ = False
@@ -1198,6 +1215,35 @@ agentServerIntegrationTests =
         for_ [(sigTERM, 143), (sigHUP, 129)] $ \(sig, code) -> do
           r <- try @ExitCode (exitOnTerminated (throwIO (Terminated sig) :: IO ()))
           r @?= Left (ExitFailure code),
+      testCase "cancel stops the server even while posting the client count blocks" $ do
+        -- Blocking in the count post itself, and in the report of a failed one.
+        for_ [const (pure ()), failCountPosts] $ \beforeBlocking ->
+          withSystemTempDirectory "hk" $ \root -> do
+            let path = root </> "s.sock"
+            gate <- newEmptyMVar
+            snapVar <- newTVarIO (buildTestSnapshot 1)
+            let env = AgentEnv {aeSnapshot = snapVar, aeInject = \m -> beforeBlocking m >> readMVar gate, aeNow = pure testNow}
+            bound <- newBoundSocket
+            a <- async (runAgentServer bound path env)
+            waitUntilReachable 100 path
+            threadDelay 100000
+            stopped <- timeout 2000000 (cancel a)
+            putMVar gate True -- keeps the gate reachable: no BlockedIndefinitelyOnMVar
+            stopped @?= Just (),
+      testCase "the client count returns to 0 when clients leave" $
+        withSystemTempDirectory "hk" $ \root -> do
+          let path = root </> "s.sock"
+          posted <- newIORef []
+          snapVar <- newTVarIO (buildTestSnapshot 1)
+          let env = AgentEnv {aeSnapshot = snapVar, aeInject = \m -> atomicModifyIORef' posted (\ms -> (m : ms, True)), aeNow = pure testNow}
+          bound <- newBoundSocket
+          withAsync (runAgentServer bound path env) $ \_ -> do
+            waitUntilReachable 100 path
+            h <- connectAgentClient path
+            _ <- sendRequest h "{\"id\":1,\"method\":\"get_state\"}"
+            hClose h
+            lastCount <- waitFor 100 ((== Just 0) <$> latestCount posted)
+            lastCount @?= True,
       testCase "a failing announce neither stops the accept loop nor goes unreported" $
         withSystemTempDirectory "hk" $ \root -> do
           let path = root </> "s.sock"
