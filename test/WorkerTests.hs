@@ -7,8 +7,12 @@ module WorkerTests (workerTests) where
 
 import CharacterizationTests (emptyState, item)
 import ClassifyTests (failure, failureWithXError, response)
+import Control.Concurrent (threadDelay)
+import Control.Concurrent.Async (cancel, withAsync)
+import Control.Concurrent.MVar (newEmptyMVar, putMVar, takeMVar)
 import Control.Exception (AsyncException (ThreadKilled), SomeException, displayException, evaluate, throwIO, toException, try)
 import Control.Lens ((&), (.~), (^.))
+import Control.Monad (forever)
 import Control.Monad.State.Strict (execState, modify, runState)
 import Data.Bifunctor (first)
 import qualified Data.ByteString as BS
@@ -20,9 +24,12 @@ import qualified Data.Map as Map
 import Data.Maybe (fromMaybe)
 import qualified Data.Text as T
 import Data.Time (UTCTime)
+import Interpret (batchWorker)
 import Network.Bookmark.App.Msg (Intent (Execute, Refresh), Msg (..), StepResult (..))
+import Network.Bookmark.App.Plan (BatchPlan (..))
 import Network.Bookmark.App.Update (update)
 import Network.Bookmark.Batch
+import Network.Bookmark.Port (RaindropPort (..))
 import Network.Bookmark.Types (BookmarkItemBatch (..), BookmarkItemId (..), PendingAction (..))
 import Network.Bookmark.Ui.State
 import Network.Bookmark.Ui.Sync
@@ -173,6 +180,15 @@ stepExceptionTests =
     [ testCase "a non-ClientError mid-step aborts it and keeps the successes so far" $ do
         o <- runCalls (throwingOn [(2, throwIO (userError "disk full"))]) [1, 2, 3]
         (o ^. soOk, o ^. soSkipped, o ^. soAborted) @?= ([1], [2, 3], Just "user error (disk full)"),
+      testCase "a cancelled batch still posts exactly one BatchFinished, and no outcome" $ do
+        posted <- newIORef []
+        called <- newEmptyMVar
+        -- The first call blocks until the test cancels the worker.
+        let port = RaindropPort (\_ -> putMVar called () >> forever (threadDelay 1000000))
+        withAsync (batchWorker (\m -> modifyIORef' posted (<> [m])) port (BatchPlan [BookmarkItemId "a"] [] [])) $ \worker -> do
+          takeMVar called
+          cancel worker
+        readIORef posted >>= (@?= [BatchStepStarted StepArchive, BatchFinished (Just "batch interrupted")]),
       testCase "a ClientError is scoped by classify: a 404 fails only that item" $ do
         o <- runCalls (throwingOn [(2, throwIO (failure 404))]) [1, 2, 3]
         (o ^. soOk, map fst (o ^. soFailed), o ^. soAborted) @?= ([1, 3], [2], Nothing),

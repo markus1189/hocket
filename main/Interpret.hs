@@ -7,6 +7,7 @@ module Interpret
   ( Env (..),
     interpret,
     copyCleaned,
+    batchWorker,
   )
 where
 
@@ -44,7 +45,7 @@ interpret env = \case
   Halt -> pure []
   OpenUrl opener url -> failed <$> try @SomeException (browseItem (program opener) (URL (T.unpack url)))
   StartFetch plan -> [] <$ async (fetch plan)
-  StartBatch plan -> [] <$ async (batch plan)
+  StartBatch plan -> [] <$ async (batchWorker post (envPort env) plan)
   CopyText link -> copyCleaned copyToClipboard link
   where
     -- The fetch worker: exactly one terminal message, whatever happens short
@@ -54,16 +55,6 @@ interpret env = \case
       let rendered = either (Left . Just . exceptionMessage) (first errorMessageFromException) result
       post (fetchResult (plan ^. spKind == IncrementalAll) rendered)
     post = writeBChan (envEvents env)
-    port = envPort env
-    -- The batch worker: one BatchFinished at the end, also if the steps
-    -- throw (runCalls already catches per call) or the thread is cancelled.
-    batch plan = do
-      let run = \case
-            StepArchive -> runStep post StepArchive Archived (performArchive port (bpArchive plan))
-            StepSetReminders -> runStep post StepSetReminders RemindersSetAt (performSetReminders port (bpSetReminders plan))
-            StepRemoveReminders -> runStep post StepRemoveReminders RemindersRemoved (performRemoveReminders port (bpRemoveReminders plan))
-      r <- trySync (runBatch run (planSteps plan)) `onException` post (BatchFinished (Just "batch interrupted"))
-      post (BatchFinished (either (Just . exceptionMessage) id r))
     failed = either (\e -> [SystemFailed (T.pack (show e))]) (const [])
     program = \case
       Firefox -> "firefox"
@@ -105,6 +96,18 @@ performSetReminders port = runCalls (\(bid, reminderTime) -> runRaindrop port (S
 
 performRemoveReminders :: RaindropPort -> [BookmarkItemId] -> IO (StepOutcome BookmarkItemId Text)
 performRemoveReminders port = runCalls (runRaindrop port . RemoveReminder)
+
+-- | The batch worker: one BatchFinished at the end, also if the steps throw
+-- (runCalls already catches per call) or the thread is cancelled, as a
+-- headless loop's or a test's teardown does.
+batchWorker :: (Msg -> IO ()) -> RaindropPort -> BatchPlan -> IO ()
+batchWorker post port plan = do
+  let run = \case
+        StepArchive -> runStep post StepArchive Archived (performArchive port (bpArchive plan))
+        StepSetReminders -> runStep post StepSetReminders RemindersSetAt (performSetReminders port (bpSetReminders plan))
+        StepRemoveReminders -> runStep post StepRemoveReminders RemindersRemoved (performRemoveReminders port (bpRemoveReminders plan))
+  r <- trySync (runBatch run (planSteps plan)) `onException` post (BatchFinished (Just "batch interrupted"))
+  post (BatchFinished (either (Just . exceptionMessage) id r))
 
 tryClientError :: IO a -> IO (Either ClientError a)
 tryClientError = try @ClientError
