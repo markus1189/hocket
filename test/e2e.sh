@@ -390,8 +390,10 @@ scenario_fetch_fail() {
   finish
 }
 
-# logged N: the desktop record has N calls.
-logged() { wait_for 5 "$1 desktop calls" test "$(wc -l <"$desktop" 2>/dev/null || echo 0)" -eq "$1"; }
+# logged N: the desktop record has N calls. The count is a function, not a
+# $(...) argument, so wait_for re-reads the file on every try.
+desktop_calls_are() { [ "$(wc -l <"$desktop" 2>/dev/null || echo 0)" -eq "$1" ]; }
+logged() { wait_for 5 "$1 desktop calls" desktop_calls_are "$1"; }
 
 # What the browser and clipboard would have done, in order: Enter, Space,
 # e, y, and the agent's open_item and open_and_flag.
