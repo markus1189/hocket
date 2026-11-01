@@ -44,7 +44,7 @@ import Brick.Widgets.Edit (applyEdit, editFocusedAttr, handleEditorEvent, render
 import qualified Brick.Widgets.List as L
 import Control.Applicative ((<|>))
 import Control.Concurrent.Async (async)
-import Control.Concurrent.STM (TVar, atomically, modifyTVar', newTVarIO)
+import Control.Concurrent.STM (TVar, newTVarIO)
 import Control.Exception (SomeException, bracket, finally)
 import Control.Exception.Base (try)
 import Control.Lens (makeLenses, uses, view)
@@ -54,7 +54,7 @@ import Control.Lens.Operators
     (.=),
     (^.),
   )
-import Control.Monad (unless, void)
+import Control.Monad (unless, void, when)
 import qualified Control.Monad.Catch as Catch
 import Control.Monad.IO.Class (liftIO)
 import Control.Monad.Logger (LoggingT, defaultOutput, logErrorN, logInfoN, runLoggingT, runStdoutLoggingT)
@@ -91,7 +91,7 @@ import Graphics.Vty (Event (EvKey), Key (KChar, KDown, KUp), Modifier (MCtrl))
 import qualified Graphics.Vty as Vty
 import Graphics.Vty.Input.Events (Key (KEnter, KEsc))
 import Graphics.Vty.Platform.Unix (mkVty)
-import Interpret (Env (..), interpret)
+import Interpret (Env (..), publish, step)
 import Keys (keyIntents)
 import Network.Bookmark.Agent.Protocol
   ( AgentCmd (..),
@@ -99,11 +99,9 @@ import Network.Bookmark.Agent.Protocol
     ReadCmd (..),
     WriteCmd (..),
   )
-import Network.Bookmark.Agent.Snapshot (AgentSnapshot, asVersion, emptySnapshot, takeSnapshot)
-import Network.Bookmark.App.Effect (Effect (..))
+import Network.Bookmark.Agent.Snapshot (AgentSnapshot, emptySnapshot)
 import Network.Bookmark.App.Msg (Intent (FilterCancel, FilterLock, FilterText, Navigate, Refresh), Msg (..))
 import Network.Bookmark.App.Nav (Nav (..))
-import Network.Bookmark.App.Update (update)
 import Network.Bookmark.Fake (encodeFixtureDump, fakePort)
 import Network.Bookmark.Port (RaindropPort (..))
 import Network.Bookmark.Types
@@ -367,15 +365,12 @@ vtyEventHandler env e = do
       -- Keys keyIntents does not know are none of hocket's.
       for_ (keyIntents now height e s) (traverse_ (applyMsg env . Intent))
 
--- | Run one message through 'update', its effects through 'interpret', and
--- what those answer right away through 'update' again.
+-- | One message through the 'step' the headless loop runs too.
 applyMsg :: Env -> Msg -> EventM Name AppState ()
 applyMsg env m = do
-  (s', effects) <- update m <$> use model
+  (s', halted) <- liftIO . step env m =<< use model
   model .= s'
-  for_ effects $ \case
-    Halt -> halt
-    effect -> liftIO (interpret env effect) >>= traverse_ (applyMsg env)
+  when halted halt
 
 -- | The editor applied a key: tell update, which owns the query (plan D3).
 reportEditor :: Env -> EventM Name AppState ()
@@ -543,13 +538,7 @@ app tz isFixture env mSnapVar =
         model %= settle
         settled <- use model
         ui %= reconcile settled
-        -- Mirror the post-render state for the agent socket. Persistent
-        -- data sharing keeps this cheap; the item projection is only fully
-        -- forced by a server thread that actually serves it.
-        for_ mSnapVar $ \snapVar -> do
-          s <- use model
-          liftIO . atomically . modifyTVar' snapVar $ \old ->
-            takeSnapshot (asVersion old + 1) s,
+        for_ mSnapVar $ \snapVar -> liftIO . publish snapVar =<< use model,
       appStartEvent = applyMsg env (Intent Refresh),
       appAttrMap = const hocketAttrMap
     }

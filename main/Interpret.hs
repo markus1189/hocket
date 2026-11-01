@@ -5,6 +5,8 @@
 -- | The shell's only way from an 'Effect' to IO (plan §4.3).
 module Interpret
   ( Env (..),
+    step,
+    publish,
     interpret,
     copyCleaned,
     batchWorker,
@@ -13,21 +15,25 @@ where
 
 import Brick.BChan (BChan, writeBChan)
 import Control.Concurrent.Async (async)
+import Control.Concurrent.STM (TVar, atomically, modifyTVar')
 import Control.Exception (SomeException, onException, try)
 import Control.Lens (view, (^.))
+import Control.Monad (foldM)
 import Control.Monad.Loops (unfoldrM)
-import Data.Bifunctor (first)
+import Data.Bifunctor (first, second)
 import Data.Text (Text)
 import qualified Data.Text as T
 import Data.Time (UTCTime)
 import Data.Time.Clock.POSIX (utcTimeToPOSIXSeconds)
+import Network.Bookmark.Agent.Snapshot (AgentSnapshot, asVersion, takeSnapshot)
 import Network.Bookmark.App.Effect
 import Network.Bookmark.App.Msg
 import Network.Bookmark.App.Plan (BatchPlan (..), planSteps)
+import Network.Bookmark.App.Update (update)
 import Network.Bookmark.Batch (StepOutcome, concatOutcome)
 import Network.Bookmark.Port (RaindropPort (..), SystemPort (..))
 import Network.Bookmark.Types (BookmarkItemBatch (..), BookmarkItemId, BookmarkRequest (..), RaindropCollectionId, URL (..), biLastUpdate)
-import Network.Bookmark.Ui.State (BatchStep (..))
+import Network.Bookmark.Ui.State (BatchStep (..), HocketState)
 import Network.Bookmark.Ui.Sync (SyncKind (IncrementalAll), spCollection, spKind, spSearch)
 import Servant.Client.Core (ClientError)
 import System (cleanUrl)
@@ -40,6 +46,24 @@ data Env = Env
     envSystem :: !SystemPort,
     envNow :: !(IO Now)
   }
+
+-- | One message as both event loops run it: update, then its effects in
+-- order, each effect's immediate answers through 'step' again, depth first.
+-- True when an effect was 'Halt'; the effects after it still run, as brick
+-- only stops after the event.
+step :: Env -> Msg -> HocketState -> IO (HocketState, Bool)
+step env m s0 = foldM run (s1, False) effects
+  where
+    (s1, effects) = update m s0
+    run (s, halted) = \case
+      Halt -> pure (s, True)
+      effect -> interpret env effect >>= foldM (\(s', h) reply -> second (|| h) <$> step env reply s') (s, halted)
+
+-- | Mirror the settled model for the agent socket, one version per event.
+-- Persistent data sharing keeps this cheap; the item projection is only
+-- fully forced by a server thread that actually serves it.
+publish :: TVar AgentSnapshot -> HocketState -> IO ()
+publish snapVar s = atomically . modifyTVar' snapVar $ \old -> takeSnapshot (asVersion old + 1) s
 
 -- | Run one effect. What the TUI waits for (browser, clipboard) answers
 -- with messages for the same event, so the status line is as quick as the

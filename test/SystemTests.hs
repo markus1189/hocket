@@ -3,20 +3,40 @@
 module SystemTests (systemTests) where
 
 import Brick.BChan (newBChan)
+import CharacterizationTests (emptyState, item)
 import Control.Exception (throwIO)
+import Control.Lens ((&), (.~), (^.))
 import Data.IORef (IORef, modifyIORef', newIORef, readIORef, writeIORef)
 import Data.Time (utc)
-import Interpret (Env (..), copyCleaned, interpret)
+import Interpret (Env (..), copyCleaned, interpret, step)
 import Network.Bookmark.App.Effect (Effect (..), Opener (..))
-import Network.Bookmark.App.Msg (Msg (..), Now (..))
+import Network.Bookmark.App.Msg (Intent (..), Msg (..), Now (..), Target (..))
 import Network.Bookmark.Port (RaindropPort (..), SystemPort (..))
-import Network.Bookmark.Types (URL (..))
+import Network.Bookmark.Types (BookmarkItemId (..), URL (..), biLink)
+import Network.Bookmark.Ui.State (hsStatus, insertItems)
 import System (cleanUrl, urlReplacements)
 import Test.Tasty (TestTree, testGroup)
 import Test.Tasty.HUnit (testCase, (@?=))
 
 systemTests :: TestTree
-systemTests = testGroup "system" [cleanUrlTests, copyTests, systemPortTests]
+systemTests = testGroup "system" [cleanUrlTests, copyTests, systemPortTests, stepTests]
+
+-- | The step both event loops run.
+stepTests :: TestTree
+stepTests =
+  testGroup
+    "step"
+    [ testCase "an effect's immediate answer goes through update in the same step" $ do
+        (env, calls) <- recordingEnv
+        let s = insertItems [item "a" (-1) & biLink .~ "https://m.imdb.com/a"] emptyState
+        (s', halted) <- step env (Intent (CopyUrl (ById (BookmarkItemId "a")))) s
+        (halted, s' ^. hsStatus) @?= (False, Just "Copied: https://imdb.com/a")
+        readIORef calls >>= (@?= ["copy https://imdb.com/a"]),
+      testCase "Halt is reported, not acted on" $ do
+        (env, _) <- recordingEnv
+        (_, halted) <- step env (Intent Quit) emptyState
+        halted @?= True
+    ]
 
 -- | interpret reaches the desktop only through the SystemPort.
 systemPortTests :: TestTree
