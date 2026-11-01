@@ -59,6 +59,7 @@ library
                      , Hocket.Shell.Headless
                      , Hocket.Shell.Interpret
                      , Hocket.Shell.Signals
+                     , Hocket.Shell.Simulate
                      , Hocket.Shell.Tui.App
                      , Hocket.Shell.Tui.Keymap
                      , Hocket.Shell.Tui.View
@@ -81,6 +82,7 @@ library
                      , lens
                      , monad-logger
                      , monad-loops
+                     , mtl
                      , network
                      , optparse-applicative
                      , process
@@ -144,6 +146,7 @@ test-suite test
                      , Shell.FixtureTests
                      , Shell.HeadlessTests
                      , Shell.SMFixtureTests
+                     , Shell.SimulateTests
                      , Shell.SnapshotGoldenTests
                      , Shell.SystemTests
                      , Shell.WorkerTests

@@ -20,6 +20,7 @@ import Shell.FakeTests (fakeTests)
 import Shell.FixtureTests (fixtureTests)
 import Shell.HeadlessTests (headlessTests)
 import Shell.SMFixtureTests (smFixtureTests)
+import Shell.SimulateTests (simulateTests)
 import Shell.SnapshotGoldenTests (snapshotGoldenTests)
 import Shell.SystemTests (systemTests)
 import Shell.WorkerTests (workerTests)
@@ -34,6 +35,7 @@ tests =
   testGroup
     "Tests"
     [ smFixtureTests,
+      simulateTests,
       snapshotGoldenTests,
       xKeyBatchConcurrencyTests,
       propertyTests,
