@@ -86,12 +86,39 @@ genRequest fr =
       d <- if null days then utctDay <$> genUTCTime else Gen.choice [Gen.element days, utctDay <$> genUTCTime]
       pure ("lastUpdate:>" <> T.pack (formatTime defaultTimeLocale "%Y-%m-%d" d))
 
-call :: RaindropPort -> IORef FakeRaindrop -> Command Gen (PropertyT IO) Model
-call port ref =
+-- | What a sequence exercised, for 'cover': an error after earlier counted
+-- calls, a fetch whose search day is an item's day, an empty fetch answer.
+data Seen = Seen {seenLateError :: !Bool, seenBoundaryDay :: !Bool, seenEmptyPage :: !Bool}
+
+noneSeen :: Seen
+noneSeen = Seen False False False
+
+-- | Classified from the store before the call and the typed answer.
+observe :: FakeRaindrop -> BookmarkRequest a -> Either ClientError a -> Seen -> Seen
+observe before req r seen =
+  Seen
+    { seenLateError = seenLateError seen || (isLeft' r && any (> 0) (before ^. frCalls)),
+      seenBoundaryDay = seenBoundaryDay seen || boundary,
+      seenEmptyPage = seenEmptyPage seen || emptyPage
+    }
+  where
+    isLeft' = either (const True) (const False)
+    days = map (utctDay . (^. biLastUpdate)) (Map.elems (before ^. frItems))
+    (boundary, emptyPage) = case (req, r) of
+      (RetrieveBookmarks _ _ search, _) ->
+        ( maybe False (\t -> any (\d -> t == "lastUpdate:>" <> T.pack (formatTime defaultTimeLocale "%Y-%m-%d" d)) days) search,
+          either (const False) (null . snd) r
+        )
+      _ -> (False, False)
+
+call :: RaindropPort -> IORef FakeRaindrop -> IORef Seen -> Command Gen (PropertyT IO) Model
+call port ref seen =
   Command
     (\(Model fr _) -> Just (Call <$> genRequest fr))
     ( \(Call (SomeRequest req)) -> do
+        before <- liftIO (readIORef ref)
         r <- liftIO (try (runRaindrop port req))
+        liftIO (atomicModifyIORef' seen (\s -> (observe before req r s, ())))
         store <- liftIO (readIORef ref)
         pure (outcome r, store)
     )
@@ -110,10 +137,16 @@ smFixture = withTests 200 . property $ do
   ticks <- liftIO (newIORef (0 :: Int))
   let clock = atomicModifyIORef' ticks (\n -> (n + 1, addUTCTime (fromIntegral (n + 1)) t0))
       port = fakePort clock ref
-  actions <- forAll (Gen.sequential (Range.linear 1 40) (Model start 0) [call port ref])
+  seen <- liftIO (newIORef noneSeen)
+  actions <- forAll (Gen.sequential (Range.linear 1 40) (Model start 0) [call port ref seen])
   -- Shrinking reruns from here: every run starts from the seed.
-  liftIO (writeIORef ref start >> writeIORef ticks 0)
+  liftIO (writeIORef ref start >> writeIORef ticks 0 >> writeIORef seen noneSeen)
   executeSequential (Model start 0) actions
+  -- QS measured about 51%, 47% and 55% per sequence.
+  Seen lateError boundaryDay emptyPage <- liftIO (readIORef seen)
+  cover 35 "an error after earlier counted calls" lateError
+  cover 30 "a fetch at an item's boundary day" boundaryDay
+  cover 40 "a page past the end / empty answer" emptyPage
 
 smFixtureTests :: TestTree
 smFixtureTests = testPropertyNamed "SM-fixture: fakePort behaves like serveFake (I9)" "smFixture" smFixture
