@@ -59,12 +59,12 @@ import Control.Lens.Operators
     (.~),
     (^.),
   )
-import Control.Monad (mfilter, unless, void)
+import Control.Monad (unless, void)
 import qualified Control.Monad.Catch as Catch
 import Control.Monad.IO.Class (liftIO)
 import Control.Monad.Logger (LoggingT, logErrorN, logInfoN, runFileLoggingT, runStdoutLoggingT)
 import Control.Monad.Loops (unfoldrM)
-import Data.Bifunctor (first)
+import Data.Bifunctor (bimap, first, second)
 import qualified Data.CaseInsensitive as CI
 import Data.Foldable (for_)
 #if MIN_VERSION_base(4,20,0)
@@ -73,7 +73,7 @@ import Data.List (find, findIndex, isPrefixOf)
 import Data.List (find, findIndex, foldl', isPrefixOf)
 #endif
 import qualified Data.Map as Map
-import Data.Maybe (fromMaybe, isJust, mapMaybe)
+import Data.Maybe (fromMaybe, isJust, isNothing)
 import Data.Text (Text)
 import qualified Data.Text as T
 import qualified Data.Text.Encoding as T
@@ -98,7 +98,6 @@ import Events
     HocketEvent (..),
     UiCommand (..),
     archivedItemsEvt,
-    asyncActionFailedEvt,
     browseItemEvt,
     clearAllFlagsEvt,
     copyUrlEvt,
@@ -129,6 +128,7 @@ import Network.Bookmark.Agent.Protocol
     WriteCmd (..),
   )
 import Network.Bookmark.Agent.Snapshot (AgentSnapshot, asVersion, emptySnapshot, takeSnapshot)
+import Network.Bookmark.Batch (StepOutcome, concatOutcome, runItems, soAborted, soOk)
 import Network.Bookmark.Types
   ( BookmarkCredentials,
     BookmarkItem,
@@ -212,7 +212,7 @@ import Network.Bookmark.Ui.Sync
     spSearch,
   )
 import Network.Bookmark.Ui.Widgets (sanitizeForDisplay)
-import Network.Raindrop (raindrop)
+import Network.Raindrop (classify, raindrop)
 import qualified Network.Raindrop as R
 import Network.URI
   ( URI (uriAuthority, uriPath, uriQuery),
@@ -263,7 +263,7 @@ import System.Process
     waitForProcess,
   )
 import System.Process.Internals (StdStream (CreatePipe))
-import Worker (exceptionMessage, fetchResultEvents, trySync)
+import Worker (exceptionMessage, fetchResultEvents, runWhile, stepEvents, trySync)
 
 makeLensesFor [("std_in", "stdIn"), ("std_err", "stdErr"), ("std_out", "stdOut")] ''CreateProcess
 
@@ -530,64 +530,44 @@ nextDayAt7AM = do
       tomorrowAt7AM = LocalTime tomorrow sevenAM
   pure $ localTimeToUTC tz tomorrowAt7AM
 
--- The three 'X' sub-op bodies, run sequentially by 'runBatchOp'.
-runArchiveOp :: BChan HocketEvent -> HocketState -> IO ()
+-- The three 'X' sub-op bodies, run sequentially by 'runBatchOp'. Each answers
+-- whether the batch may go on, i.e. whether it ended without a global error.
+runArchiveOp :: BChan HocketEvent -> HocketState -> IO Bool
 runArchiveOp es s = do
   es `trigger` setStatusEvt (Just "archiving")
-  eitherErrorResults <-
-    performArchive (s ^. hsCredentials) (getItemsWithPendingAction ToBeArchived s)
-  case eitherErrorResults of
-    Left e -> es `trigger` asyncActionFailedEvt (errorMessageFromException e)
-    Right results -> do
-      es
-        `trigger` archivedItemsEvt
-          ( mapMaybe
-              (\(bit, successful) -> mfilter (const successful) (Just (view biId bit)))
-              results
-          )
-      es `trigger` setStatusEvt Nothing
+  outcome <- performArchive (s ^. hsCredentials) (getItemsWithPendingAction ToBeArchived s)
+  postStep es archivedItemsEvt (second renderClientError outcome)
 
-runSetRemindersOp :: BChan HocketEvent -> HocketState -> IO ()
+runSetRemindersOp :: BChan HocketEvent -> HocketState -> IO Bool
 runSetRemindersOp es s = do
   es `trigger` setStatusEvt (Just "setting reminders")
-  eitherErrorResults <- performSetReminders (s ^. hsCredentials) (getItemsToBeReminded s)
-  case eitherErrorResults of
-    Left e -> es `trigger` asyncActionFailedEvt (errorMessageFromException e)
-    Right results -> do
-      es
-        `trigger` remindersSetEvt
-          ( mapMaybe
-              (\(bit, successful) -> mfilter (const successful) (Just (view biId bit)))
-              results
-          )
-      es `trigger` setStatusEvt Nothing
+  outcome <- performSetReminders (s ^. hsCredentials) (getItemsToBeReminded s)
+  postStep es remindersSetEvt (bimap (view biId . fst) renderClientError outcome)
 
-runRemoveRemindersOp :: BChan HocketEvent -> HocketState -> IO ()
+runRemoveRemindersOp :: BChan HocketEvent -> HocketState -> IO Bool
 runRemoveRemindersOp es s = do
   es `trigger` setStatusEvt (Just "removing reminders")
-  eitherErrorResults <- performRemoveReminders (s ^. hsCredentials) (getItemsWithPendingAction ReminderToBeRemoved s)
-  case eitherErrorResults of
-    Left e -> es `trigger` asyncActionFailedEvt (errorMessageFromException e)
-    Right results -> do
-      es
-        `trigger` remindersRemovedEvt
-          ( mapMaybe
-              (\(bit, successful) -> mfilter (const successful) (Just (view biId bit)))
-              results
-          )
-      es `trigger` setStatusEvt Nothing
+  outcome <- performRemoveReminders (s ^. hsCredentials) (getItemsWithPendingAction ReminderToBeRemoved s)
+  postStep es remindersRemovedEvt (bimap (view biId) renderClientError outcome)
+
+postStep :: BChan HocketEvent -> (StepOutcome a Text -> HocketEvent) -> StepOutcome a Text -> IO Bool
+postStep es done outcome = do
+  for_ (stepEvents done outcome) (trigger es)
+  pure (isNothing (outcome ^. soAborted))
 
 -- Run every bucket that has pending work, in order, in one async thread. The
 -- slot is held for the whole batch and freed exactly once via
 -- 'executeBatchDoneEvt', guarded by 'finally' so a sub-op failure can't leak it.
 runBatchOp :: BChan HocketEvent -> HocketState -> IO ()
 runBatchOp es s =
-  for_
-    (batchStepsWithWork s)
-    ( \case
-        StepArchive -> runArchiveOp es s
-        StepSetReminders -> runSetRemindersOp es s
-        StepRemoveReminders -> runRemoveRemindersOp es s
+  runWhile
+    ( map
+        ( \case
+            StepArchive -> runArchiveOp es s
+            StepSetReminders -> runSetRemindersOp es s
+            StepRemoveReminders -> runRemoveRemindersOp es s
+        )
+        (batchStepsWithWork s)
     )
     `finally` (es `trigger` executeBatchDoneEvt)
 
@@ -624,12 +604,12 @@ asyncCommandEventHandler es ExecuteBatch = do
       pure ()
 asyncCommandEventHandler _ ExecuteBatchDone = do
   id %= completeAsyncOp
-asyncCommandEventHandler _ (ArchivedItems bis) =
-  id %= applyStepResult StepArchive bis
-asyncCommandEventHandler _ (RemindersSet bis) =
-  id %= applyStepResult StepSetReminders bis
-asyncCommandEventHandler _ (RemindersRemoved bis) =
-  id %= applyStepResult StepRemoveReminders bis
+asyncCommandEventHandler _ (ArchivedItems outcome) =
+  id %= applyStepResult StepArchive (outcome ^. soOk)
+asyncCommandEventHandler _ (RemindersSet outcome) =
+  id %= applyStepResult StepSetReminders (outcome ^. soOk)
+asyncCommandEventHandler _ (RemindersRemoved outcome) =
+  id %= applyStepResult StepRemoveReminders (outcome ^. soOk)
 
 uiCommandEventHandler ::
   BChan HocketEvent ->
@@ -1088,32 +1068,19 @@ retrieveItems cred searchParam collectionId = do
         )
         0
 
-performArchive :: BookmarkCredentials -> [BookmarkItem] -> IO (Either ClientError [(BookmarkItem, Bool)])
-performArchive cred items = do
-  tryClientError $ runTuiLoggingT $ do
-    let itemIds = map (view biId) items
-    success <- raindrop cred (BatchArchiveBookmarks itemIds)
-    pure $ map (,success) items
+-- | One batch call, so its outcome applies to every id.
+performArchive :: BookmarkCredentials -> [BookmarkItem] -> IO (StepOutcome BookmarkItemId ClientError)
+performArchive cred items =
+  runTuiLoggingT $
+    concatOutcome <$> runItems classify (Catch.try . raindrop cred . BatchArchiveBookmarks) [map (view biId) items]
 
-performSetReminders :: BookmarkCredentials -> [(BookmarkItem, UTCTime)] -> IO (Either ClientError [(BookmarkItem, Bool)])
-performSetReminders cred itemsWithTimes = do
-  tryClientError $ runTuiLoggingT $ do
-    traverse
-      ( \(item, reminderTime) -> do
-          success <- raindrop cred (SetReminder (view biId item) reminderTime)
-          pure (item, success)
-      )
-      itemsWithTimes
+performSetReminders :: BookmarkCredentials -> [(BookmarkItem, UTCTime)] -> IO (StepOutcome (BookmarkItem, UTCTime) ClientError)
+performSetReminders cred =
+  runTuiLoggingT . runItems classify (\(item, reminderTime) -> Catch.try (raindrop cred (SetReminder (view biId item) reminderTime)))
 
-performRemoveReminders :: BookmarkCredentials -> [BookmarkItem] -> IO (Either ClientError [(BookmarkItem, Bool)])
-performRemoveReminders cred items = do
-  tryClientError $ runTuiLoggingT $ do
-    traverse
-      ( \item -> do
-          success <- raindrop cred (RemoveReminder (view biId item))
-          pure (item, success)
-      )
-      items
+performRemoveReminders :: BookmarkCredentials -> [BookmarkItem] -> IO (StepOutcome BookmarkItem ClientError)
+performRemoveReminders cred =
+  runTuiLoggingT . runItems classify (Catch.try . raindrop cred . RemoveReminder . view biId)
 
 -- | vty owns the terminal while the TUI runs, so stdout logging would draw over it.
 runTuiLoggingT :: LoggingT IO a -> IO a
@@ -1240,6 +1207,9 @@ runClipboardCmd cmd args text = do
   exitCode <- waitForProcess ph
   unless (exitCode == ExitSuccess) $
     ioError (userError (cmd <> " exited with code " <> show exitCode))
+
+renderClientError :: ClientError -> Text
+renderClientError = fromMaybe "<no err>" . errorMessageFromException
 
 errorMessageFromException :: ClientError -> Maybe Text
 errorMessageFromException (FailureResponse _ resp) = xError <|> code

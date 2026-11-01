@@ -15,6 +15,7 @@ import Control.Monad.Logger (MonadLogger, logWarnN)
 import Control.Retry (RetryPolicyM, RetryStatus (rsIterNumber), exponentialBackoff, limitRetries, retrying)
 import Data.Maybe (fromMaybe)
 import qualified Data.Text as T
+import Network.Bookmark.Batch (ErrorScope (..))
 import Network.Bookmark.Types (BookmarkCredentials, BookmarkItemId (..), BookmarkRequest (..), RaindropCollectionId (RaindropCollectionId), RaindropToken (..), archiveCollectionId, raindropToken, _BookmarkItemId)
 import Network.HTTP.Types.Status (statusCode)
 import Network.Raindrop.Api
@@ -29,10 +30,6 @@ isTransient :: ClientError -> Bool
 isTransient (ConnectionError _) = True
 isTransient (FailureResponse _ r) = let c = statusCode (responseStatusCode r) in c == 429 || c >= 500
 isTransient _ = False
-
--- | Whether a failed call says something about its item, or would hit every
--- following call the same way (plan D6).
-data ErrorScope = ItemScoped | Global deriving (Show, Eq)
 
 -- | Auth, request timeout and rate limiting are not about the item; neither
 -- are 1xx/3xx, connection, decode or content-type failures.

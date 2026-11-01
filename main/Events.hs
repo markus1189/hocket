@@ -38,6 +38,7 @@ where
 
 import Data.Set (Set)
 import Data.Text (Text)
+import Network.Bookmark.Batch (StepOutcome)
 import Network.Bookmark.Types
 import Network.Bookmark.Ui.State (VideoFilterMode)
 
@@ -54,9 +55,9 @@ data AsyncCommand
   | FetchFailed !(Maybe Text)
   | ExecuteBatch
   | ExecuteBatchDone
-  | ArchivedItems ![BookmarkItemId]
-  | RemindersSet ![BookmarkItemId]
-  | RemindersRemoved ![BookmarkItemId]
+  | ArchivedItems !(StepOutcome BookmarkItemId Text)
+  | RemindersSet !(StepOutcome BookmarkItemId Text)
+  | RemindersRemoved !(StepOutcome BookmarkItemId Text)
   | AsyncActionFailed !(Maybe Text)
   deriving (Show, Eq)
 
@@ -101,14 +102,14 @@ executeBatchEvt = HocketAsync ExecuteBatch
 executeBatchDoneEvt :: HocketEvent
 executeBatchDoneEvt = HocketAsync ExecuteBatchDone
 
-archivedItemsEvt :: [BookmarkItemId] -> HocketEvent
-archivedItemsEvt bids = HocketAsync (ArchivedItems bids)
+archivedItemsEvt :: StepOutcome BookmarkItemId Text -> HocketEvent
+archivedItemsEvt outcome = HocketAsync (ArchivedItems outcome)
 
-remindersSetEvt :: [BookmarkItemId] -> HocketEvent
-remindersSetEvt bids = HocketAsync (RemindersSet bids)
+remindersSetEvt :: StepOutcome BookmarkItemId Text -> HocketEvent
+remindersSetEvt outcome = HocketAsync (RemindersSet outcome)
 
-remindersRemovedEvt :: [BookmarkItemId] -> HocketEvent
-remindersRemovedEvt bids = HocketAsync (RemindersRemoved bids)
+remindersRemovedEvt :: StepOutcome BookmarkItemId Text -> HocketEvent
+remindersRemovedEvt outcome = HocketAsync (RemindersRemoved outcome)
 
 asyncActionFailedEvt :: Maybe Text -> HocketEvent
 asyncActionFailedEvt maybeMsg = HocketAsync (AsyncActionFailed maybeMsg)

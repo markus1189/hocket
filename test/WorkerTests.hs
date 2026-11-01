@@ -7,8 +7,13 @@ module WorkerTests (workerTests) where
 import CharacterizationTests (emptyState, item)
 import Control.Exception (AsyncException (ThreadKilled), throwIO, try)
 import Control.Lens ((^.))
+import Control.Monad.State.Strict (execState, modify)
+import Data.Functor.Identity (runIdentity)
 import qualified Data.Map as Map
+import Data.Maybe (fromMaybe)
+import qualified Data.Text as T
 import Events
+import Network.Bookmark.Batch
 import Network.Bookmark.Types (BookmarkItemBatch (..), BookmarkItemId (..))
 import Network.Bookmark.Ui.State
 import Network.Bookmark.Ui.Sync
@@ -17,7 +22,7 @@ import Test.Tasty.HUnit
 import Worker
 
 workerTests :: TestTree
-workerTests = testGroup "async workers" [fetchEmissionTests, fetchSlotTests]
+workerTests = testGroup "async workers" [fetchEmissionTests, fetchSlotTests, stepEmissionTests]
 
 page1, page2 :: BookmarkItemBatch
 page1 = BookmarkItemBatch 10 [item "a" (-1)] 1
@@ -71,4 +76,29 @@ fetchSlotTests =
         let trace = slotTrace (fetchResultEvents True (Right [page1, page2])) in trace @?= freedByLastOnly trace,
       testCase "a failed fetch frees the slot" $
         let trace = slotTrace (fetchResultEvents False (Left Nothing)) in trace @?= freedByLastOnly trace
+    ]
+
+-- | A step outcome from a script; errors starting with "5" are global.
+outcomeOf :: [(T.Text, Either T.Text Bool)] -> StepOutcome BookmarkItemId T.Text
+outcomeOf script = runIdentity (runItems scope (pure . flip lookupScript script) (map (BookmarkItemId . fst) script))
+  where
+    scope e = if "5" `T.isPrefixOf` e then Global else ItemScoped
+    lookupScript (BookmarkItemId i) = fromMaybe (Right True) . lookup i
+
+stepEmissionTests :: TestTree
+stepEmissionTests =
+  testGroup
+    "batch step emission"
+    [ testCase "a clean step posts its outcome and clears the status" $
+        let o = outcomeOf [("a", Right True)] in stepEvents archivedItemsEvt o @?= [archivedItemsEvt o, setStatusEvt Nothing],
+      testCase "an aborted step still posts its successes first (B5)" $ do
+        let o = outcomeOf [("a", Right True), ("b", Left "503"), ("c", Right True)]
+        o ^. soOk @?= [BookmarkItemId "a"]
+        stepEvents archivedItemsEvt o @?= [archivedItemsEvt o, asyncActionFailedEvt (Just "503")],
+      testCase "an item-scoped failure is named in the status" $ do
+        stepEvents archivedItemsEvt (outcomeOf [("a", Left "404")]) !! 1 @?= setStatusEvt (Just "failed: 404")
+        stepEvents archivedItemsEvt (outcomeOf [("a", Right False)]) !! 1 @?= setStatusEvt (Just "failed: result: false"),
+      testCase "runWhile stops after the first step that answers False" $
+        execState (runWhile [modify (<> [1 :: Int]) >> pure True, modify (<> [2]) >> pure False, modify (<> [3]) >> pure True]) []
+          @?= [1, 2]
     ]
