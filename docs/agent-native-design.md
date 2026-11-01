@@ -59,10 +59,10 @@ process no matter what. Splitting the problem gives each layer a clean job:
 │    user     │ ─────────────► │  hocket tui (one process)        │
 └─────────────┘                │                                  │
                                │  Brick event loop                │
-┌─────────────┐                │   ├─ vtyEventHandler             │
-│ Claude Code │                │   └─ internalEventHandler        │
+┌─────────────┐                │  ├─ VtyEvent → keyIntents → step │
+│ Claude Code │                │  └─ AppEvent → applyMsg → step   │
 └──────┬──────┘                │        ▲            │            │
-       │ stdio (MCP)           │        │ writeBChan │ after each │
+       │ stdio (MCP)           │        │ injectMsg  │ after each │
 ┌──────▼──────┐                │        │            ▼ event      │
 │ hocket mcp  │   UDS, JSON    │  ┌─────┴──────┐  ┌────────────┐  │
 │  (bridge)   │ ◄────────────► │  │ agent      │  │ TVar       │  │
