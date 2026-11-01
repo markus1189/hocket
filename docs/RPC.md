@@ -654,11 +654,11 @@ document remains the normative spec.
 
 | Concern | Module | Notes |
 |---|---|---|
-| Protocol decode / validate / serve | `src/Hocket/Agent/Protocol.hs` | `decodeCmd`, `validateWrite`, `serveRead`, `stateView`; total & pure |
-| Snapshot mirror + JSON | `src/Hocket/Agent/Snapshot.hs` | `AgentSnapshot`, `takeSnapshot`, `ToJSON` |
-| Client (CLI + IO shell) | `main/Hocket/Shell/Agent/Client.hs` | `callAgent`, `runAgentCommand`; requests built via `encodeCmd` |
-| Socket server (IO shell) | `main/Hocket/Shell/Agent/Server.hs` | `runAgentServer`, `resolveAgentSocketPath`, `reclaimStaleSocket`, `handleLine` / `dispatch` / `toEvent` |
-| Writes as Intents | `src/Hocket/Agent/Intent.hs` | `toIntent :: Now -> WriteCmd -> Intent`; total & pure |
-| TUI core | `src/Hocket/App/{Msg,Effect,Update}.hs` | `Intent`, `Msg`, `Effect`; the one pure `update` keys and agent writes go through |
+| Protocol decode / validate / serve | `src/core/Hocket/Agent/Protocol.hs` | `decodeCmd`, `validateWrite`, `serveRead`, `stateView`; total & pure |
+| Snapshot mirror + JSON | `src/core/Hocket/Agent/Snapshot.hs` | `AgentSnapshot`, `takeSnapshot`, `ToJSON` |
+| Client (CLI + IO shell) | `src/Hocket/Shell/Agent/Client.hs` | `callAgent`, `runAgentCommand`; requests built via `encodeCmd` |
+| Socket server (IO shell) | `src/Hocket/Shell/Agent/Server.hs` | `runAgentServer`, `resolveAgentSocketPath`, `reclaimStaleSocket`, `handleLine` / `dispatch` / `toEvent` |
+| Writes as Intents | `src/core/Hocket/Agent/Intent.hs` | `toIntent :: Now -> WriteCmd -> Intent`; total & pure |
+| TUI core | `src/core/Hocket/App/{Msg,Effect,Update}.hs` | `Intent`, `Msg`, `Effect`; the one pure `update` keys and agent writes go through |
 | Wiring, rendering mirror, cleanup | `main/hocket.hs` | `startAgentServer`, `app` snapshot rebuild, `cleanupAgentSocket` |
 | Tests | `test/test.hs` | protocol round-trips and IO-shell behaviour |

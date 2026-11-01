@@ -32,17 +32,17 @@ Hocket is a terminal-based bookmark manager for Raindrop.io built with Haskell a
 
 ### Key Components
 - **main/hocket.hs** - Main application entry point, UI event handling, and TUI rendering using Brick
-- **src/Hocket/App/{Msg,Effect,Update}.hs** - The TUI core: keys, agent writes and worker results arrive as `Msg`; the pure `update` answers the new state and `Effect`s
-- **main/Hocket/Shell/Interpret.hs** - Runs `Effect`s: fetch and batch workers, browser, clipboard
-- **main/Hocket/Shell/Tui/Keymap.hs** - Normal-mode keys as `Intent`s (`keyIntents`)
+- **src/core/Hocket/App/{Msg,Effect,Update}.hs** - The TUI core: keys, agent writes and worker results arrive as `Msg`; the pure `update` answers the new state and `Effect`s
+- **src/Hocket/Shell/Interpret.hs** - Runs `Effect`s: fetch and batch workers, browser, clipboard
+- **src/Hocket/Shell/Tui/Keymap.hs** - Normal-mode keys as `Intent`s (`keyIntents`)
 - **src/Hocket/Adapter/Raindrop.hs** - HTTP client implementation for Raindrop.io REST API
-- **src/Hocket/Domain/Bookmark.hs** - Core data types, JSON serialization, and bookmark model
-- **src/Hocket/App/Model.hs** - Application state management and UI state synchronization
-- **src/Hocket/Domain/Filter.hs** - Reusable UI helper functions
-- **main/Hocket/Shell/Agent/Server.hs** - Unix-domain socket server (IO shell) for the agent control socket
-- **main/Hocket/Shell/Agent/Client.hs** - Client for the agent control socket, exposed as the `hocket agent` subcommand
-- **src/Hocket/Agent/Protocol.hs** - Agent control-socket protocol: command decode/encode, write validation, read serving
-- **src/Hocket/Agent/Snapshot.hs** - Serializable read-only mirror of TUI state for the agent socket
+- **src/core/Hocket/Domain/Bookmark.hs** - Core data types, JSON serialization, and bookmark model
+- **src/core/Hocket/App/Model.hs** - Application state management and UI state synchronization
+- **src/core/Hocket/Domain/Filter.hs** - Reusable UI helper functions
+- **src/Hocket/Shell/Agent/Server.hs** - Unix-domain socket server (IO shell) for the agent control socket
+- **src/Hocket/Shell/Agent/Client.hs** - Client for the agent control socket, exposed as the `hocket agent` subcommand
+- **src/core/Hocket/Agent/Protocol.hs** - Agent control-socket protocol: command decode/encode, write validation, read serving
+- **src/core/Hocket/Agent/Snapshot.hs** - Serializable read-only mirror of TUI state for the agent socket
 - **docs/RPC.md** - Full spec of the agent control-socket protocol
 - **skills/hocket-rpc/SKILL.md** - Agent-facing operating guide for the control socket (install with `cp -r skills/hocket-rpc ~/.claude/skills/`)
 
@@ -51,6 +51,7 @@ Hocket is a terminal-based bookmark manager for Raindrop.io built with Haskell a
 - **Single-pane interface with action flags** - Items display pending action indicators instead of being moved to separate panes
 - **Lens-based state management** - Uses lens library for clean record access and updates
 - **Smart synchronization** - Only fetches items modified since last update to minimize API calls
+- **Two libraries** - `library core` (`src/core/`: domain and application, pure) has no brick, servant, network or async in its dependencies, so importing them there fails the build; the main library (`src/`) holds ports, adapters and the shell
 - **Agent control socket** - Optional Unix-domain socket (JSON over newline-delimited lines) for external tools/agents to observe and drive the TUI; reads served from a snapshot mirror, writes injected as regular UI events. Spec: `docs/RPC.md`. Enabled via `--agent-socket` / `--agent-socket-path`.
 
 ### Configuration
