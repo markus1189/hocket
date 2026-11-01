@@ -143,7 +143,7 @@ hocket tui --fixture seed.json --fixture-desktop-log desktop.jsonl
 ```
 
 `test/e2e.sh` drives fixture-mode sessions through the agent socket and
-checks the outcome of five scenarios (see the script's header).
+checks the outcome of each scenario it defines (`scenario_*` in the script).
 
 #### Add Bookmarks from Command Line
 ```bash
