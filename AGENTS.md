@@ -23,6 +23,9 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 ### End-to-end tests
 - `test/e2e.sh [SCENARIO...]` - Fixture sessions driven over the agent socket; run before merging any change to workers, handlers or the agent socket. `HOCKET=path` skips the nix build
 
+### Benchmarks
+- `bench/compare.sh BASE_REV` - HEAD's benchmarks against BASE_REV's, interleaved on pinned cores; fails on a >10% slowdown or a vanished name. Run before merging changes to `settle`, `takeSnapshot` or `validateWrite`, on a quiet machine; never rename a benchmark
+
 ## Architecture Overview
 
 Hocket is a terminal-based bookmark manager for Raindrop.io built with Haskell and the Brick TUI library.

@@ -5,10 +5,14 @@ import Control.DeepSeq (NFData (..))
 import Control.Lens (view, (^.))
 import Data.Text (Text)
 import qualified Data.Text as T
+import Data.Time (utc)
 import Data.Time.Clock (addUTCTime)
 import Data.Time.Clock.POSIX (posixSecondsToUTCTime)
+import Network.Bookmark.Agent.Intent (toIntent)
 import Network.Bookmark.Agent.Protocol (FlagAction (..), WriteCmd (..), validateWrite)
 import Network.Bookmark.Agent.Snapshot (asItems, siVisible, takeSnapshot)
+import Network.Bookmark.App.Msg (Msg (Intent), Now (..))
+import Network.Bookmark.App.Update (update)
 import Network.Bookmark.Types
 import Network.Bookmark.Ui.State
 import Test.Tasty.Bench
@@ -92,7 +96,15 @@ flagMany is s0 = foldl' step s0 is
   where
     step st i = case validateWrite (takeSnapshot 0 st) (CmdSetFlag (itemId i) FlagArchive) of
       Left e -> error (T.unpack e)
-      Right _ -> settle (setPendingAction (itemId i) ToBeArchived st)
+      Right cmd -> applyWrite cmd st
+
+-- | An agent write as the TUI applies it: update, then the settle that
+-- follows every event.
+applyWrite :: WriteCmd -> HocketState -> HocketState
+applyWrite cmd = settle . fst . update (Intent (toIntent benchNow cmd))
+
+benchNow :: Now
+benchNow = Now (posixSecondsToUTCTime 1700000000) utc
 
 sizes :: [Int]
 sizes = [1000, 5000, 20000]
@@ -125,7 +137,7 @@ main =
               -- What the server + TUI do per flag write: validate against the
               -- current snapshot, apply, re-render, re-snapshot.
               bench "flag 100 (validate+sync)" $ nf (visibleCount . flagMany [1 .. 100]) s,
-              bench "flag 100 (sync only)" $ nf (visibleCount . foldl' (\st i -> settle (setPendingAction (itemId i) ToBeArchived st)) s) [1 .. 100]
+              bench "flag 100 (sync only)" $ nf (visibleCount . foldl' (\st i -> applyWrite (CmdSetFlag (itemId i) FlagArchive) st) s) [1 .. 100]
             ],
           bench "hsNumItems" $ nf (\st -> let c = hsNumItems st in c ^. icNone + c ^. icFutureReminders) s,
           -- SnapshotItem fields are strict, so WHNF of each list cell forces the projection.
