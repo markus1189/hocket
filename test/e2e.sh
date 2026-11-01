@@ -250,13 +250,80 @@ scenario_navigation() {
   finish
 }
 
+# The agent's flags: set_flag is idempotent, none clears, the bulk writes
+# reach every item, and execute archives only what is flagged then.
+scenario_agent_flags() {
+  start agent-flags seed-basic.json || return 1
+  flag 1001 archive && flag 1001 archive || return 1
+  wait_for 5 "one archive flag after two set_flag" state_is '.counts.archive_flagged == 1' || return 1
+  flag 1002 reminder && wait_for 5 "1002 flagged for a reminder" action_is 1002 reminder || return 1
+  flag 1002 none && wait_for 5 "1002 unflagged" action_is 1002 none || return 1
+  agent flag_all_archive >/dev/null && wait_for 5 "all four flagged" state_is '.counts.archive_flagged == 4' || return 1
+  agent clear_all_flags >/dev/null && wait_for 5 "no flags" state_is '.counts.archive_flagged == 0 and .counts.reminder_flagged == 0 and .counts.remove_reminder_flagged == 0' || return 1
+  flag 1004 archive && agent execute >/dev/null && settle || return 1
+  finish
+}
+
+# The agent's view writes: filter, video filter, future reminders, select,
+# status. visible counts the items the list shows.
+scenario_agent_view() {
+  start agent-view seed-mixed.json || return 1
+  agent set_filter 1004 >/dev/null && wait_for 5 "the filter to leave 1004" state_is '.counts.visible == 1' || return 1
+  agent set_filter "" >/dev/null && wait_for 5 "all but the reminder" state_is '.counts.visible == 5' || return 1
+  agent set_video_filter only_videos >/dev/null && wait_for 5 "only the two videos" state_is '.counts.visible == 2' || return 1
+  agent set_video_filter hide_videos >/dev/null && wait_for 5 "the videos hidden" state_is '.counts.visible == 3' || return 1
+  agent set_video_filter none >/dev/null && wait_for 5 "no video filter" state_is '.counts.visible == 5' || return 1
+  # From here on settle would refuse: show_future_reminders stays on.
+  agent set_show_future_reminders --show >/dev/null && wait_for 5 "the reminder shown" state_is '.counts.visible == 6' || return 1
+  agent select_item 1003 >/dev/null && wait_for 5 "1003 selected" state_is '.selected == "1003"' || return 1
+  agent set_status hello >/dev/null && wait_for 5 "the status" state_is '.status == "agent: hello"' || return 1
+  finish
+}
+
+# rejected CMD...: the agent call must fail.
+rejected() {
+  if agent "$@" >/dev/null 2>&1; then
+    fail "agent $* was accepted"
+    return 1
+  fi
+}
+
+# view: what a rejected write must leave alone (the version counts every
+# event, agent connections included, so it is not compared).
+view() { jq -n -S --argjson s "$(agent get_state | jq '.result | del(.version)')" --argjson i "$(agent list_items --all | jq .result)" '{s: $s, i: $i}'; }
+
+# Rejected writes change nothing; wait_version wakes on a later write.
+scenario_agent_errors() {
+  start agent-errors seed-basic.json || return 1
+  local before after v
+  before=$(view)
+  rejected set_flag 9999 --action archive || return 1
+  rejected select_item 1003 || return 1 # hidden: a future reminder
+  rejected set_flag 1001 --action remove_reminder || return 1
+  rejected set_flag 1003 --action reminder || return 1
+  after=$(view)
+  [ "$before" = "$after" ] || {
+    fail "a rejected write changed the state"
+    diff -u <(echo "$before") <(echo "$after") >&2
+    return 1
+  }
+  v=$(agent get_state | jq '.result.version')
+  agent set_status checked >/dev/null || return 1
+  agent wait_version --after "$v" --timeout-ms 5000 >/dev/null || {
+    fail "wait_version --after $v did not return after a write"
+    return 1
+  }
+  wait_for 5 "the status" state_is '.status == "agent: checked"' || return 1
+  finish
+}
+
 # nav KEY ID: press KEY, then ID must be selected.
 nav() {
   key "$1"
   wait_for 5 "$1 to select $2" state_is ".selected == \"$2\""
 }
 
-scenarios=(all-three archive-503 reminder-404 empty-fetch key-a filter-typing navigation)
+scenarios=(all-three archive-503 reminder-404 empty-fetch key-a filter-typing navigation agent-flags agent-view agent-errors)
 (($# == 0)) || scenarios=("$@")
 for s in "${scenarios[@]}"; do
   if "scenario_${s//-/_}"; then
