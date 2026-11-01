@@ -1,13 +1,16 @@
 cradle:
   cabal:
+    - path: "src/core"
+      component: "hocket:lib:core"
+
     - path: "src"
-      component: "lib:hocket"
+      component: "hocket:lib:hocket"
 
-    - path: "main/hocket.hs"
-      component: "hocket:exe:hocket"
-
-    - path: "main/Events.hs"
+    - path: "main"
       component: "hocket:exe:hocket"
 
     - path: "test"
       component: "hocket:test:test"
+
+    - path: "bench"
+      component: "hocket:bench:bench"
