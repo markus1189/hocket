@@ -6,21 +6,28 @@
 
 -- | SM-agent (plan I10): two agents write to one headless hocket over the
 -- real socket at once, and some order of their calls explains every answer.
--- No write is lost or applied twice (the flags equal the model's after any
--- linearisation), a write lands or is answered "channel full" and retried,
--- versions never go back, and the slot is free once the loop is idle.
 --
--- Every write here is valid in every state: the items have no reminders and
--- nothing executes, so no write can be rejected by a race with an archive.
--- After a write, the harness waits until the channel is drained, so a later
--- read sees it: the socket only promises that a write was injected.
+-- smAgent: no write is lost or applied twice (the flags equal the model's
+-- after any linearisation), a write lands or is answered "channel full" and
+-- retried, versions never go back, and the slot is free once the loop is
+-- idle. Every write is valid in every state (no reminders, no execute), so
+-- no rejection can come from a race with an archive. After a write the
+-- harness waits until the channel is drained: the socket only promises that
+-- a write was injected. The skill's wait_version --after V is not enough
+-- here: it returns once any later event was applied, also one queued before
+-- the write (with it in place of the drain, this property fails).
+--
+-- smAgentExecute: agents write while a batch runs. Flags are not modelled;
+-- a write lands, is retried on "channel full", or is a set_flag rejected for
+-- one of the reasons a concurrent archive or reminder can cause.
 module Shell.AgentParallelTests (agentParallelTests) where
 
 import Control.Concurrent (threadDelay)
 import Control.Concurrent.Async (withAsync)
-import Control.Concurrent.STM (atomically, newTVarIO, readTVar)
+import Control.Concurrent.STM (atomically, newTVarIO, readTVar, readTVarIO)
 import qualified Control.Concurrent.STM as STM
 import Control.Lens ((&), (.~))
+import Control.Monad (void)
 import Control.Monad.IO.Class (liftIO)
 import Control.Monad.Trans.Control (control)
 import Data.Aeson (Value, withObject, (.:))
@@ -37,9 +44,10 @@ import Data.Time (UTCTime, addUTCTime, utc)
 import Hedgehog
 import qualified Hedgehog.Gen as Gen
 import qualified Hedgehog.Range as Range
-import Hocket.Adapter.Fake (fakePort, frItems, seedFake)
+import Hocket.Adapter.Fake (FakeRaindrop, fakePort, frItems, seedFake)
 import Hocket.Agent.Protocol (AgentCmd (..), FlagAction (..), ReadCmd (..), WriteCmd (..))
-import Hocket.App.Model (initialModel)
+import Hocket.Agent.Snapshot (asAsyncOp)
+import Hocket.App.Model (AsyncOp (OpExecuteBatch), initialModel)
 import Hocket.App.Msg (Now (..))
 import Hocket.Domain.Bookmark (BookmarkItemId (..), biReminder)
 import Hocket.Port (SystemPort (..))
@@ -51,11 +59,16 @@ import System.Directory (createDirectory)
 import System.FilePath ((</>))
 import System.IO.Temp (withSystemTempDirectory)
 import System.Timeout (timeout)
-import Test.Tasty (TestTree)
+import Test.Tasty (TestTree, testGroup)
 import Test.Tasty.Hedgehog (testPropertyNamed)
 
 agentParallelTests :: TestTree
-agentParallelTests = testPropertyNamed "SM-agent: concurrent agents on one socket (I10)" "smAgent" smAgent
+agentParallelTests =
+  testGroup
+    "SM-agent"
+    [ testPropertyNamed "concurrent agents on one socket (I10)" "smAgent" smAgent,
+      testPropertyNamed "agents writing while a batch runs" "smAgentExecute" smAgentExecute
+    ]
 
 t0 :: UTCTime
 t0 = read "2026-11-01 12:00:00 UTC"
@@ -66,14 +79,15 @@ ids = ["1001", "1002", "1003", "1004"]
 -- | A running headless hocket with its socket.
 data Sut = Sut {sutSocket :: FilePath, sutEnv :: Env, sutLoop :: Loop}
 
--- | seed-basic without its one reminder, so every flag is a valid write.
-withSut :: (Sut -> IO a) -> IO a
-withSut act = withSystemTempDirectory "hocket-sm" $ \dir -> do
+-- | seed-basic, prepared, behind a fake whose every request takes this many
+-- microseconds.
+withSut :: (FakeRaindrop -> FakeRaindrop) -> Int -> (Sut -> IO a) -> IO a
+withSut prepare delay act = withSystemTempDirectory "hocket-sm" $ \dir -> do
   body <- LBS.readFile "test/e2e/seed-basic.json"
   seed <- either fail pure (seedFake 999 body)
-  store <- newIORef (seed & frItems . traverse . biReminder .~ Nothing)
+  store <- newIORef (prepare seed)
   ticks <- newIORef (0 :: Int)
-  let clock = atomicModifyIORef' ticks (\n -> (n + 1, addUTCTime (fromIntegral (n + 1)) t0))
+  let clock = threadDelay delay >> atomicModifyIORef' ticks (\n -> (n + 1, addUTCTime (fromIntegral (n + 1)) t0))
   env <- newEnv (fakePort clock store) (SystemPort (\_ _ -> pure ()) (\_ -> pure ())) (pure (Now t0 utc))
   createDirectory (dir </> "sock")
   let path = dir </> "sock" </> "s.sock"
@@ -204,7 +218,8 @@ smAgent = withTests 100 . withShrinks 20 . property $ do
   -- branches are short, as their interleavings multiply.
   let commands = [setFlags ref, setFlags ref, clearFlags ref, otherWrites ref, getFlags ref, getFlags ref, getState ref]
   actions <- forAll (Gen.parallel (Range.linear 1 20) (Range.linear 1 6) initialAgentModel commands)
-  test (control (\run -> withSut (run . scenario ref actions)))
+  -- Without its one reminder, every flag is a valid write.
+  test (control (\run -> withSut (frItems . traverse . biReminder .~ Nothing) 0 (run . scenario ref actions)))
   where
     scenario :: IORef (Maybe Sut) -> Parallel (TestT IO) AgentModel -> Sut -> TestT IO ()
     scenario ref actions sut = do
@@ -213,3 +228,101 @@ smAgent = withTests 100 . withShrinks 20 . property $ do
       idle <- evalIO (timeout 10000000 (atomically (loopIdle (sutEnv sut) (sutLoop sut) >>= STM.check)))
       annotate "the loop did not go idle within 10 s: a write stuck or the slot held"
       idle === Just ()
+
+-- | What the agents ran into, for the coverage of smAgentExecute.
+data Seen = Seen {seenRetry :: !Bool, seenRejection :: !Bool, seenWriteInBatch :: !Bool}
+
+data Answer = Landed | Rejected !Text | Unexpected !Text deriving (Show, Eq)
+
+newtype ExecModel (v :: Type -> Type) = ExecModel (Maybe (Var Int v))
+
+-- | Writes in order, as one command: a flag and an execute make sure the
+-- batch has work, which an execute on its own often has not.
+newtype Exec (v :: Type -> Type) = Exec [WriteCmd] deriving (Show)
+
+instance FunctorB Exec where bmap _ (Exec ws) = Exec ws
+
+instance TraversableB Exec where btraverse _ (Exec ws) = pure (Exec ws)
+
+-- | A write, retried while the channel is full; no waiting for it to apply.
+writeAnswer :: IORef Seen -> Sut -> WriteCmd -> IO Answer
+writeAnswer seen sut w = do
+  inBatch <- (== Just OpExecuteBatch) . asAsyncOp <$> readTVarIO (loopSnapshot (sutLoop sut))
+  note (\s -> s {seenWriteInBatch = seenWriteInBatch s || inBatch})
+  r <- callAgent (sutSocket sut) (AWrite w)
+  case r of
+    Right v | isChannelFullError v -> note (\s -> s {seenRetry = True}) >> threadDelay 1000 >> writeAnswer seen sut w
+    Right v | okOf v == Just True -> Landed <$ startedBatch
+    Right v -> maybe (pure (Unexpected (T.pack (show v)))) (\e -> Rejected e <$ note (\s -> s {seenRejection = True})) (errorOf v)
+    Left e -> pure (Unexpected e)
+  where
+    note f = atomicModifyIORef' seen (\s -> (f s, ()))
+    -- Steers only the timing: after an execute the agent goes on once the
+    -- batch runs (or after 100 ms, if update dropped it), so that what it
+    -- writes next meets the batch.
+    startedBatch = case w of
+      CmdExecute -> void (timeout 100000 (atomically (readTVar (loopSnapshot (sutLoop sut)) >>= STM.check . (== Just OpExecuteBatch) . asAsyncOp)))
+      _ -> pure ()
+    errorOf = parseMaybe (withObject "response" (.: "error"))
+
+-- | What a concurrent archive or reminder can make validateWrite answer.
+raceRejection :: Text -> Bool
+raceRejection e = any (`T.isPrefixOf` e) ["unknown item id: ", "item already has a reminder", "item has no reminder to remove: "]
+
+execWrites :: IORef (Maybe Sut) -> IORef Seen -> Command Gen (TestT IO) ExecModel
+execWrites ref seen =
+  Command
+    ( \_ ->
+        Just . fmap Exec . Gen.frequency $
+          [ (4, pure <$> setFlag),
+            (3, (\f -> [f, CmdExecute]) <$> setFlag),
+            (1, pure [CmdExecute]),
+            (1, pure [CmdClearFlags]),
+            (1, pure [CmdRefresh])
+          ]
+    )
+    (\(Exec ws) -> evalIO (sutOf ref >>= \sut -> traverse (writeAnswer seen sut) ws))
+    [ Ensure $ \_ _ (Exec ws) answers -> for_ (zip ws answers) $ \case
+        (_, Landed) -> success
+        (CmdSetFlag _ _, Rejected e) | raceRejection e -> success
+        other -> annotateShow other >> failure
+    ]
+  where
+    setFlag = CmdSetFlag . BookmarkItemId <$> Gen.element ids <*> Gen.element [FlagArchive, FlagReminder, FlagRemoveReminder, FlagNone]
+
+execState :: IORef (Maybe Sut) -> Command Gen (TestT IO) ExecModel
+execState ref =
+  Command
+    (\_ -> Just (pure GetState))
+    ( \_ -> do
+        r <- evalIO (sutOf ref >>= \sut -> callAgent (sutSocket sut) (ARead CmdGetState))
+        v <- evalEither r
+        evalMaybe (parseMaybe (withObject "response" (\o -> o .: "result" >>= withObject "state" (.: "version"))) v)
+    )
+    [ Update $ \_ _ v -> ExecModel (Just v),
+      Ensure $ \(ExecModel before) _ _ v -> for_ before (\seenV -> assert (v >= concrete seenV))
+    ]
+
+smAgentExecute :: Property
+smAgentExecute = withTests 50 . withShrinks 20 . property $ do
+  ref <- evalIO (newIORef Nothing)
+  seen <- evalIO (newIORef (Seen False False False))
+  let commands = [execWrites ref seen, execWrites ref seen, execState ref]
+  actions <- forAll (Gen.parallel (Range.linear 1 10) (Range.linear 1 6) (ExecModel Nothing) commands)
+  -- The original seed: 1003 has a reminder. Every request takes 10 ms, so a
+  -- batch an agent starts runs on while the agents write.
+  test (control (\run -> withSut id 10000 (run . scenario ref seen actions)))
+  where
+    scenario :: IORef (Maybe Sut) -> IORef Seen -> Parallel (TestT IO) ExecModel -> Sut -> TestT IO ()
+    scenario ref seen actions sut = do
+      evalIO (writeIORef ref (Just sut) >> writeIORef seen (Seen False False False))
+      executeParallel (ExecModel Nothing) actions
+      idle <- evalIO (timeout 20000000 (atomically (loopIdle (sutEnv sut) (sutLoop sut) >>= STM.check)))
+      annotate "the loop did not go idle within 20 s: a write stuck or the slot held"
+      idle === Just ()
+      Seen retry rejection inBatch <- evalIO (readIORef seen)
+      -- The loop drains faster than two agents fill ten places; the full
+      -- channel has its own test in AgentServerTests.
+      classify "a write retried on a full channel" retry
+      cover 10 "a set_flag rejected by a race" rejection
+      cover 10 "a write while a batch ran" inBatch
