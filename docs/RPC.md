@@ -87,8 +87,10 @@ The default path is resolved at startup:
 2. Otherwise `/tmp/hocket-<uid>/control.sock` using the effective user id.
 
 The directory is created if missing. `--agent-socket-path PATH` overrides
-the path entirely; `--agent-socket` selects the default. The socket is bound
-with a listen backlog of **5**.
+the path entirely; `--agent-socket` selects the default. Anything at `PATH`
+that is not a socket is refused ("PATH exists and is not a socket"), and on
+exit hocket removes only the socket it bound, plus the directory if it
+created it. The socket is bound with a listen backlog of **5**.
 
 ### 2.2 Framing
 

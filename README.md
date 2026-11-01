@@ -123,7 +123,8 @@ hocket tui
 # $XDG_RUNTIME_DIR/hocket/control.sock, else /tmp/hocket-<uid>/control.sock)
 hocket tui --agent-socket
 
-# Same, with an explicit socket path
+# Same, with an explicit socket path (an existing non-socket file there is
+# refused, never replaced)
 hocket tui --agent-socket-path /path/to/control.sock
 
 # Fixture mode: a fake Raindrop seeded from a list response, for trying
