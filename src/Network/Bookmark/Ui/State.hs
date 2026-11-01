@@ -49,6 +49,14 @@ module Network.Bookmark.Ui.State
     hsAgentError,
     clearAllFlags,
     clearFlagsForItems,
+    clearToBeRemindedFlags,
+    isToBeReminded,
+    isReminderAction,
+    focusedList,
+    focusedItem,
+    getPendingActionForItem,
+    shiftItem,
+    shiftItemReminder,
     setAllFlagsToArchive,
     toggleShowFutureReminders,
     toggleVideoFilter,
@@ -254,6 +262,27 @@ togglePendingActionToReminder bid reminderTime s =
        in s & hsContents . at bid ?~ (newAction, item)
     Nothing -> s
 
+focusedList :: HocketState -> Maybe (L.List Name BookmarkItem)
+focusedList s = s ^? itemList
+
+focusedItem :: HocketState -> Maybe BookmarkItem
+focusedItem s = do
+  list <- focusedList s
+  snd <$> L.listSelectedElement list
+
+getPendingActionForItem :: BookmarkItemId -> HocketState -> PendingAction
+getPendingActionForItem bid s =
+  case s ^. hsContents . at bid of
+    Just (action, _) -> action
+    Nothing -> None
+
+-- | The key-path toggles: flip the flag, then move the cursor down.
+shiftItem :: BookmarkItemId -> HocketState -> HocketState
+shiftItem bid = (itemList %~ L.listMoveDown) . togglePendingAction bid
+
+shiftItemReminder :: BookmarkItemId -> UTCTime -> HocketState -> HocketState
+shiftItemReminder bid reminderTime = (itemList %~ L.listMoveDown) . togglePendingActionToReminder bid reminderTime
+
 -- | Idempotent flag assignment for the agent socket: unlike the keyboard
 -- toggles this cannot flip the wrong way when the caller's view is stale.
 -- A no-op for unknown ids.
@@ -289,6 +318,27 @@ clearFlagsForItems targetAction bids s =
     ( \st bid ->
         case st ^. hsContents . at bid of
           Just (action, item) | action == targetAction -> st & hsContents . at bid ?~ (None, item)
+          _ -> st
+    )
+    s
+    bids
+
+-- Helper functions to check action types without caring about parameters
+isToBeReminded :: PendingAction -> Bool
+isToBeReminded (ToBeReminded _) = True
+isToBeReminded _ = False
+
+isReminderAction :: PendingAction -> Bool
+isReminderAction (ToBeReminded _) = True
+isReminderAction ReminderToBeRemoved = True
+isReminderAction _ = False
+
+clearToBeRemindedFlags :: [BookmarkItemId] -> HocketState -> HocketState
+clearToBeRemindedFlags bids s =
+  foldl'
+    ( \st bid ->
+        case st ^. hsContents . at bid of
+          Just (action, item) | isToBeReminded action -> st & hsContents . at bid ?~ (None, item)
           _ -> st
     )
     s

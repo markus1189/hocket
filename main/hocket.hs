@@ -57,11 +57,9 @@ import Control.Lens.Operators
     (&),
     (.=),
     (.~),
-    (?~),
     (^.),
-    (^?),
   )
-import Control.Monad (mfilter, unless, void, when)
+import Control.Monad (mfilter, unless, void)
 import qualified Control.Monad.Catch as Catch
 import Control.Monad.IO.Class (liftIO)
 import Control.Monad.Logger (LoggingT, logErrorN, logInfoN, runFileLoggingT, runStdoutLoggingT)
@@ -79,7 +77,7 @@ import qualified Data.Text as T
 import qualified Data.Text.Encoding as T
 import Data.Text.Zipper.Generic.Words (deletePrevWord)
 import Data.Time (UTCTime, addDays, getCurrentTime)
-import Data.Time.Clock.POSIX (POSIXTime, posixSecondsToUTCTime, utcTimeToPOSIXSeconds)
+import Data.Time.Clock.POSIX (posixSecondsToUTCTime, utcTimeToPOSIXSeconds)
 import Data.Time.Format (defaultTimeLocale, formatTime)
 import Data.Time.LocalTime
   ( LocalTime (LocalTime),
@@ -111,8 +109,6 @@ import Events
     remindersSetEvt,
     setAgentErrorEvt,
     setStatusEvt,
-    shiftItemEvt,
-    shiftItemReminderEvt,
     toggleInvertedVideoFilterEvt,
     toggleRemindersEvt,
     toggleVideoFilterEvt,
@@ -124,6 +120,7 @@ import Graphics.Vty (Event (EvKey), Key (KChar, KDown, KUp), Modifier (MCtrl))
 import qualified Graphics.Vty as Vty
 import Graphics.Vty.Input.Events (Key (KEnter, KEsc))
 import Graphics.Vty.Platform.Unix (mkVty)
+import Keys (ItemKey (..), itemKeyEvents)
 import Network.Bookmark.Agent.Protocol
   ( AgentCmd (..),
     FlagAction (..),
@@ -138,9 +135,8 @@ import Network.Bookmark.Types
     BookmarkItemId (..),
     BookmarkRequest (AddBookmark, BatchArchiveBookmarks, RemoveReminder, RetrieveBookmarks, SetReminder),
     PendingAction (..),
-    RaindropCollectionId (RaindropCollectionId),
+    RaindropCollectionId,
     URL (..),
-    biCollectionId,
     biCreated,
     biExcerpt,
     biId,
@@ -161,10 +157,12 @@ import Network.Bookmark.Ui.State
     batchStepsWithWork,
     cancelFilter,
     clearAllFlags,
-    clearFlagsForItems,
     completeAsyncOp,
     enterFilterMode,
     focusRing,
+    focusedItem,
+    focusedList,
+    getPendingActionForItem,
     hsAgentClients,
     hsAgentError,
     hsContents,
@@ -182,11 +180,10 @@ import Network.Bookmark.Ui.State
     icToBeArchived,
     icToBeReminded,
     initialState,
-    insertItems,
+    isReminderAction,
     itemList,
     lockFilter,
     removeItems,
-    removeReminderFromItems,
     setAgentClients,
     setAgentError,
     setAllFlagsToArchive,
@@ -194,14 +191,23 @@ import Network.Bookmark.Ui.State
     setPendingAction,
     setShowFutureReminders,
     setVideoFilterMode,
+    shiftItem,
+    shiftItemReminder,
     syncForRender,
     toggleInvertedVideoFilter,
-    togglePendingAction,
-    togglePendingActionToReminder,
     toggleShowFutureReminders,
     toggleVideoFilter,
     tryAcquireAsyncOp,
-    updateItemsWithStoredReminderTimes,
+  )
+import Network.Bookmark.Ui.Sync
+  ( SyncKind (..),
+    applyFetched,
+    applyStepResult,
+    formatPOSIXTime,
+    planSync,
+    spCollection,
+    spKind,
+    spSearch,
   )
 import Network.Bookmark.Ui.Widgets (sanitizeForDisplay)
 import Network.Raindrop (raindrop)
@@ -437,12 +443,10 @@ vtyEventHandlerNormal ::
   EventM Name HocketState ()
 vtyEventHandlerNormal es (EvKey (KChar ' ') []) = do
   s <- use id
-  liftIO . for_ (focusedItem s) $ \bit -> es `trigger` browseItemEvt bit
+  liftIO $ for_ (itemKeyEvents KeySpace s) (trigger es)
 vtyEventHandlerNormal es (EvKey KEnter []) = do
   s <- use id
-  liftIO . for_ (focusedItem s) $ \bit -> do
-    es `trigger` browseItemEvt bit
-    es `trigger` shiftItemEvt (view biId bit)
+  liftIO $ for_ (itemKeyEvents KeyEnter s) (trigger es)
 vtyEventHandlerNormal es (EvKey (KChar 'r') []) = do
   liftIO $ es `trigger` fetchItemsEvt
   pure ()
@@ -451,22 +455,13 @@ vtyEventHandlerNormal es (EvKey (KChar 'X') []) = do
   pure ()
 vtyEventHandlerNormal es (EvKey (KChar 'a') []) = do
   s <- use id
-  liftIO . for_ (focusedItem s) $ \bit ->
-    unless (getPendingActionForItem (view biId bit) s == ToBeArchived) $
-      es `trigger` shiftItemEvt (view biId bit)
+  liftIO $ for_ (itemKeyEvents KeyArchive s) (trigger es)
 vtyEventHandlerNormal es (EvKey (KChar 's') []) = do
   s <- use id
-  liftIO . for_ (focusedItem s) $ \bit ->
-    unless (isToBeReminded (getPendingActionForItem (view biId bit) s)) $
-      es `trigger` shiftItemReminderEvt (view biId bit)
+  liftIO $ for_ (itemKeyEvents KeyRemind s) (trigger es)
 vtyEventHandlerNormal es (EvKey (KChar 'u') []) = do
   s <- use id
-  liftIO . for_ (focusedItem s) $ \bit -> do
-    let action = getPendingActionForItem (view biId bit) s
-    when (action == ToBeArchived) $
-      es `trigger` shiftItemEvt (view biId bit)
-    when (isReminderAction action) $
-      es `trigger` shiftItemReminderEvt (view biId bit)
+  liftIO $ for_ (itemKeyEvents KeyUnflag s) (trigger es)
 vtyEventHandlerNormal _ (EvKey (KChar 'J') []) = do
   s <- use id
   case findNextFlaggedItem s of
@@ -521,9 +516,6 @@ withAsyncSlot op run = do
     Just s' -> do
       id .= s'
       run
-
-formatPOSIXTime :: POSIXTime -> Text
-formatPOSIXTime t = T.pack $ formatTime defaultTimeLocale "%Y-%m-%d" (posixSecondsToUTCTime t)
 
 nextDayAt7AM :: IO UTCTime
 nextDayAt7AM = do
@@ -604,17 +596,11 @@ asyncCommandEventHandler es FetchItems =
   withAsyncSlot OpFetchItems $ do
     s <- use id
     _ <- liftIO . async $ do
-      let searchParam = case s ^. hsLastUpdated of
-            Nothing -> Nothing
-            Just lastTime -> Just ("lastUpdate:>" <> formatPOSIXTime (lastTime - 86400))
-          isUpdateFetch = isJust (s ^. hsLastUpdated)
-          collectionToFetch =
-            if isUpdateFetch
-              then RaindropCollectionId "0"
-              else RaindropCollectionId "-1"
+      let plan = planSync (s ^. hsLastUpdated)
+          isUpdateFetch = plan ^. spKind == IncrementalAll
           suffix = maybe "" (\since -> " since: " <> formatPOSIXTime (since - 86400)) $ s ^. hsLastUpdated
       es `trigger` setStatusEvt (Just ("fetching" <> suffix))
-      eitherErrorBis <- retrieveItems (s ^. hsCredentials) searchParam collectionToFetch
+      eitherErrorBis <- retrieveItems (s ^. hsCredentials) (plan ^. spSearch) (plan ^. spCollection)
       case eitherErrorBis of
         Left e -> es `trigger` asyncActionFailedEvt (errorMessageFromException e)
         Right batches -> do
@@ -622,23 +608,8 @@ asyncCommandEventHandler es FetchItems =
           for_ batches $ \(BookmarkItemBatch ts bis _) -> do
             es `trigger` fetchedItemsEvt ts bis isUpdateFetch
     pure ()
-asyncCommandEventHandler _ (FetchedItems ts bis wasAllCollectionsFetch) = do
-  if wasAllCollectionsFetch
-    then do
-      let itemsToPotentiallyAdd = filter (\item -> item ^. biCollectionId == -1) bis
-          itemIdsToRemove = map (view biId) $ filter (\item -> item ^. biCollectionId /= -1) bis
-      unless (null itemIdsToRemove) $
-        id %= removeItems itemIdsToRemove
-      id %= insertItems itemsToPotentiallyAdd
-    else id %= insertItems bis
-
-  id %= completeAsyncOp
-  currentLastUpdated <- use hsLastUpdated
-  let newTimestampToConsider = if null bis then Nothing else Just ts
-  case (currentLastUpdated, newTimestampToConsider) of
-    (Nothing, Just newTs) -> hsLastUpdated .= Just newTs
-    (Just oldTs, Just newTs) -> when (newTs >= oldTs) $ hsLastUpdated .= Just newTs
-    _ -> pure ()
+asyncCommandEventHandler _ (FetchedItems ts bis wasAllCollectionsFetch) =
+  id %= applyFetched ts bis wasAllCollectionsFetch
 asyncCommandEventHandler es (AsyncActionFailed err) = do
   id %= completeAsyncOp
   liftIO (es `trigger` setStatusEvt (Just ("failed" <> maybe "<no err>" (": " <>) err)))
@@ -651,26 +622,22 @@ asyncCommandEventHandler es ExecuteBatch = do
       pure ()
 asyncCommandEventHandler _ ExecuteBatchDone = do
   id %= completeAsyncOp
-asyncCommandEventHandler _ (ArchivedItems bis) = do
-  id %= removeItems bis
-asyncCommandEventHandler _ (RemindersSet bis) = do
-  id %= updateItemsWithStoredReminderTimes bis
-  id %= clearToBeRemindedFlags bis
-asyncCommandEventHandler _ (RemindersRemoved bis) = do
-  id %= removeReminderFromItems bis
-  id %= clearFlagsForItems ReminderToBeRemoved bis
+asyncCommandEventHandler _ (ArchivedItems bis) =
+  id %= applyStepResult StepArchive bis
+asyncCommandEventHandler _ (RemindersSet bis) =
+  id %= applyStepResult StepSetReminders bis
+asyncCommandEventHandler _ (RemindersRemoved bis) =
+  id %= applyStepResult StepRemoveReminders bis
 
 uiCommandEventHandler ::
   BChan HocketEvent ->
   UiCommand ->
   EventM Name HocketState ()
-uiCommandEventHandler _ (ShiftItem bid) = do
-  id %= togglePendingAction bid
-  itemList %= L.listMoveDown
+uiCommandEventHandler _ (ShiftItem bid) =
+  id %= shiftItem bid
 uiCommandEventHandler _ (ShiftItemReminder bid) = do
   reminderTime <- liftIO nextDayAt7AM
-  id %= togglePendingActionToReminder bid reminderTime
-  itemList %= L.listMoveDown
+  id %= shiftItemReminder bid reminderTime
 uiCommandEventHandler _ (RemoveItems bis) = id %= removeItems bis
 uiCommandEventHandler _ (SetStatus t) = hsStatus .= t
 uiCommandEventHandler _ ClearAllFlags = id %= clearAllFlags
@@ -1008,9 +975,6 @@ drawGui tz s = [w]
             else txt (fromMaybe " " (s ^. hsStatus))
         ]
 
-focusedList :: HocketState -> Maybe (L.List Name BookmarkItem)
-focusedList s = s ^? itemList
-
 listDrawElementWithAction :: HocketState -> Bool -> BookmarkItem -> Widget Name
 listDrawElementWithAction s sel e =
   let actionIndicator = case getPendingActionForItem (view biId e) s of
@@ -1197,27 +1161,6 @@ trimURI uri =
         then drop (length prefix) s
         else s
 
-focusedItem :: HocketState -> Maybe BookmarkItem
-focusedItem s = do
-  list <- focusedList s
-  snd <$> L.listSelectedElement list
-
-getPendingActionForItem :: BookmarkItemId -> HocketState -> PendingAction
-getPendingActionForItem bid s =
-  case s ^. hsContents . at bid of
-    Just (action, _) -> action
-    Nothing -> None
-
--- Helper functions to check action types without caring about parameters
-isToBeReminded :: PendingAction -> Bool
-isToBeReminded (ToBeReminded _) = True
-isToBeReminded _ = False
-
-isReminderAction :: PendingAction -> Bool
-isReminderAction (ToBeReminded _) = True
-isReminderAction ReminderToBeRemoved = True
-isReminderAction _ = False
-
 getItemsWithPendingAction :: PendingAction -> HocketState -> [BookmarkItem]
 getItemsWithPendingAction targetAction s =
   [item | (action, item) <- Map.elems (s ^. hsContents), matchesAction action targetAction]
@@ -1228,17 +1171,6 @@ getItemsWithPendingAction targetAction s =
 getItemsToBeReminded :: HocketState -> [(BookmarkItem, UTCTime)]
 getItemsToBeReminded s =
   [(item, time) | (ToBeReminded time, item) <- Map.elems (s ^. hsContents)]
-
-clearToBeRemindedFlags :: [BookmarkItemId] -> HocketState -> HocketState
-clearToBeRemindedFlags bids s =
-  foldl'
-    ( \st bid ->
-        case st ^. hsContents . at bid of
-          Just (action, item) | isToBeReminded action -> st & hsContents . at bid ?~ (None, item)
-          _ -> st
-    )
-    s
-    bids
 
 -- Find next flagged item
 findNextFlaggedItem :: HocketState -> Maybe Int

@@ -23,6 +23,7 @@ library
                      , Network.Bookmark.Agent.Snapshot
                      , Network.Bookmark.Types
                      , Network.Bookmark.Ui.State
+                     , Network.Bookmark.Ui.Sync
                      , Network.Bookmark.Ui.Widgets
   Build-depends:       aeson
                      , base
@@ -33,6 +34,7 @@ library
                      , http-types
                      , lens
                      , monad-logger
+                     , mtl
                      , retry
                      , servant
                      , servant-client
@@ -49,6 +51,7 @@ executable hocket
   other-modules:       AgentClient
                      , AgentServer
                      , Events
+                     , Keys
   build-depends:       aeson
                      , async
                      , base
@@ -88,6 +91,7 @@ test-suite test
   other-modules:       AgentClient
                      , AgentServer
                      , Events
+                     , Keys
   build-depends:       base
                      , aeson
                      , async
