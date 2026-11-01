@@ -220,6 +220,10 @@ errorRenderingTests =
         for_ ["a\rb", "a\tb", "a\ESCb"] $ \x -> do
           shortClientError (failureWithXError 404 x) @?= "404"
           fmap (T.isPrefixOf "Got status: ") (errorMessageFromException (failureWithXError 404 x)) @?= Just True,
+      testCase "an x-error that is empty after stripping is left out" $
+        for_ ["", "  "] $ \x -> do
+          shortClientError (failureWithXError 404 x) @?= "404"
+          fmap (T.isPrefixOf "Got status: ") (errorMessageFromException (failureWithXError 404 x)) @?= Just True,
       testCase "the batch summary uses the short form" $ do
         o <- runCalls (throwingOn [(2, throwIO (failure 404))]) [1, 2, 3]
         map snd (o ^. soFailed) @?= [CallFailed "404"]

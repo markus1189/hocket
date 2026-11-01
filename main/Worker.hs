@@ -139,11 +139,12 @@ shortClientError = \case
   where
     shortXError = mfilter ((<= 40) . T.length) . xErrorText
 
--- | Raindrop's @x-error@ text, unless it carries control characters, which
--- would garble the status line.
+-- | Raindrop's @x-error@ text, unless it is blank, so callers fall back to the
+-- status code, or carries control characters, which would garble the status
+-- line.
 xErrorText :: ResponseF a -> Maybe Text
 xErrorText resp =
-  mfilter (not . T.any isControl) $
+  mfilter (\t -> not (T.null t) && not (T.any isControl t)) $
     T.strip . T.decodeUtf8Lenient . snd <$> find ((== CI.mk "x-error") . fst) (responseHeaders resp)
 
 errorMessageFromException :: ClientError -> Maybe Text
