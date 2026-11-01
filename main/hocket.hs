@@ -69,6 +69,7 @@ import Data.Bifunctor (first)
 import qualified Data.ByteString.Lazy as LBS
 import Data.Foldable (for_)
 import Data.IORef (newIORef, readIORef)
+import Signals (unwindOnTermination)
 #if MIN_VERSION_base(4,20,0)
 import Data.List (find, findIndex, isPrefixOf)
 #else
@@ -732,6 +733,7 @@ runTui mAgentOpt isFixture port s0 = do
   events <- newBChan 10
   tz <- getCurrentTimeZone
   mAgent <- for mAgentOpt (startAgentServer events)
+  unwindOnTermination
   vty <- mkVty Vty.defaultConfig
   void
     ( customMain

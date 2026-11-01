@@ -59,6 +59,7 @@ executable hocket
                      , Events
                      , Fixture
                      , Keys
+                     , Signals
                      , Worker
   build-depends:       aeson
                      , async
@@ -110,6 +111,7 @@ test-suite test
                      , Gen
                      , ReminderTests
                      , Keys
+                     , Signals
                      , Worker
                      , Properties
                      , WorkerTests

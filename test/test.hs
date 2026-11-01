@@ -13,7 +13,7 @@ import ClassifyTests (classifyTests)
 import Control.Concurrent (forkIO, threadDelay)
 import Control.Concurrent.Async (withAsync)
 import Control.Concurrent.STM (TVar, atomically, modifyTVar', newTVarIO)
-import Control.Exception (IOException, try)
+import Control.Exception (AsyncException (UserInterrupt), IOException, finally, try)
 import Control.Lens (ix, view, _1, _2)
 import Control.Lens.Operators
 import Control.Monad (void)
@@ -25,6 +25,7 @@ import qualified Data.ByteString.Char8 as BSC
 import qualified Data.ByteString.Lazy.Char8 as LBS
 import Data.Either (isLeft)
 import Data.Foldable (for_)
+import Data.IORef (newIORef, readIORef, writeIORef)
 import Data.List (find, head, intercalate, isInfixOf, last)
 import Data.Map (Map)
 import qualified Data.Map as Map
@@ -61,6 +62,7 @@ import Network.Socket
   )
 import Properties (propertyTests)
 import ReminderTests (reminderTests)
+import Signals (unwindOnTermination)
 import System.Directory (createDirectory, createDirectoryIfMissing, doesDirectoryExist, doesFileExist, getTemporaryDirectory, pathIsSymbolicLink, removeDirectoryRecursive, removeFile)
 import System.FilePath ((</>))
 import System.IO
@@ -73,6 +75,7 @@ import System.IO
 import System.IO.Temp (withSystemTempDirectory)
 import System.Posix.Files (createSymbolicLink, fileMode, getFileStatus, setFileMode)
 import System.Posix.Process (getProcessID)
+import System.Posix.Signals (Handler (Default), installHandler, raiseSignal, sigHUP, sigTERM)
 import System.Posix.Time (epochTime)
 import System.Timeout (timeout)
 import Test.Tasty
@@ -1108,6 +1111,14 @@ agentServerIntegrationTests =
           assertBool "second bind should fail" (isLeft r)
           cleanupAgentSocket bound2 False path
           waitUntilReachable 1 path,
+      testCase "SIGTERM and SIGHUP unwind so finally runs (B8)" $
+        for_ [sigTERM, sigHUP] $ \sig -> do
+          ran <- newIORef False
+          unwindOnTermination
+          r <- try @AsyncException ((raiseSignal sig >> threadDelay 5000000) `finally` writeIORef ran True)
+          for_ [sigTERM, sigHUP] $ \s -> installHandler s Default Nothing
+          r @?= Left UserInterrupt
+          readIORef ran >>= (@?= True),
       testCase "a second server on the same path fails instead of hijacking" $
         withAgentServer $ \snapVar events path -> do
           -- First server is live on `path`. Attempt to start a second one on
