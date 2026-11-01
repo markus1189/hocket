@@ -3,7 +3,8 @@ module Events
     AsyncCommand (..),
     UiCommand (..),
     fetchItemsEvt,
-    fetchedItemsEvt,
+    fetchCompletedEvt,
+    fetchFailedEvt,
     executeBatchEvt,
     executeBatchDoneEvt,
     archivedItemsEvt,
@@ -37,7 +38,6 @@ where
 
 import Data.Set (Set)
 import Data.Text (Text)
-import Data.Time.Clock.POSIX (POSIXTime)
 import Network.Bookmark.Types
 import Network.Bookmark.Ui.State (VideoFilterMode)
 
@@ -48,7 +48,10 @@ data HocketEvent
 
 data AsyncCommand
   = FetchItems
-  | FetchedItems !POSIXTime ![BookmarkItem] !Bool
+  | -- | The one terminal message of a fetch: all pages, and whether it was
+    -- incremental. Only this or 'FetchFailed' frees the fetch slot.
+    FetchCompleted !Bool ![BookmarkItemBatch]
+  | FetchFailed !(Maybe Text)
   | ExecuteBatch
   | ExecuteBatchDone
   | ArchivedItems ![BookmarkItemId]
@@ -86,8 +89,11 @@ data UiCommand
 fetchItemsEvt :: HocketEvent
 fetchItemsEvt = HocketAsync FetchItems
 
-fetchedItemsEvt :: POSIXTime -> [BookmarkItem] -> Bool -> HocketEvent
-fetchedItemsEvt t itms isAllCollections = HocketAsync (FetchedItems t itms isAllCollections)
+fetchCompletedEvt :: Bool -> [BookmarkItemBatch] -> HocketEvent
+fetchCompletedEvt isAllCollections batches = HocketAsync (FetchCompleted isAllCollections batches)
+
+fetchFailedEvt :: Maybe Text -> HocketEvent
+fetchFailedEvt err = HocketAsync (FetchFailed err)
 
 executeBatchEvt :: HocketEvent
 executeBatchEvt = HocketAsync ExecuteBatch

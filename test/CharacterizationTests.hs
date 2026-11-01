@@ -103,12 +103,10 @@ syncTests =
               page = [item "a" (-1) | nonEmpty]
           ((old, ts, nonEmpty), applyFetched ts page True s ^. hsLastUpdated)
             @?= ((old, ts, nonEmpty), expected),
-      -- pins bug B1b, flipped in Phase 1
-      testCase "every fetched page frees the slot, even with more pages to come" $ do
+      testCase "merging a page leaves the fetch slot alone (B1b)" $ do
         let Just fetching = tryAcquireAsyncOp OpFetchItems emptyState
             afterPage1 = applyFetched 1 [item "a" (-1)] False fetching
-        asyncOpRunning fetching @?= True
-        asyncOpRunning afterPage1 @?= False
+        asyncOpRunning afterPage1 @?= True
     ]
 
 stepResultTests :: TestTree

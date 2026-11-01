@@ -116,7 +116,7 @@ data BookmarkItemBatch = BookmarkItemBatch
     _batchItems :: [BookmarkItem],
     _batchTotal :: Natural
   }
-  deriving (Show)
+  deriving (Show, Eq)
 
 makeLenses ''BookmarkItemBatch
 

@@ -203,7 +203,7 @@ import Network.Bookmark.Ui.State
   )
 import Network.Bookmark.Ui.Sync
   ( SyncKind (..),
-    applyFetched,
+    applyFetchCompleted,
     applyStepResult,
     formatPOSIXTime,
     planSync,
@@ -263,7 +263,7 @@ import System.Process
     waitForProcess,
   )
 import System.Process.Internals (StdStream (CreatePipe))
-import Worker (fetchResultEvents)
+import Worker (exceptionMessage, fetchResultEvents, trySync)
 
 makeLensesFor [("std_in", "stdIn"), ("std_err", "stdErr"), ("std_out", "stdOut")] ''CreateProcess
 
@@ -603,11 +603,15 @@ asyncCommandEventHandler es FetchItems =
           isUpdateFetch = plan ^. spKind == IncrementalAll
           suffix = maybe "" (\since -> " since: " <> formatPOSIXTime (since - 86400)) $ s ^. hsLastUpdated
       es `trigger` setStatusEvt (Just ("fetching" <> suffix))
-      eitherErrorBis <- retrieveItems (s ^. hsCredentials) (plan ^. spSearch) (plan ^. spCollection)
-      for_ (fetchResultEvents isUpdateFetch (first errorMessageFromException eitherErrorBis)) (trigger es)
+      result <- trySync (retrieveItems (s ^. hsCredentials) (plan ^. spSearch) (plan ^. spCollection))
+      let rendered = either (Left . Just . exceptionMessage) (first errorMessageFromException) result
+      for_ (fetchResultEvents isUpdateFetch rendered) (trigger es)
     pure ()
-asyncCommandEventHandler _ (FetchedItems ts bis wasAllCollectionsFetch) =
-  id %= applyFetched ts bis wasAllCollectionsFetch
+asyncCommandEventHandler _ (FetchCompleted wasAllCollectionsFetch batches) =
+  id %= applyFetchCompleted wasAllCollectionsFetch batches
+asyncCommandEventHandler es (FetchFailed err) = do
+  id %= completeAsyncOp
+  liftIO (es `trigger` setStatusEvt (Just ("failed" <> maybe "<no err>" (": " <>) err)))
 asyncCommandEventHandler es (AsyncActionFailed err) = do
   id %= completeAsyncOp
   liftIO (es `trigger` setStatusEvt (Just ("failed" <> maybe "<no err>" (": " <>) err)))

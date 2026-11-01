@@ -12,6 +12,7 @@ module Network.Bookmark.Ui.Sync
     spSearch,
     planSync,
     applyFetched,
+    applyFetchCompleted,
     applyStepResult,
     formatPOSIXTime,
   )
@@ -65,13 +66,18 @@ applyFetched ts bis wasAllCollectionsFetch = execState $ do
       id %= insertItems itemsToPotentiallyAdd
     else id %= insertItems bis
 
-  id %= completeAsyncOp
   currentLastUpdated <- use hsLastUpdated
   let newTimestampToConsider = if null bis then Nothing else Just ts
   case (currentLastUpdated, newTimestampToConsider) of
     (Nothing, Just newTs) -> hsLastUpdated .= Just newTs
     (Just oldTs, Just newTs) -> when (newTs >= oldTs) $ hsLastUpdated .= Just newTs
     _ -> pure ()
+
+-- | The terminal message of a fetch: merge the pages in order, then free the
+-- slot exactly once, also when there were no pages.
+applyFetchCompleted :: Bool -> [BookmarkItemBatch] -> HocketState -> HocketState
+applyFetchCompleted wasAllCollectionsFetch batches s =
+  completeAsyncOp $ foldl (\st (BookmarkItemBatch ts bis _) -> applyFetched ts bis wasAllCollectionsFetch st) s batches
 
 -- | The local effect of the ids a batch step reported as done.
 applyStepResult :: BatchStep -> [BookmarkItemId] -> HocketState -> HocketState
