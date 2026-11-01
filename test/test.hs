@@ -6,7 +6,7 @@ import AgentClient (callAgent, isChannelFullError)
 import AgentServer (AgentEnv (..), BoundSocket, boundSocketId, cleanupAgentSocket, newBoundSocket, runAgentServer, socketDirIsOurs)
 import BatchTests (batchTests)
 import Brick.BChan (BChan, newBChan, readBChan, writeBChan)
-import Brick.Widgets.Edit (applyEdit)
+import Brick.Widgets.Edit (applyEdit, editContentsL)
 import qualified Brick.Widgets.List as L
 import CharacterizationTests (characterizationTests)
 import ClassifyTests (classifyTests)
@@ -14,7 +14,7 @@ import Control.Concurrent (forkIO, threadDelay)
 import Control.Concurrent.Async (withAsync)
 import Control.Concurrent.STM (TVar, atomically, modifyTVar', newTVarIO)
 import Control.Exception (IOException, SomeException, finally, throwIO, try)
-import Control.Lens (ix, view, _1, _2)
+import Control.Lens (ix, to, view, _1, _2)
 import Control.Lens.Operators
 import Control.Monad (void)
 import qualified Data.Aeson as A
@@ -487,14 +487,19 @@ filterStateTests =
       testCase "enterFilterMode sets hsFilterActive" $
         view hsFilterActive (enterFilterMode testState) @?= True,
       testCase "typing after a set query appends at the end" $
-        view hsFilterQuery (typeInFilter "x" (testState & hsFilterQuery .~ "ab")) @?= "abx",
+        editorQuery (typeInFilter "x" (reconcileEditor (testState & hsFilterQuery .~ "ab"))) @?= "abx",
       testCase "ctrl-w deletes the previous word" $
-        view hsFilterQuery (testState & hsFilterQuery .~ "foo bar" & hsFilterEditor %~ applyEdit deletePrevWord) @?= "foo ",
+        editorQuery (reconcileEditor (testState & hsFilterQuery .~ "foo bar") & hsFilterEditor %~ applyEdit deletePrevWord) @?= "foo ",
+      testCase "the editor is written only when it differs from the query" $ do
+        -- Mid-typing the two agree, so the cursor is left where it is.
+        let typing = typeInFilter "a" (reconcileEditor testState) & hsFilterQuery .~ "a"
+        view (hsFilterEditor . editContentsL . to Z.cursorPosition) (reconcileEditor typing) @?= view (hsFilterEditor . editContentsL . to Z.cursorPosition) typing
+        editorQuery (reconcileEditor (typing & hsFilterQuery .~ "agent")) @?= "agent",
       testCase "cancelFilter clears query and exits editing" $
-        let s = cancelFilter (typeInFilter "x" (enterFilterMode testState))
+        let s = cancelFilter (enterFilterMode testState & hsFilterQuery .~ "x")
          in (view hsFilterActive s, view hsFilterQuery s) @?= (False, ""),
       testCase "lockFilter exits editing but preserves query" $
-        let s = lockFilter (typeInFilter "x" (enterFilterMode testState))
+        let s = lockFilter (enterFilterMode testState & hsFilterQuery .~ "x")
          in (view hsFilterActive s, view hsFilterQuery s) @?= (False, "x"),
       testCase "settle applies fuzzy text filter" $
         let base = insertItems [filterTestBookmark, filterOtherBookmark] testState

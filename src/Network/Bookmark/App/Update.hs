@@ -40,6 +40,10 @@ update msg s = case msg of
   Intent FlagAllArchive -> (setAllFlagsToArchive s, [])
   -- Agent @select_item@: only an item the list shows can be selected.
   Intent (Select bid) -> (s & hsSelected %~ \cur -> if V.any ((== bid) . (^. biId)) (s ^. hsVisible) then Just bid else cur, [])
+  Intent FilterEnter -> (enterFilterMode s, [])
+  Intent (FilterText t) -> refilter (hsFilterQuery .~ t)
+  Intent FilterLock -> (lockFilter s, [])
+  Intent FilterCancel -> refilter cancelFilter
   Intent (SetFilter q) -> refilter (setFilterQuery q)
   Intent (SetVideoFilter m) -> refilter (setVideoFilterMode m)
   Intent ToggleVideoOnly -> refilter toggleVideoFilter

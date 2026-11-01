@@ -36,6 +36,7 @@ rows =
     (key 'v', [ToggleVideoOnly]),
     (key 'V', [ToggleHideVideos]),
     (key 'Q', [Quit]),
+    (key '/', [FilterEnter]),
     (key 'k', [Navigate height Up]),
     (EvKey KUp [], [Navigate height Up]),
     (key 'j', [Navigate height Down]),
@@ -65,8 +66,8 @@ keyIntentTests =
     [ testCase "every action key yields its Intents" $
         for_ rows $
           \(e, is) -> (e, keyIntents now height e initialState) @?= (e, Just is),
-      testCase "/ and unknown keys stay with the shell" $
-        for_ [key '/', key 'x', EvKey (KChar 'j') [MCtrl]] $ \e ->
+      testCase "unknown keys stay with the shell" $
+        for_ [key 'x', EvKey (KChar 'j') [MCtrl]] $ \e ->
           (e, keyIntents now height e initialState) @?= (e, Nothing),
       testCase "the keymap is not asked while the filter editor has focus" $
         for_ (map fst rows) $

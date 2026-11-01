@@ -25,6 +25,8 @@ module Network.Bookmark.Ui.State
     hsFilterActive,
     hsFilterQuery,
     hsFilterEditor,
+    editorQuery,
+    reconcileEditor,
     ItemCounts,
     icNone,
     icToBeArchived,
@@ -131,6 +133,8 @@ data HocketState = HocketState
     _hsVideoFilter :: !VideoFilterMode,
     _hsFilterActive :: !Bool,
     _hsFilterEditor :: !(Editor Text Name),
+    -- | The filter text (plan D3): the core's; the editor only edits it.
+    _hsFilterQuery :: !Text,
     _hsAgentClients :: !Int,
     -- | Set when the agent socket server died; the shared status line is
     -- overwritten within a frame, so the header carries this instead.
@@ -144,10 +148,17 @@ data HocketState = HocketState
 
 makeLenses ''HocketState
 
--- | The filter text held by 'hsFilterEditor'. Setting it puts the cursor at
--- the end, so typing after an agent's 'setFilterQuery' appends.
-hsFilterQuery :: Lens' HocketState Text
-hsFilterQuery = hsFilterEditor . lens (T.concat . getEditContents) (\ed q -> applyEdit (const (Z.gotoEOL (Z.textZipper [q] (Just 1)))) ed)
+-- | What the filter editor holds now; the shell reports it as 'FilterText'.
+editorQuery :: HocketState -> Text
+editorQuery = T.concat . getEditContents . view hsFilterEditor
+
+-- | Write the query into the editor only when they differ (an agent's
+-- set_filter, a cancel), cursor at the end, so typing keeps its cursor and
+-- typing after set_filter appends.
+reconcileEditor :: HocketState -> HocketState
+reconcileEditor s
+  | editorQuery s == s ^. hsFilterQuery = s
+  | otherwise = s & hsFilterEditor %~ applyEdit (const (Z.gotoEOL (Z.textZipper [s ^. hsFilterQuery] (Just 1))))
 
 asyncOpRunning :: HocketState -> Bool
 asyncOpRunning s = case s ^. hsAsyncOp of
@@ -229,6 +240,7 @@ initialState =
     NoVideoFilter
     False
     (editorText FilterEditorName (Just 1) "")
+    T.empty
     0
     Nothing
     V.empty

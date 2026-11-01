@@ -33,6 +33,7 @@ keyIntents now height e s
       EvKey (KChar 'v') [] -> Just [I.ToggleVideoOnly]
       EvKey (KChar 'V') [] -> Just [I.ToggleHideVideos]
       EvKey (KChar 'Q') [] -> Just [I.Quit]
+      EvKey (KChar '/') [] -> Just [I.FilterEnter]
       -- brick's list keys (handleListEvent, handleListEventVi), plus J/K.
       EvKey (KChar 'k') [] -> nav Up
       EvKey KUp [] -> nav Up

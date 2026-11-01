@@ -101,7 +101,7 @@ import Network.Bookmark.Agent.Protocol
   )
 import Network.Bookmark.Agent.Snapshot (AgentSnapshot, asVersion, emptySnapshot, takeSnapshot)
 import Network.Bookmark.App.Effect (Effect (..))
-import Network.Bookmark.App.Msg (Intent (Navigate, Refresh), Msg (..), Now (..))
+import Network.Bookmark.App.Msg (Intent (FilterCancel, FilterLock, FilterText, Navigate, Refresh), Msg (..), Now (..))
 import Network.Bookmark.App.Nav (Nav (..))
 import Network.Bookmark.App.Update (update)
 import Network.Bookmark.Fake (encodeFixtureDump, fakePort)
@@ -125,8 +125,7 @@ import Network.Bookmark.Ui.State
   ( HocketState,
     Name (..),
     VideoFilterMode (..),
-    cancelFilter,
-    enterFilterMode,
+    editorQuery,
     focusRing,
     focusedItem,
     getPendingActionForItem,
@@ -146,7 +145,7 @@ import Network.Bookmark.Ui.State
     icToBeReminded,
     initialState,
     itemList,
-    lockFilter,
+    reconcileEditor,
     settle,
   )
 import Network.Bookmark.Ui.Widgets (sanitizeForDisplay)
@@ -353,20 +352,18 @@ vtyEventHandler env e = do
     then case e of
       -- Handled here, not via the BChan, so they stay ordered with the
       -- keystrokes the editor already applied synchronously.
-      EvKey KEsc [] -> id %= cancelFilter
-      EvKey KEnter [] -> id %= lockFilter
+      EvKey KEsc [] -> applyMsg env (Intent FilterCancel)
+      EvKey KEnter [] -> applyMsg env (Intent FilterLock)
       EvKey KUp [] -> listHeight >>= \h -> applyMsg env (Intent (Navigate h Up))
       EvKey KDown [] -> listHeight >>= \h -> applyMsg env (Intent (Navigate h Down))
       -- Brick's editor has no Ctrl-W.
-      EvKey (KChar 'w') [MCtrl] -> hsFilterEditor %= applyEdit deletePrevWord
-      _ -> zoom hsFilterEditor (handleEditorEvent (VtyEvent e))
+      EvKey (KChar 'w') [MCtrl] -> (hsFilterEditor %= applyEdit deletePrevWord) >> reportEditor env
+      _ -> zoom hsFilterEditor (handleEditorEvent (VtyEvent e)) >> reportEditor env
     else do
       now <- liftIO (Now <$> getCurrentTime <*> getCurrentTimeZone)
       height <- listHeight
-      case keyIntents now height e s of
-        Just intents -> traverse_ (applyMsg env . Intent) intents
-        -- Navigation and the switch to filter mode stay with the shell.
-        Nothing -> vtyEventHandlerNormal e
+      -- Keys keyIntents does not know are none of hocket's.
+      for_ (keyIntents now height e s) (traverse_ (applyMsg env . Intent))
 
 -- | Run one message through 'update', its effects through 'interpret', and
 -- what those answer right away through 'update' again.
@@ -378,15 +375,11 @@ applyMsg env m = do
     Halt -> halt
     effect -> liftIO (interpret env effect) >>= traverse_ (applyMsg env)
 
-vtyEventHandlerNormal ::
-  Event ->
-  EventM Name HocketState ()
-vtyEventHandlerNormal (EvKey (KChar '/') []) =
-  -- Flip into filter mode synchronously so the very next keystroke is already
-  -- seen under the editing guard; routing this through the BChan would leave a
-  -- one-event window where a fast 'Q'/paste leaks to normal mode and quits.
-  id %= enterFilterMode
-vtyEventHandlerNormal _ = pure ()
+-- | The editor applied a key: tell update, which owns the query (plan D3).
+reportEditor :: Env -> EventM Name HocketState ()
+reportEditor env = do
+  s <- use id
+  unless (editorQuery s == s ^. hsFilterQuery) $ applyMsg env (Intent (FilterText (editorQuery s)))
 
 -- | The list viewport's height in rows, as brick's page moves measure it;
 -- 0 before the list was first drawn, which makes a page move no move.
@@ -542,7 +535,7 @@ app tz isFixture env mSnapVar =
           else Focus.focusRingCursor (view focusRing) s,
       appHandleEvent = \e -> do
         myEventHandler env e
-        id %= settle
+        id %= reconcileEditor . settle
         -- Mirror the post-render state for the agent socket. Persistent
         -- data sharing keeps this cheap; the item projection is only fully
         -- forced by a server thread that actually serves it.

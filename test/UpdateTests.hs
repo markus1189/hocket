@@ -145,6 +145,16 @@ updateTests =
         moved 0 (Page 1) onB @?= Just (BookmarkItemId "b")
         let flaggedD = onB & setPendingAction (BookmarkItemId "d") ToBeArchived
         moved 3 NextFlagged flaggedD @?= Just (BookmarkItemId "d"),
+      testCase "the filter editor: enter, type, lock, cancel" $ do
+        let editing = after (Intent FilterEnter) twoItems
+            typed = after (Intent (FilterText "title b")) editing
+        (editing ^. hsFilterActive, editing ^. hsFilterQuery) @?= (True, "")
+        -- Filters as you type, and stays in the editor.
+        (typed ^. hsFilterActive, visibleIds typed) @?= (True, [BookmarkItemId "b"])
+        let locked = after (Intent FilterLock) typed
+        (locked ^. hsFilterActive, locked ^. hsFilterQuery, visibleIds locked) @?= (False, "title b", [BookmarkItemId "b"])
+        let cancelled = after (Intent FilterCancel) typed
+        (cancelled ^. hsFilterActive, cancelled ^. hsFilterQuery, length (visibleIds cancelled)) @?= (False, "", 2),
       testCase "SystemFailed and Copied go to the status line" $ do
         after (SystemFailed "no firefox") emptyState ^. hsStatus @?= Just "no firefox"
         after (Copied "https://example.com/a") emptyState ^. hsStatus @?= Just "Copied: https://example.com/a"

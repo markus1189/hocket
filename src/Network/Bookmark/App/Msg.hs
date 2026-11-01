@@ -48,7 +48,16 @@ data Intent
   | EditInRaindrop !Target
   | CopyUrl !Target
   | Select !BookmarkItemId
-  | SetFilter !Text
+  | -- | Key @/@: the filter editor takes the keys.
+    FilterEnter
+  | -- | The editor's text after a keystroke; filters as you type.
+    FilterText !Text
+  | -- | Enter in the editor: keep the query, leave the editor.
+    FilterLock
+  | -- | Esc in the editor: clear the query, leave the editor.
+    FilterCancel
+  | -- | Agent @set_filter@: the whole query in one step, editor left.
+    SetFilter !Text
   | SetVideoFilter !VideoFilterMode
   | ToggleVideoOnly
   | ToggleHideVideos
