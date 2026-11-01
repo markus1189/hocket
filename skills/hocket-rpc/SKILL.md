@@ -142,7 +142,8 @@ hocket agent set_status "reviewing 40 unread bookmarks"
 - **Applied is not done.** Once `wait_applied` answers, your write and every
   agent write before it have been run; read the state to see what that did
   (a write validated against a stale state may have changed nothing). For
-  `execute` and `refresh` it means the job started; wait for
+  `execute` and `refresh` it means the job started, unless it was dropped
+  (nothing flagged, or another job running); either way wait for
   `async_op == null` for its end.
 - **`unknown seq N: last issued M`** means no write got that seq from this
   hocket (wrong number, or hocket restarted: seqs start at 1 again). A seq

@@ -308,6 +308,13 @@ scenario_agent_errors() {
   start agent-errors seed-basic.json || return 1
   local before after v seq
   v=$(agent get_state | jq '.result.version')
+  # The startup refresh, its fetch and settle's marker: 3. Without the
+  # startup publish it is 2, and against Raindrop the socket would serve an
+  # empty snapshot until the first fetch lands.
+  [ "$v" -eq 3 ] || {
+    fail "version $v after start, expected 3 (startup, fetch, marker)"
+    return 1
+  }
   state_is ".version == $v" >/dev/null || {
     fail "the version moved on an idle hocket: $v, then $(agent get_state | jq '.result.version')"
     return 1

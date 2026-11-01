@@ -217,7 +217,7 @@ client-count update (§4.2). It contains:
 - `applied_seq`: the seq of the last agent write the loop has applied
   (§5.5), `0` before the first.
 
-Rebuilding after every render means the mirror is at worst one render behind
+Rebuilding after every event means the mirror is at worst one event behind
 the actual screen. It is cheap to do because the snapshot shares the
 persistent data structures; the full item JSON is only forced by a server
 thread that actually serves it.
@@ -601,13 +601,14 @@ shown (and vice-versa); there is no separate agent lane.
   `BChan` of capacity 10. If the loop is busy, a write can be dropped
   (`aeInject == False` → `event channel full, retry`). This is the one place
   the protocol can race the user; the write path accounts for it.
-- The snapshot `TVar` is written under `atomically` after every event but a
-  client count and read `readTVarIO` / within `STM` by server threads. There are two
-  sequential points. The version bump happens inside the render thread, so
-  versions are never duplicated. The seq lock in the server makes taking a
-  seq, injecting the write and committing the seq one step for all clients
-  (masked against asynchronous exceptions), so seqs are unique, dense and in
-  channel order, and `applied_seq ≥ N` covers every agent write up to `N`.
+- The snapshot `TVar` is written under `atomically` after every event but
+  a client count and read `readTVarIO` / within `STM` by server threads.
+  There are two sequential points. The version bump happens inside the
+  render thread, so versions are never duplicated. The seq lock in the
+  server makes taking a seq, injecting the write and committing the seq one
+  step for all clients (masked against asynchronous exceptions), so seqs are
+  unique, dense and in channel order, and `applied_seq ≥ N` covers every
+  agent write up to `N`.
   Keys and worker results take no seq.
 
 ### 7.1 Waiting for one write
