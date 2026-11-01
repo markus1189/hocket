@@ -56,6 +56,7 @@ import Network.Socket
     socket,
     socketToHandle,
   )
+import Properties (propertyTests)
 import System.Directory (createDirectoryIfMissing, getTemporaryDirectory, removeDirectoryRecursive, removeFile)
 import System.FilePath ((</>))
 import System.IO
@@ -75,7 +76,7 @@ import Test.Tasty.HUnit
 main = defaultMain tests
 
 tests :: TestTree
-tests = testGroup "Tests" [xKeyBatchConcurrencyTests, hocketStateTests, raindropParsingTests, raindropApiBodyTests, classifyTests, characterizationTests, dateTimeParsingTests, jsonRoundtripTests, sanitizeForDisplayTests, fuzzyMatchTests, fuzzyFilterMatchTests, filterStateTests, filterTuningTests, agentSnapshotTests, agentProtocolTests, agentServerIntegrationTests]
+tests = testGroup "Tests" [xKeyBatchConcurrencyTests, propertyTests, hocketStateTests, raindropParsingTests, raindropApiBodyTests, classifyTests, characterizationTests, dateTimeParsingTests, jsonRoundtripTests, sanitizeForDisplayTests, fuzzyMatchTests, fuzzyFilterMatchTests, filterStateTests, filterTuningTests, agentSnapshotTests, agentProtocolTests, agentServerIntegrationTests]
 
 -- Expected bodies are what the pre-servant wreq client sent.
 raindropApiBodyTests :: TestTree
@@ -685,47 +686,12 @@ agentSnapshotTests =
               (not ("super-secret-token" `isInfixOf` encoded))
     ]
 
--- | The CLI builds requests with 'encodeCmd' and the server reads them with
--- 'decodeCmd'; if the two ever disagree, `hocket agent` starts emitting
--- requests the socket rejects. This asserts they are inverses.
-roundTripsCmd :: AgentCmd -> IO ()
-roundTripsCmd cmd =
-  let (method, params) = encodeCmd cmd
-   in decodeCmd method (Just params) @?= Right cmd
-
 agentProtocolTests :: TestTree
 agentProtocolTests =
   testGroup
     "Agent protocol"
     [ testCase "decodeCmd: get_state" $
         decodeCmd "get_state" Nothing @?= Right (ARead CmdGetState),
-      testCase "encodeCmd round-trips through decodeCmd for every command" $
-        mapM_
-          roundTripsCmd
-          [ ARead CmdGetState,
-            ARead (CmdListItems True False),
-            ARead (CmdListItems False True),
-            ARead (CmdGetItem (BookmarkItemId "ag1")),
-            AWait 12 30000,
-            AWrite (CmdSetFlag (BookmarkItemId "ag1") FlagArchive),
-            AWrite (CmdSetFlag (BookmarkItemId "ag1") FlagReminder),
-            AWrite (CmdSetFlag (BookmarkItemId "ag1") FlagRemoveReminder),
-            AWrite (CmdSetFlag (BookmarkItemId "ag1") FlagNone),
-            AWrite CmdClearFlags,
-            AWrite CmdFlagAllArchive,
-            AWrite CmdExecute,
-            AWrite CmdRefresh,
-            AWrite (CmdSetFilter "haskell"),
-            AWrite (CmdSetVideoFilter NoVideoFilter),
-            AWrite (CmdSetVideoFilter ShowOnlyVideos),
-            AWrite (CmdSetVideoFilter HideVideos),
-            AWrite (CmdSetShowFutureReminders True),
-            AWrite (CmdSetShowFutureReminders False),
-            AWrite (CmdSelectItem (BookmarkItemId "ag1")),
-            AWrite (CmdOpenItem (BookmarkItemId "ag1")),
-            AWrite (CmdOpenAndFlag (BookmarkItemId "ag1")),
-            AWrite (CmdSetStatus "hello")
-          ],
       testCase "decodeCmd: list_items defaults to visible-only" $
         decodeCmd "list_items" Nothing @?= Right (ARead (CmdListItems True False)),
       testCase "decodeCmd: wait_version defaults its timeout" $

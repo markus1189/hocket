@@ -93,7 +93,9 @@ test-suite test
                      , CharacterizationTests
                      , ClassifyTests
                      , Events
+                     , Gen
                      , Keys
+                     , Properties
   build-depends:       base
                      , aeson
                      , async
