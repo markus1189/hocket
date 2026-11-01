@@ -16,11 +16,12 @@ module AgentServer
     socketDirIsOurs,
     cleanupAgentSocket,
     resolveAgentSocketPath,
+    withAgentServer,
   )
 where
 
 import Control.Concurrent (forkFinally, threadDelay)
-import Control.Concurrent.Async (withAsync)
+import Control.Concurrent.Async (async, withAsync)
 import Control.Concurrent.STM
   ( TVar,
     atomically,
@@ -39,6 +40,7 @@ import Data.Char (isSpace)
 import Data.Foldable (traverse_)
 import Data.IORef (IORef, newIORef, readIORef, writeIORef)
 import qualified Data.Text as T
+import Interpret (Env (..), injectMsg, postMsg)
 import Network.Bookmark.Agent.Intent (toIntent)
 import Network.Bookmark.Agent.Protocol
   ( AgentCmd (..),
@@ -51,8 +53,8 @@ import Network.Bookmark.Agent.Protocol
     stateView,
     validateWrite,
   )
-import Network.Bookmark.Agent.Snapshot (AgentSnapshot, asVersion)
-import Network.Bookmark.App.Msg (Intent (SetStatus), Msg (AgentClients, Intent), Now)
+import Network.Bookmark.Agent.Snapshot (AgentSnapshot, asVersion, emptySnapshot)
+import Network.Bookmark.App.Msg (Intent (SetStatus), Msg (AgentClients, AgentServerDied, Intent), Now)
 import Network.Socket
   ( Family (AF_UNIX),
     SockAddr (SockAddrUnix),
@@ -274,3 +276,38 @@ dispatch env rid = \case
 -- sampled here, in the shell, once per write.
 toEvent :: AgentEnv -> WriteCmd -> IO Msg
 toEvent env cmd = Intent . (`toIntent` cmd) <$> aeNow env
+
+-- | Serve the agent socket at this path for the length of the action, which
+-- gets the snapshot its loop must publish to. bracket, not finally: a
+-- signal while the server starts is held off until it is recorded for
+-- cleanup, which removes the socket however the action ends (B7).
+withAgentServer :: Env -> FilePath -> (TVar AgentSnapshot -> IO a) -> IO a
+withAgentServer env path =
+  bracket
+    (startAgentServer env path)
+    (\((path', ours, bound), _) -> cleanupAgentSocket bound ours path')
+    . (. snd)
+
+-- | Bind the agent control socket and keep serving it in the background.
+-- Server failures surface in the TUI status bar instead of killing the app.
+-- The path comes back with what cleanup needs: whether hocket owns its
+-- directory, and the socket it bound.
+startAgentServer :: Env -> FilePath -> IO ((FilePath, Bool, BoundSocket), TVar AgentSnapshot)
+startAgentServer env path = do
+  ours <- socketDirIsOurs path
+  bound <- newBoundSocket
+  snapVar <- newTVarIO emptySnapshot
+  let agentEnv =
+        AgentEnv
+          { aeSnapshot = snapVar,
+            aeInject = injectMsg env,
+            aeNow = envNow env
+          }
+  _ <- async $ do
+    r <- try @SomeException (runAgentServer bound path agentEnv)
+    case r of
+      -- Blocking: rare, the main loop drains, and a dropped report would
+      -- leave a dead socket looking alive.
+      Left e -> postMsg env (AgentServerDied (T.pack (show e)))
+      Right () -> pure ()
+  pure ((path, ours, bound), snapVar)

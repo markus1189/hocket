@@ -15,7 +15,7 @@ module Main
 where
 
 import AgentClient (runAgentCommand)
-import AgentServer (AgentEnv (..), BoundSocket, cleanupAgentSocket, newBoundSocket, resolveAgentSocketPath, runAgentServer, socketDirIsOurs)
+import AgentServer (resolveAgentSocketPath, withAgentServer)
 import Brick
   ( App (..),
     AttrMap,
@@ -42,10 +42,8 @@ import Brick.Widgets.Border (hBorder)
 import Brick.Widgets.Edit (applyEdit, editFocusedAttr, handleEditorEvent, renderEditor)
 import qualified Brick.Widgets.List as L
 import Control.Applicative ((<|>))
-import Control.Concurrent.Async (async)
-import Control.Concurrent.STM (TVar, atomically, newTVarIO)
-import Control.Exception (SomeException, bracket, finally)
-import Control.Exception.Base (try)
+import Control.Concurrent.STM (TVar, atomically)
+import Control.Exception (SomeException, finally)
 import Control.Lens (makeLenses, uses, view)
 import Control.Lens.Combinators (use)
 import Control.Lens.Operators
@@ -90,7 +88,7 @@ import Graphics.Vty (Event (EvKey), Key (KChar, KDown, KUp), Modifier (MCtrl))
 import qualified Graphics.Vty as Vty
 import Graphics.Vty.Input.Events (Key (KEnter, KEsc))
 import Graphics.Vty.Platform.Unix (mkVty)
-import Interpret (Env (..), injectMsg, newEnv, postMsg, publish, step, tookMsg)
+import Interpret (Env (..), newEnv, publish, step, tookMsg)
 import Keys (keyIntents)
 import Network.Bookmark.Agent.Protocol
   ( AgentCmd (..),
@@ -98,7 +96,7 @@ import Network.Bookmark.Agent.Protocol
     ReadCmd (..),
     WriteCmd (..),
   )
-import Network.Bookmark.Agent.Snapshot (AgentSnapshot, emptySnapshot)
+import Network.Bookmark.Agent.Snapshot (AgentSnapshot)
 import Network.Bookmark.App.Msg (Intent (FilterCancel, FilterLock, FilterText, Navigate, Refresh), Msg (..))
 import Network.Bookmark.App.Nav (Nav (..))
 import Network.Bookmark.Fake (encodeFixtureDump, fakePort)
@@ -450,48 +448,20 @@ runTui mAgentOpt isFixture port s0 = do
   env <- newEnv port systemPort systemNow
   tz <- getCurrentTimeZone
   unwindOnTermination
-  -- bracket, not finally around customMain: a signal during mkVty must
-  -- still remove the socket, and one during startAgentServer is held off
-  -- until the server is recorded for cleanup.
-  bracket
-    (for mAgentOpt (startAgentServer env))
-    (traverse_ (\((path, ours, bound), _) -> cleanupAgentSocket bound ours path))
-    $ \mAgent -> do
-      vty <- mkVty Vty.defaultConfig
-      void $
-        customMain
-          vty
-          (mkVty Vty.defaultConfig)
-          (Just (envEvents env))
-          (app tz isFixture env (snd <$> mAgent))
-          (AppState s0 initialUi)
-
--- | Bind the agent control socket and keep serving it in the background.
--- Server failures surface in the TUI status bar instead of killing the app.
--- The path comes back with what cleanup needs: whether hocket owns its
--- directory, and the socket it bound.
-startAgentServer :: Env -> AgentSocketOpt -> IO ((FilePath, Bool, BoundSocket), TVar AgentSnapshot)
-startAgentServer env opt = do
-  path <- case opt of
+  mPath <- for mAgentOpt $ \case
     AgentSocketDefault -> resolveAgentSocketPath
     AgentSocketAt p -> pure p
-  ours <- socketDirIsOurs path
-  bound <- newBoundSocket
-  snapVar <- newTVarIO emptySnapshot
-  let agentEnv =
-        AgentEnv
-          { aeSnapshot = snapVar,
-            aeInject = injectMsg env,
-            aeNow = envNow env
-          }
-  _ <- async $ do
-    r <- try @SomeException (runAgentServer bound path agentEnv)
-    case r of
-      -- Blocking: rare, the main loop drains, and a dropped report would
-      -- leave a dead socket looking alive.
-      Left e -> postMsg env (AgentServerDied (T.pack (show e)))
-      Right () -> pure ()
-  pure ((path, ours, bound), snapVar)
+  -- The vty starts inside the server's bracket: a signal during mkVty must
+  -- still remove the socket.
+  maybe ($ Nothing) (\path -> withAgentServer env path . (. Just)) mPath $ \mSnapVar -> do
+    vty <- mkVty Vty.defaultConfig
+    void $
+      customMain
+        vty
+        (mkVty Vty.defaultConfig)
+        (Just (envEvents env))
+        (app tz isFixture env mSnapVar)
+        (AppState s0 initialUi)
 
 runAddCommand :: Text -> Maybe Text -> [Text] -> IO ()
 runAddCommand url mCollection tags = do
