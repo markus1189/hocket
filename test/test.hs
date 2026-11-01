@@ -25,6 +25,7 @@ import Shell.SMFixtureTests (smFixtureTests)
 import Shell.SimulateTests (simulateTests)
 import Shell.SnapshotGoldenTests (snapshotGoldenTests)
 import Shell.SystemTests (systemTests)
+import Shell.WaitAppliedTests (waitAppliedTests)
 import Shell.WorkerTests (workerTests)
 import Test.Tasty (TestTree, defaultMain, localOption, mkTimeout, testGroup)
 
@@ -43,6 +44,7 @@ tests =
       smFixtureTests,
       simulateTests,
       agentParallelTests,
+      waitAppliedTests,
       snapshotGoldenTests,
       xKeyBatchConcurrencyTests,
       propertyTests,

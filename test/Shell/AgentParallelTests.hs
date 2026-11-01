@@ -12,10 +12,10 @@
 -- retried, versions never go back, and the slot is free once the loop is
 -- idle. Every write is valid in every state (no reminders, no execute), so
 -- no rejection can come from a race with an archive. After a write the
--- harness waits until the channel is drained: the socket only promises that
--- a write was injected. The skill's wait_version --after V is not enough
--- here: it returns once any later event was applied, also one queued before
--- the write (with it in place of the drain, this property fails).
+-- harness waits with wait_applied for the write's seq, as the skill does,
+-- so this tests wait_applied under parallel clients too. wait_version
+-- --after V would not do: it returns once any later event was applied, also
+-- one queued before the write (with it, this property failed).
 --
 -- What no test here can see: a write applied twice. Every agent write sets
 -- a state rather than toggling one, so a second application changes nothing
@@ -27,7 +27,14 @@
 -- smAgentExecute: agents write while a batch runs. Flags are not modelled;
 -- a write lands, is retried on "channel full", or is a set_flag rejected for
 -- one of the reasons a concurrent archive or reminder can cause.
-module Shell.AgentParallelTests (agentParallelTests) where
+module Shell.AgentParallelTests
+  ( agentParallelTests,
+    Sut (..),
+    withSut,
+    noDesktop,
+    retryingFull,
+  )
+where
 
 import Control.Concurrent (threadDelay)
 import Control.Concurrent.Async (withAsync)
@@ -188,17 +195,15 @@ write :: Sut -> Op -> IO (Maybe Bool)
 write sut op = do
   r <- retryingFull (callAgent (sutSocket sut) (AWrite (toCmd op)))
   case r of
-    Right v -> do
-      drained <- timeout 5000000 . atomically $ do
-        pending <- readTVar (envPending (sutEnv sut))
-        busy <- readTVar (loopBusy (sutLoop sut))
-        STM.check (pending == 0 && not busy)
+    Right v | Just n <- seqOf v -> do
+      applied <- callAgent (sutSocket sut) (AWaitApplied n 5000)
       -- Fail here, not after every later write has waited out its timeout.
-      maybe (fail "SM-agent: a landed write was not applied within 5 s") pure drained
+      now <- either (fail . T.unpack) pure (applied >>= \a -> maybe (Left ("SM-agent: write " <> T.pack (show n) <> " not applied: " <> T.pack (show a))) Right (versionOf a))
       -- Its own event was applied and published since: past the version the
       -- write answered with.
-      now <- asVersion <$> readTVarIO (loopSnapshot (sutLoop sut))
       pure ((&&) <$> okOf v <*> ((< now) <$> versionOf v))
+    -- Rejected, or accepted without a seq.
+    Right _ -> pure (Just False)
     Left _ -> pure Nothing
   where
     toCmd = \case
@@ -213,6 +218,9 @@ okOf = parseMaybe (withObject "response" (.: "ok"))
 
 versionOf :: Value -> Maybe Int
 versionOf = parseMaybe (withObject "response" (\o -> o .: "result" >>= withObject "result" (.: "version")))
+
+seqOf :: Value -> Maybe Int
+seqOf = parseMaybe (withObject "response" (\o -> o .: "result" >>= withObject "result" (.: "seq")))
 
 -- | The flag writes get commands of their own, so that they are common: a
 -- lost write only shows when a read follows it.

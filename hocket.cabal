@@ -151,6 +151,7 @@ test-suite test
                      , Shell.SimulateTests
                      , Shell.SnapshotGoldenTests
                      , Shell.SystemTests
+                     , Shell.WaitAppliedTests
                      , Shell.WorkerTests
                      , TestUtil
   build-depends:       base

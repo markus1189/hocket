@@ -1,3 +1,4 @@
+{-# LANGUAGE LambdaCase #-}
 {-# LANGUAGE OverloadedStrings #-}
 {-# LANGUAGE ScopedTypeVariables #-}
 {-# LANGUAGE TypeApplications #-}
@@ -9,11 +10,11 @@ where
 
 import Brick.BChan (BChan, newBChan, readBChan, writeBChan)
 import Control.Concurrent (forkIO, threadDelay)
-import Control.Concurrent.Async (async, cancel, poll, withAsync)
-import Control.Concurrent.MVar (newEmptyMVar, putMVar, readMVar)
+import Control.Concurrent.Async (async, cancel, poll, wait, withAsync)
+import Control.Concurrent.MVar (newEmptyMVar, putMVar, readMVar, takeMVar)
 import Control.Concurrent.STM (TVar, atomically, modifyTVar', newTVarIO)
 import Control.Exception (IOException, SomeException, displayException, finally, throwIO, try)
-import Control.Monad (void)
+import Control.Monad (void, when)
 import qualified Data.Aeson as A
 import qualified Data.Aeson.Key as AKey
 import qualified Data.Aeson.KeyMap as KM
@@ -153,19 +154,17 @@ waitUntilReachable attempts0 path = go attempts0 []
 withAgentServer ::
   (TVar AgentSnapshot -> BChan I.Msg -> FilePath -> IO a) ->
   IO a
-withAgentServer action = withSystemTempDirectory "hk" $ \dir -> do
+withAgentServer action = do
+  events <- newBChan 10
+  withInjectingServer (\evt -> True <$ writeBChan events evt) (`action` events)
+
+-- | 'withAgentServer' with this injection in place of the channel.
+withInjectingServer :: (I.Msg -> IO Bool) -> (TVar AgentSnapshot -> FilePath -> IO a) -> IO a
+withInjectingServer inject action = withSystemTempDirectory "hk" $ \dir -> do
   let path = dir </> "s.sock"
   snapVar <- newTVarIO emptySnapshot
   atomically (modifyTVar' snapVar (const (buildTestSnapshot 1)))
-  events <- newBChan 10
-  let env =
-        AgentEnv
-          { aeSnapshot = snapVar,
-            aeInject = \evt -> do
-              void (writeBChan events evt)
-              pure True,
-            aeNow = pure testNow
-          }
+  let env = AgentEnv {aeSnapshot = snapVar, aeInject = inject, aeNow = pure testNow}
   -- The readiness probe is a real client: the server announces it with two
   -- AgentClients messages (+1, then -1 from its own thread, so possibly
   -- after the test's first events). readAgentInjected skips them; any test asserting
@@ -173,7 +172,7 @@ withAgentServer action = withSystemTempDirectory "hk" $ \dir -> do
   bound <- newBoundSocket
   withAsync (runAgentServer bound path env) $ \_ -> do
     waitUntilReachable 100 path
-    action snapVar events path
+    action snapVar path
 
 -- | The TUI's socket lifecycle: decide ownership, serve until reachable,
 -- stop, clean up. Only ever pointed at a fresh temp root.
@@ -342,6 +341,27 @@ agentServerIntegrationTests =
                   KM.lookup (AKey.fromText "version") r @?= Just (A.Number 6)
                 _ -> assertFailure "wait_version result missing"
             _ -> assertFailure "wait_version response not object",
+      testCase "the seq lock: a second write waits until the first one's inject returns (§12.5 #4)" $ do
+        entered <- newEmptyMVar
+        release <- newEmptyMVar
+        injected <- newIORef []
+        let inject = \case
+              I.AgentWrite n _ -> do
+                before <- atomicModifyIORef' injected (\ns -> (ns <> [n], ns))
+                when (null before) (putMVar entered () >> takeMVar release)
+                pure True
+              _ -> pure True
+        withInjectingServer inject $ \_ path -> do
+          first <- async (callAgent path (AWrite (CmdSetStatus "first")))
+          takeMVar entered
+          second <- async (callAgent path (AWrite (CmdSetStatus "second")))
+          -- Unlocked, the second inject is logged within this time, with
+          -- the seq the first has not committed yet; locked, it never is.
+          _ <- waitFor 25 ((> 1) . length <$> readIORef injected)
+          putMVar release ()
+          seqs <- traverse (fmap (answered (resultField "seq")) . wait) [first, second]
+          readIORef injected >>= (@?= [1, 2])
+          seqs @?= [Right (1 :: Int), Right 2],
       testCase "wait_version with timeout_ms 0 polls: a passed version answers at once" $
         withAgentServer $ \snapVar _events path -> do
           atomically (modifyTVar' snapVar (const (buildTestSnapshot 4)))
