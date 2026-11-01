@@ -24,6 +24,7 @@ library
                      , Network.Bookmark.Batch
                      , Network.Bookmark.Port
                      , Network.Raindrop.Api
+                     , Network.Bookmark.Agent.Intent
                      , Network.Bookmark.Agent.Protocol
                      , Network.Bookmark.Agent.Snapshot
                      , Network.Bookmark.Fake
@@ -115,6 +116,7 @@ test-suite test
                      , FakeTests
                      , FixtureTests
                      , Gen
+                     , IntentTests
                      , ReminderTests
                      , Keys
                      , Signals
