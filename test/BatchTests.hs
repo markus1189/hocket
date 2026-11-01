@@ -8,6 +8,7 @@ module BatchTests (batchTests) where
 import CharacterizationTests (emptyState, item)
 import Control.Lens
 import Control.Monad.State.Strict (State, modify, runState)
+import Data.Either (isLeft)
 import Data.List (findIndex, sort)
 import qualified Data.Map as Map
 import Data.Maybe (fromJust, isJust, isNothing)
@@ -19,6 +20,7 @@ import Network.Bookmark.Types (BookmarkItemId (..), PendingAction (..))
 import Network.Bookmark.Ui.State
 import Network.Bookmark.Ui.Sync (applyArchived)
 import Network.Raindrop (classify)
+import Servant.Client.Core (ClientError)
 import Test.Tasty
 import Test.Tasty.HUnit
 import Test.Tasty.Hedgehog (testProperty)
@@ -43,6 +45,10 @@ isCallFailed = \case
   CallFailed _ -> True
   ResultFalse -> False
 isResultFalse = not . isCallFailed
+
+-- | A call result that fails only its own item.
+itemScopedFailure :: Either ClientError Bool -> Bool
+itemScopedFailure = either ((== ItemScoped) . classify) not
 
 okAll :: [Int] -> [(Int, Either Int Bool)]
 okAll = map (,Right True)
@@ -89,6 +95,11 @@ outcomeProperty =
         cover 1 "ran to the end" (isNothing firstGlobal)
         cover 1 "an item-scoped error" (any (isCallFailed . snd) (outcome ^. soFailed))
         cover 1 "result: false" (any (isResultFalse . snd) (outcome ^. soFailed))
+        -- Against the script, not runItems' own split: the items called
+        -- before the first global error, sorted by what their call returned.
+        let ran = zip items (maybe results (`take` results) firstGlobal)
+        ok === [i | (i, Right True) <- ran]
+        [(i, isCallFailed f) | (i, f) <- outcome ^. soFailed] === [(i, isLeft r) | (i, r) <- ran, itemScopedFailure r]
         sort (ok <> map fst (outcome ^. soFailed) <> outcome ^. soSkipped) === items
         outcome ^. soSkipped === maybe [] (`drop` items) firstGlobal
         calls === maybe items (\i -> take (i + 1) items) firstGlobal
