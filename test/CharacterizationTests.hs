@@ -112,25 +112,24 @@ syncTests =
 stepResultTests :: TestTree
 stepResultTests =
   testGroup
-    "applyStepResult"
+    "batch step results"
     [ testCase "archive removes the reported items only" $
-        ids (applyStepResult StepArchive [BookmarkItemId "a"] twoFlagged) @?= ["b"],
-      testCase "set-reminders stores the flag's time and clears the flag" $ do
-        let after = applyStepResult StepSetReminders [BookmarkItemId "r"] reminderFlagged
+        ids (applyArchived [BookmarkItemId "a"] twoFlagged) @?= ["b"],
+      testCase "set-reminders stores the time that was sent and clears the flag" $ do
+        let after = applyRemindersSet [(BookmarkItemId "r", tPrev)] reminderFlagged
+        flagOf "r" after @?= Just None
+        reminderOf "r" after @?= Just (Just tPrev),
+      testCase "set-reminders after an unflag during the batch keeps the sent reminder (B3)" $ do
+        let unflagged = reminderFlagged & setPendingAction (BookmarkItemId "r") None
+            after = applyRemindersSet [(BookmarkItemId "r", t7)] unflagged
         flagOf "r" after @?= Just None
         reminderOf "r" after @?= Just (Just t7),
-      -- pins bug B3, flipped in Phase 1
-      testCase "set-reminders after an unflag during the batch drops the reminder locally" $ do
-        let unflagged = reminderFlagged & setPendingAction (BookmarkItemId "r") None
-            after = applyStepResult StepSetReminders [BookmarkItemId "r"] unflagged
-        flagOf "r" after @?= Just None
-        reminderOf "r" after @?= Just Nothing,
       testCase "remove-reminders clears the reminder, and the flag only if still ReminderToBeRemoved" $ do
         let s =
               insertItems [withRem (item "x" (-1)), withRem (item "y" (-1))] emptyState
                 & setPendingAction (BookmarkItemId "x") ReminderToBeRemoved
                 & setPendingAction (BookmarkItemId "y") ToBeArchived
-            after = applyStepResult StepRemoveReminders [BookmarkItemId "x", BookmarkItemId "y"] s
+            after = applyRemindersRemoved [BookmarkItemId "x", BookmarkItemId "y"] s
         (flagOf "x" after, reminderOf "x" after) @?= (Just None, Just Nothing)
         (flagOf "y" after, reminderOf "y" after) @?= (Just ToBeArchived, Just Nothing)
     ]

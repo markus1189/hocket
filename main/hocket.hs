@@ -203,8 +203,10 @@ import Network.Bookmark.Ui.State
   )
 import Network.Bookmark.Ui.Sync
   ( SyncKind (..),
+    applyArchived,
     applyFetchCompleted,
-    applyStepResult,
+    applyRemindersRemoved,
+    applyRemindersSet,
     formatPOSIXTime,
     planSync,
     spCollection,
@@ -542,7 +544,7 @@ runSetRemindersOp :: BChan HocketEvent -> HocketState -> IO Bool
 runSetRemindersOp es s = do
   es `trigger` setStatusEvt (Just "setting reminders")
   outcome <- performSetReminders (s ^. hsCredentials) (getItemsToBeReminded s)
-  postStep es remindersSetEvt (bimap (view biId . fst) renderClientError outcome)
+  postStep es remindersSetEvt (bimap (first (view biId)) renderClientError outcome)
 
 runRemoveRemindersOp :: BChan HocketEvent -> HocketState -> IO Bool
 runRemoveRemindersOp es s = do
@@ -605,11 +607,11 @@ asyncCommandEventHandler es ExecuteBatch = do
 asyncCommandEventHandler _ ExecuteBatchDone = do
   id %= completeAsyncOp
 asyncCommandEventHandler _ (ArchivedItems outcome) =
-  id %= applyStepResult StepArchive (outcome ^. soOk)
+  id %= applyArchived (outcome ^. soOk)
 asyncCommandEventHandler _ (RemindersSet outcome) =
-  id %= applyStepResult StepSetReminders (outcome ^. soOk)
+  id %= applyRemindersSet (outcome ^. soOk)
 asyncCommandEventHandler _ (RemindersRemoved outcome) =
-  id %= applyStepResult StepRemoveReminders (outcome ^. soOk)
+  id %= applyRemindersRemoved (outcome ^. soOk)
 
 uiCommandEventHandler ::
   BChan HocketEvent ->

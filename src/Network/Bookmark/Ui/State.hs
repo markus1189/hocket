@@ -67,7 +67,6 @@ module Network.Bookmark.Ui.State
     cancelFilter,
     bookmarkSearchText,
     updateItemsWithReminder,
-    updateItemsWithStoredReminderTimes,
     removeReminderFromItems,
     SortByUpdated,
     syncForRender,
@@ -397,20 +396,6 @@ updateItemsWithReminder bids reminderTime s =
           Just (action, item) ->
             let updatedItem = item & biReminder ?~ reminderTime
              in st & hsContents . at bid ?~ (action, updatedItem)
-          Nothing -> st
-    )
-    s
-    bids
-
-updateItemsWithStoredReminderTimes :: [BookmarkItemId] -> HocketState -> HocketState
-updateItemsWithStoredReminderTimes bids s =
-  foldl'
-    ( \st bid ->
-        case st ^. hsContents . at bid of
-          Just (ToBeReminded reminderTime, item) ->
-            let updatedItem = item & biReminder ?~ reminderTime
-             in st & hsContents . at bid ?~ (ToBeReminded reminderTime, updatedItem)
-          Just _ -> st -- Keep non-reminder actions unchanged
           Nothing -> st
     )
     s

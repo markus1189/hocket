@@ -13,7 +13,9 @@ module Network.Bookmark.Ui.Sync
     planSync,
     applyFetched,
     applyFetchCompleted,
-    applyStepResult,
+    applyArchived,
+    applyRemindersSet,
+    applyRemindersRemoved,
     formatPOSIXTime,
   )
 where
@@ -24,6 +26,7 @@ import Control.Monad.State.Strict (execState)
 import Data.Maybe (isJust)
 import Data.Text (Text)
 import qualified Data.Text as T
+import Data.Time (UTCTime)
 import Data.Time.Clock.POSIX (POSIXTime, posixSecondsToUTCTime)
 import Data.Time.Format (defaultTimeLocale, formatTime)
 import Network.Bookmark.Types
@@ -79,8 +82,14 @@ applyFetchCompleted :: Bool -> [BookmarkItemBatch] -> HocketState -> HocketState
 applyFetchCompleted wasAllCollectionsFetch batches s =
   completeAsyncOp $ foldl (\st (BookmarkItemBatch ts bis _) -> applyFetched ts bis wasAllCollectionsFetch st) s batches
 
--- | The local effect of the ids a batch step reported as done.
-applyStepResult :: BatchStep -> [BookmarkItemId] -> HocketState -> HocketState
-applyStepResult StepArchive bis = removeItems bis
-applyStepResult StepSetReminders bis = clearToBeRemindedFlags bis . updateItemsWithStoredReminderTimes bis
-applyStepResult StepRemoveReminders bis = clearFlagsForItems ReminderToBeRemoved bis . removeReminderFromItems bis
+-- | The local effect of what a batch step reported as done.
+applyArchived :: [BookmarkItemId] -> HocketState -> HocketState
+applyArchived = removeItems
+
+-- | Stores the time that was sent, whatever the flag says by now (B3).
+applyRemindersSet :: [(BookmarkItemId, UTCTime)] -> HocketState -> HocketState
+applyRemindersSet sent s =
+  clearToBeRemindedFlags (map fst sent) (foldl (\st (bid, t) -> updateItemsWithReminder [bid] t st) s sent)
+
+applyRemindersRemoved :: [BookmarkItemId] -> HocketState -> HocketState
+applyRemindersRemoved bis = clearFlagsForItems ReminderToBeRemoved bis . removeReminderFromItems bis

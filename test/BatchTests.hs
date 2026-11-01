@@ -17,7 +17,7 @@ import Hedgehog (cover, forAll, property, withTests, (===))
 import Network.Bookmark.Batch
 import Network.Bookmark.Types (BookmarkItemId (..), PendingAction (..))
 import Network.Bookmark.Ui.State
-import Network.Bookmark.Ui.Sync (applyStepResult)
+import Network.Bookmark.Ui.Sync (applyArchived)
 import Network.Raindrop (classify)
 import Test.Tasty
 import Test.Tasty.HUnit
@@ -95,5 +95,5 @@ outcomeProperty =
         isJust (outcome ^. soAborted) === isJust firstGlobal
         let bid = BookmarkItemId . T.pack . show
             flagged = insertItems [item (T.pack (show i)) (-1) | i <- items] emptyState & setAllFlagsToArchive
-            after = applyStepResult StepArchive (map bid ok) flagged
+            after = applyArchived (map bid ok) flagged
         Map.map fst (after ^. hsContents) === Map.fromList [(bid i, ToBeArchived) | i <- items, i `notElem` ok]

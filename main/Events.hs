@@ -38,6 +38,7 @@ where
 
 import Data.Set (Set)
 import Data.Text (Text)
+import Data.Time (UTCTime)
 import Network.Bookmark.Batch (StepOutcome)
 import Network.Bookmark.Types
 import Network.Bookmark.Ui.State (VideoFilterMode)
@@ -56,7 +57,7 @@ data AsyncCommand
   | ExecuteBatch
   | ExecuteBatchDone
   | ArchivedItems !(StepOutcome BookmarkItemId Text)
-  | RemindersSet !(StepOutcome BookmarkItemId Text)
+  | RemindersSet !(StepOutcome (BookmarkItemId, UTCTime) Text)
   | RemindersRemoved !(StepOutcome BookmarkItemId Text)
   | AsyncActionFailed !(Maybe Text)
   deriving (Show, Eq)
@@ -105,7 +106,7 @@ executeBatchDoneEvt = HocketAsync ExecuteBatchDone
 archivedItemsEvt :: StepOutcome BookmarkItemId Text -> HocketEvent
 archivedItemsEvt outcome = HocketAsync (ArchivedItems outcome)
 
-remindersSetEvt :: StepOutcome BookmarkItemId Text -> HocketEvent
+remindersSetEvt :: StepOutcome (BookmarkItemId, UTCTime) Text -> HocketEvent
 remindersSetEvt outcome = HocketAsync (RemindersSet outcome)
 
 remindersRemovedEvt :: StepOutcome BookmarkItemId Text -> HocketEvent
