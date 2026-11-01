@@ -21,7 +21,7 @@ module Hocket.Shell.Agent.Server
 where
 
 import Control.Concurrent (forkFinally, threadDelay)
-import Control.Concurrent.Async (async, withAsync)
+import Control.Concurrent.Async (withAsync)
 import Control.Concurrent.STM
   ( TVar,
     atomically,
@@ -278,36 +278,25 @@ toEvent :: AgentEnv -> WriteCmd -> IO Msg
 toEvent env cmd = Intent . (`toIntent` cmd) <$> aeNow env
 
 -- | Serve the agent socket at this path for the length of the action, which
--- gets the snapshot its loop must publish to. bracket, not finally: a
--- signal while the server starts is held off until it is recorded for
--- cleanup, which removes the socket however the action ends (B7).
+-- gets the snapshot its loop must publish to. On the way out the server
+-- thread is cancelled first, which closes the listening socket and ends
+-- the client-count poster, then the socket is removed (B7). bracket, not
+-- finally: a signal while the server starts is held off until it is
+-- recorded for cleanup. Server failures surface in the TUI's status line
+-- (AgentServerDied) instead of killing the app.
 withAgentServer :: Env -> FilePath -> (TVar AgentSnapshot -> IO a) -> IO a
-withAgentServer env path =
+withAgentServer env path act =
   bracket
-    (startAgentServer env path)
-    (\((path', ours, bound), _) -> cleanupAgentSocket bound ours path')
-    . (. snd)
-
--- | Bind the agent control socket and keep serving it in the background.
--- Server failures surface in the TUI status bar instead of killing the app.
--- The path comes back with what cleanup needs: whether hocket owns its
--- directory, and the socket it bound.
-startAgentServer :: Env -> FilePath -> IO ((FilePath, Bool, BoundSocket), TVar AgentSnapshot)
-startAgentServer env path = do
-  ours <- socketDirIsOurs path
-  bound <- newBoundSocket
-  snapVar <- newTVarIO emptySnapshot
-  let agentEnv =
-        AgentEnv
-          { aeSnapshot = snapVar,
-            aeInject = injectMsg env,
-            aeNow = envNow env
-          }
-  _ <- async $ do
-    r <- try @SomeException (runAgentServer bound path agentEnv)
-    case r of
-      -- Blocking: rare, the main loop drains, and a dropped report would
-      -- leave a dead socket looking alive.
-      Left e -> postMsg env (AgentServerDied (T.pack (show e)))
-      Right () -> pure ()
-  pure ((path, ours, bound), snapVar)
+    ((,,) <$> socketDirIsOurs path <*> newBoundSocket <*> newTVarIO emptySnapshot)
+    (\(ours, bound, _) -> cleanupAgentSocket bound ours path)
+    (\(_, bound, snapVar) -> withAsync (serve bound snapVar) (const (act snapVar)))
+  where
+    serve bound snapVar = do
+      let agentEnv = AgentEnv {aeSnapshot = snapVar, aeInject = injectMsg env, aeNow = envNow env}
+      -- trySync: a cancel is the way out, not a failure to report.
+      r <- trySync (runAgentServer bound path agentEnv)
+      case r of
+        -- Blocking: rare, the main loop drains, and a dropped report would
+        -- leave a dead socket looking alive.
+        Left e -> postMsg env (AgentServerDied (T.pack (show e)))
+        Right () -> pure ()

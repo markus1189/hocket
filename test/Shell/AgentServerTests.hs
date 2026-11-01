@@ -32,11 +32,14 @@ import Hocket.Agent.Snapshot
 import Hocket.App.Model
 import qualified Hocket.App.Msg as I
 import Hocket.Domain.Bookmark
+import Hocket.Port (RaindropPort (..), SystemPort (..))
 import Hocket.Shell.Agent.Client (callAgent, isChannelFullError)
 import Hocket.Shell.Agent.Server (AgentEnv (..), BoundSocket, boundSocketId, cleanupAgentSocket, newBoundSocket, runAgentServer, socketDirIsOurs)
+import qualified Hocket.Shell.Agent.Server as Server
+import Hocket.Shell.Interpret (newEnv)
 import Hocket.Shell.Signals (Terminated (..), exitOnTerminated, unwindOnTermination)
 import Network.Socket (Family (AF_UNIX), SockAddr (SockAddrUnix), SocketType (Stream), close, connect, defaultProtocol, socket, socketToHandle)
-import System.Directory (createDirectory, createDirectoryIfMissing, doesDirectoryExist, doesFileExist, getTemporaryDirectory, pathIsSymbolicLink, removeDirectoryRecursive, removeFile)
+import System.Directory (createDirectory, createDirectoryIfMissing, doesDirectoryExist, doesFileExist, getTemporaryDirectory, listDirectory, pathIsSymbolicLink, removeDirectoryRecursive, removeFile)
 import System.Exit (ExitCode (..))
 import System.FilePath ((</>))
 import System.IO
@@ -243,7 +246,21 @@ agentServerIntegrationTests :: TestTree
 agentServerIntegrationTests =
   testGroup
     "Agent server (socket)"
-    [ testCase "get_state returns the snapshot view with a version" $
+    [ testCase "the server leaves no file descriptor behind when it stops" $ do
+        env <- newEnv (RaindropPort (\_ -> fail "no Raindrop here")) (SystemPort (\_ _ -> pure ()) (\_ -> pure ())) (pure testNow)
+        -- One start and stop, with a call once it is up so it has bound.
+        let cycleOnce = withSystemTempDirectory "hocket-fd" $ \dir -> do
+              let path = dir </> "sock" </> "s.sock"
+              up <- Server.withAgentServer env path (const (timeout 5000000 (untilUp path)))
+              maybe (assertFailure "the agent socket did not come up within 5 s") pure up
+            untilUp path = callAgent path (ARead CmdGetState) >>= either (const (threadDelay 10000 >> untilUp path)) (const (pure ()))
+            fds = length <$> listDirectory "/proc/self/fd"
+        cycleOnce
+        before <- fds
+        mapM_ (const cycleOnce) [1 .. 20 :: Int]
+        after <- fds
+        assertBool ("open file descriptors went from " <> show before <> " to " <> show after <> " over 20 cycles") (after - before <= 2),
+      testCase "get_state returns the snapshot view with a version" $
         withAgentServer $ \snapVar events path -> do
           -- seed the snapshot the test owns; the server reads from the same TVar
           atomically (modifyTVar' snapVar (const (buildTestSnapshot 7)))
