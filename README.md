@@ -172,7 +172,7 @@ hocket add https://example.com --collection 12345 --tag rust --tag cli
 
 #### Item Actions
 - `Space` - Open selected item in browser
-- `Enter` - Open item in browser AND mark for archiving
+- `Enter` - Open item in browser and toggle its archive flag: an unflagged item is marked for archiving, a flagged one (archive or reminder) is cleared
 - `e` - Open selected item's edit page in Raindrop.io
 - `y` - Copy selected item's URL to the clipboard (wl-copy on Wayland, xclip on X11) and flash `Copied: <url>` in the status bar
 - `a` - Flag selected item for archiving
