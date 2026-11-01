@@ -15,6 +15,7 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 - `cabal build` - Build the project
 - `cabal test` - Run the test suite
 - `cabal build --ghc-options="-Wall -Werror"` - Development build with warnings
+- After HLS/hie-bios sessions in the checkout, `cabal test` once failed to link (undefined references from the test objects into `lib:core`) while a clean `nix build` was green; `rm -r dist-newstyle` fixed it
 
 ### Running the Application
 - `hocket tui` - Start the terminal user interface (requires config.dhall)
