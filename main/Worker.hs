@@ -6,52 +6,99 @@
 -- returned, so the posting rules can be tested without IO.
 module Worker
   ( fetchResultEvents,
-    stepEvents,
-    runWhile,
+    postOutcome,
+    runSteps,
+    runBatch,
+    batchStatus,
+    runCalls,
+    guardStep,
+    describeError,
+    renderClientError,
+    errorMessageFromException,
     trySync,
     exceptionMessage,
   )
 where
 
-import Control.Exception (SomeAsyncException, SomeException (..), displayException, fromException, throwIO, try)
-import Control.Lens ((^.))
-import Control.Monad (when)
+import Control.Applicative ((<|>))
+import Control.Exception (SomeAsyncException, SomeException (..), displayException, fromException)
+import Control.Lens (view, (^.))
+import Control.Monad.Catch (MonadCatch, throwM, try)
+import Data.Bifunctor (first, second)
+import qualified Data.CaseInsensitive as CI
+import Data.List (find, nub)
+import Data.Maybe (fromMaybe, isJust, isNothing, listToMaybe, mapMaybe)
 import Data.Text (Text)
 import qualified Data.Text as T
+import qualified Data.Text.Encoding as T
 import Events
 import Network.Bookmark.Batch
 import Network.Bookmark.Types (BookmarkItemBatch)
+import Network.Bookmark.Ui.State (BatchStep (..))
+import Network.Raindrop (classify)
+import Servant.Client.Core (ClientError (..), ResponseF (..))
 
 -- | The events a finished fetch posts, given the rendered error or the pages.
 fetchResultEvents :: Bool -> Either (Maybe Text) [BookmarkItemBatch] -> [HocketEvent]
 fetchResultEvents _ (Left err) = [fetchFailedEvt err]
 fetchResultEvents isUpdateFetch (Right batches) = [setStatusEvt Nothing, fetchCompletedEvt isUpdateFetch batches]
 
--- | The events a finished batch step posts: its outcome first, so the
--- successes are recorded even when the step was aborted, then the status.
-stepEvents :: (StepOutcome a Text -> HocketEvent) -> StepOutcome a Text -> [HocketEvent]
-stepEvents done outcome = done outcome : status
+-- | Post a finished step's outcome; what is left for the batch status.
+postOutcome :: (Monad m) => (HocketEvent -> m ()) -> (StepOutcome a Text -> HocketEvent) -> StepOutcome a Text -> m (StepOutcome () Text)
+postOutcome post done outcome = first (const ()) outcome <$ post (done outcome)
+
+-- | Run the planned steps in order and stop after one that aborted; the
+-- outcomes of the steps that ran.
+runSteps :: (Monad m) => (step -> m (StepOutcome () e)) -> [step] -> m [(step, StepOutcome () e)]
+runSteps _ [] = pure []
+runSteps run (step : rest) = do
+  outcome <- run step
+  if isJust (outcome ^. soAborted)
+    then pure [(step, outcome)]
+    else ((step, outcome) :) <$> runSteps run rest
+
+-- | The batch worker without its IO: the steps post their outcomes, then one
+-- status sums up the batch. The caller posts ExecuteBatchDone afterwards,
+-- the only event that frees the batch slot.
+runBatch :: (Monad m) => (HocketEvent -> m ()) -> (BatchStep -> m (StepOutcome () Text)) -> [BatchStep] -> m ()
+runBatch post run steps = runSteps run steps >>= post . setStatusEvt . batchStatus steps
+
+-- | The D6 status line, e.g.
+-- @archive ok · reminders 3/5 (2 failed: 404) · remove-reminders skipped: offline@;
+-- 'Nothing' when every step went through cleanly.
+batchStatus :: [BatchStep] -> [(BatchStep, StepOutcome () Text)] -> Maybe Text
+batchStatus planned ran
+  | all (clean . snd) ran = Nothing
+  | otherwise = Just (T.intercalate " · " (map ranText ran <> map skippedText (drop (length ran) planned)))
   where
-    status = case (outcome ^. soAborted, outcome ^. soFailed) of
-      (Just err, _) -> [asyncActionFailedEvt (Just err)]
-      (Nothing, []) -> [setStatusEvt Nothing]
-      (Nothing, (_, failure) : _) -> [setStatusEvt (Just ("failed: " <> failureText failure))]
+    clean o = null (o ^. soFailed) && isNothing (o ^. soAborted)
+    abortReason = fromMaybe "" (listToMaybe (mapMaybe (view soAborted . snd) ran))
+    skippedText step = stepName step <> " skipped: " <> abortReason
+    ranText (step, o)
+      | clean o = stepName step <> " ok"
+      | otherwise = stepName step <> " " <> count (o ^. soOk) <> "/" <> count (total o) <> " (" <> T.intercalate "; " (problems o) <> ")"
+    total o = (o ^. soOk) <> map fst (o ^. soFailed) <> (o ^. soSkipped)
+    problems o =
+      [count fs <> " failed: " <> T.intercalate ", " (nub (map (failureText . snd) fs)) | let fs = o ^. soFailed, not (null fs)]
+        <> ["aborted: " <> e | Just e <- [o ^. soAborted]]
+    count :: [x] -> Text
+    count = T.pack . show . length
     failureText ResultFalse = "result: false"
     failureText (CallFailed err) = err
 
--- | Run steps in order until one answers 'False' (aborted); later ones are
--- not run.
-runWhile :: (Monad m) => [m Bool] -> m ()
-runWhile [] = pure ()
-runWhile (step : rest) = step >>= \continue -> when continue (runWhile rest)
+stepName :: BatchStep -> Text
+stepName = \case
+  StepArchive -> "archive"
+  StepSetReminders -> "reminders"
+  StepRemoveReminders -> "remove-reminders"
 
 -- | Catch what the action itself threw, so a worker can still post its
 -- terminal message; asynchronous exceptions (a cancel) are rethrown.
-trySync :: IO a -> IO (Either SomeException a)
+trySync :: (MonadCatch m) => m a -> m (Either SomeException a)
 trySync act =
   try act >>= \case
     Left e -> case fromException e of
-      Just (_ :: SomeAsyncException) -> throwIO e
+      Just (_ :: SomeAsyncException) -> throwM e
       Nothing -> pure (Left e)
     Right a -> pure (Right a)
 
@@ -59,3 +106,28 @@ trySync act =
 -- 'SomeException' appends a multi-line backtrace, so render the inner one.
 exceptionMessage :: SomeException -> Text
 exceptionMessage (SomeException e) = T.pack (displayException e)
+
+-- | One call per item through 'runItems'. A 'ClientError' is scoped by
+-- 'classify'; any other synchronous exception is global, so the step stops
+-- there but keeps what already succeeded.
+runCalls :: (MonadCatch m) => (a -> m Bool) -> [a] -> m (StepOutcome a Text)
+runCalls call = fmap (second snd) . runItems fst (fmap (first describeError) . trySync . call)
+
+-- | A whole step that threw outside its calls (e.g. setting up the log)
+-- becomes a global abort before the first call.
+guardStep :: [a] -> IO (StepOutcome a Text) -> IO (StepOutcome a Text)
+guardStep items act = either (abortedBefore items . exceptionMessage) id <$> trySync act
+
+describeError :: SomeException -> (ErrorScope, Text)
+describeError e = maybe (Global, exceptionMessage e) (\ce -> (classify ce, renderClientError ce)) (fromException e)
+
+renderClientError :: ClientError -> Text
+renderClientError = fromMaybe "<no err>" . errorMessageFromException
+
+errorMessageFromException :: ClientError -> Maybe Text
+errorMessageFromException (FailureResponse _ resp) = xError <|> code
+  where
+    xError = T.decodeUtf8 . snd <$> find (\(k, _) -> k == CI.mk "x-error") (responseHeaders resp)
+    code = Just . T.pack $ "Got status: " <> show (responseStatusCode resp)
+errorMessageFromException (DecodeFailure msg _) = Just ("Unexpected response from Raindrop: " <> msg)
+errorMessageFromException e = Just . T.pack $ show e

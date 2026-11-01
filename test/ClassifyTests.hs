@@ -1,6 +1,6 @@
 {-# LANGUAGE OverloadedStrings #-}
 
-module ClassifyTests (classifyTests) where
+module ClassifyTests (classifyTests, failure) where
 
 import Control.Exception (toException)
 import Data.Bifunctor (bimap)

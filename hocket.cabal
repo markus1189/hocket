@@ -75,6 +75,7 @@ executable hocket
                      , optparse-applicative
                      , process
                      , servant-client
+                     , servant-client-core
                      , stm
                      , text
                      , text-zipper
@@ -106,8 +107,10 @@ test-suite test
                      , async
                      , brick
                      , bytestring
+                     , case-insensitive
                      , containers
                      , directory
+                     , exceptions
                      , filepath
                      , hedgehog
                      , hocket == 0.2.0.0

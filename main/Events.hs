@@ -10,7 +10,6 @@ module Events
     archivedItemsEvt,
     remindersSetEvt,
     remindersRemovedEvt,
-    asyncActionFailedEvt,
     shiftItemEvt,
     archiveItemEvt,
     shiftItemReminderEvt,
@@ -59,7 +58,6 @@ data AsyncCommand
   | ArchivedItems !(StepOutcome BookmarkItemId Text)
   | RemindersSet !(StepOutcome (BookmarkItemId, UTCTime) Text)
   | RemindersRemoved !(StepOutcome BookmarkItemId Text)
-  | AsyncActionFailed !(Maybe Text)
   deriving (Show, Eq)
 
 data UiCommand
@@ -111,9 +109,6 @@ remindersSetEvt outcome = HocketAsync (RemindersSet outcome)
 
 remindersRemovedEvt :: StepOutcome BookmarkItemId Text -> HocketEvent
 remindersRemovedEvt outcome = HocketAsync (RemindersRemoved outcome)
-
-asyncActionFailedEvt :: Maybe Text -> HocketEvent
-asyncActionFailedEvt maybeMsg = HocketAsync (AsyncActionFailed maybeMsg)
 
 shiftItemEvt :: BookmarkItemId -> HocketEvent
 shiftItemEvt bid = HocketUi (ShiftItem bid)

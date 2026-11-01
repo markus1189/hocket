@@ -1,3 +1,4 @@
+{-# LANGUAGE FlexibleContexts #-}
 {-# LANGUAGE LambdaCase #-}
 {-# LANGUAGE OverloadedStrings #-}
 {-# LANGUAGE TypeApplications #-}
@@ -5,16 +6,19 @@
 module WorkerTests (workerTests) where
 
 import CharacterizationTests (emptyState, item)
+import ClassifyTests (failure)
 import Control.Exception (AsyncException (ThreadKilled), throwIO, try)
-import Control.Lens ((^.))
-import Control.Monad.State.Strict (execState, modify)
+import Control.Lens ((&), (.~), (^.))
+import Control.Monad.State.Strict (execState, modify, runState)
+import Data.Bifunctor (first)
 import Data.Functor.Identity (runIdentity)
 import qualified Data.Map as Map
 import Data.Maybe (fromMaybe)
 import qualified Data.Text as T
+import Data.Time (UTCTime)
 import Events
 import Network.Bookmark.Batch
-import Network.Bookmark.Types (BookmarkItemBatch (..), BookmarkItemId (..))
+import Network.Bookmark.Types (BookmarkItemBatch (..), BookmarkItemId (..), PendingAction (..))
 import Network.Bookmark.Ui.State
 import Network.Bookmark.Ui.Sync
 import Test.Tasty
@@ -22,7 +26,7 @@ import Test.Tasty.HUnit
 import Worker
 
 workerTests :: TestTree
-workerTests = testGroup "async workers" [fetchEmissionTests, fetchSlotTests, stepEmissionTests]
+workerTests = testGroup "async workers" [fetchEmissionTests, fetchSlotTests, stepEmissionTests, batchSlotTests, stepExceptionTests]
 
 page1, page2 :: BookmarkItemBatch
 page1 = BookmarkItemBatch 10 [item "a" (-1)] 1
@@ -79,26 +83,109 @@ fetchSlotTests =
     ]
 
 -- | A step outcome from a script; errors starting with "5" are global.
-outcomeOf :: [(T.Text, Either T.Text Bool)] -> StepOutcome BookmarkItemId T.Text
-outcomeOf script = runIdentity (runItems scope (pure . flip lookupScript script) (map (BookmarkItemId . fst) script))
+scriptedOutcome :: (Eq a) => [(a, Either T.Text Bool)] -> StepOutcome a T.Text
+scriptedOutcome script = runIdentity (runItems scope (\x -> pure (fromMaybe (Right True) (lookup x script))) (map fst script))
   where
     scope e = if "5" `T.isPrefixOf` e then Global else ItemScoped
-    lookupScript (BookmarkItemId i) = fromMaybe (Right True) . lookup i
+
+outcomeOf :: [(T.Text, Either T.Text Bool)] -> StepOutcome BookmarkItemId T.Text
+outcomeOf script = scriptedOutcome [(BookmarkItemId i, r) | (i, r) <- script]
 
 stepEmissionTests :: TestTree
 stepEmissionTests =
   testGroup
-    "batch step emission"
-    [ testCase "a clean step posts its outcome and clears the status" $
-        let o = outcomeOf [("a", Right True)] in stepEvents archivedItemsEvt o @?= [archivedItemsEvt o, setStatusEvt Nothing],
-      testCase "an aborted step still posts its successes first (B5)" $ do
-        let o = outcomeOf [("a", Right True), ("b", Left "503"), ("c", Right True)]
-        o ^. soOk @?= [BookmarkItemId "a"]
-        stepEvents archivedItemsEvt o @?= [archivedItemsEvt o, asyncActionFailedEvt (Just "503")],
-      testCase "an item-scoped failure is named in the status" $ do
-        stepEvents archivedItemsEvt (outcomeOf [("a", Left "404")]) !! 1 @?= setStatusEvt (Just "failed: 404")
-        stepEvents archivedItemsEvt (outcomeOf [("a", Right False)]) !! 1 @?= setStatusEvt (Just "failed: result: false"),
-      testCase "runWhile stops after the first step that answers False" $
-        execState (runWhile [modify (<> [1 :: Int]) >> pure True, modify (<> [2]) >> pure False, modify (<> [3]) >> pure True]) []
-          @?= [1, 2]
+    "batch steps"
+    [ testCase "runSteps stops after the first aborted step" $ do
+        let run step = modify (<> [step]) >> pure (first (const ()) (outcomeOf [("x", if step == 2 then Left "503" else Right True)]))
+            (ran, called) = runState (runSteps run [1 :: Int, 2, 3]) []
+        (map fst ran, called) @?= ([1, 2], [1, 2]),
+      testCase "batchStatus names every failure, the abort and what was skipped" $
+        batchStatus
+          [StepArchive, StepSetReminders, StepRemoveReminders]
+          [ (StepArchive, erase (outcomeOf [("a", Right True)])),
+            (StepSetReminders, erase (outcomeOf [("r1", Left "404"), ("r2", Right False), ("r3", Right True), ("r4", Left "503"), ("r5", Right True)]))
+          ]
+          @?= Just "archive ok · reminders 1/5 (2 failed: 404, result: false; aborted: 503) · remove-reminders skipped: 503",
+      testCase "batchStatus is Nothing when every step was clean" $
+        batchStatus [StepArchive] [(StepArchive, erase (outcomeOf [("a", Right True)]))] @?= Nothing
     ]
+  where
+    erase = first (const ())
+
+-- | Items for one archive and one set-reminders bucket.
+batchState :: HocketState
+batchState =
+  insertItems [item "a" (-1), item "r" (-1)] emptyState
+    & setPendingAction (BookmarkItemId "a") ToBeArchived
+    & setPendingAction (BookmarkItemId "r") (ToBeReminded batchTime)
+
+batchTime :: UTCTime
+batchTime = read "2026-11-02 06:00:00 UTC"
+
+-- | Deliver a batch's events the way the handlers apply them, from an
+-- acquired batch slot; the slot and the status after each event.
+batchTrace :: [HocketEvent] -> [(Bool, Maybe T.Text)]
+batchTrace = map (\s -> (asyncOpRunning s, s ^. hsStatus)) . drop 1 . scanl deliver acquired
+  where
+    Just acquired = tryAcquireAsyncOp OpExecuteBatch batchState
+    deliver s = \case
+      HocketAsync (ArchivedItems o) -> applyArchived (o ^. soOk) s
+      HocketAsync (RemindersSet o) -> applyRemindersSet (o ^. soOk) s
+      HocketAsync (RemindersRemoved o) -> applyRemindersRemoved (o ^. soOk) s
+      HocketAsync ExecuteBatchDone -> completeAsyncOp s
+      HocketUi (SetStatus t) -> s & hsStatus .~ t
+      other -> error ("unexpected event from a batch: " <> show other)
+
+-- | What the batch worker posts for these step results, ending with the
+-- 'finally'-guarded ExecuteBatchDone.
+batchEvents :: StepOutcome BookmarkItemId T.Text -> StepOutcome (BookmarkItemId, UTCTime) T.Text -> [HocketEvent]
+batchEvents archive reminders = execState (runBatch post run [StepArchive, StepSetReminders]) [] <> [executeBatchDoneEvt]
+  where
+    post e = modify (<> [e])
+    run = \case
+      StepArchive -> postOutcome post archivedItemsEvt archive
+      StepSetReminders -> postOutcome post remindersSetEvt reminders
+      StepRemoveReminders -> error "not planned"
+
+batchSlotTests :: TestTree
+batchSlotTests =
+  testGroup
+    "batch slot and status (B2)"
+    [ testCase "an item-scoped archive failure: slot held until done, status names both steps" $ do
+        let trace = batchTrace (batchEvents (outcomeOf [("a", Left "400")]) remindersOk)
+        map fst trace @?= freedByLastOnly (map fst trace)
+        snd (last trace) @?= Just "archive 0/1 (1 failed: 400) · reminders ok",
+      testCase "a global archive failure: slot held until done, reminders reported skipped" $ do
+        let trace = batchTrace (batchEvents (outcomeOf [("a", Left "503")]) remindersOk)
+        map fst trace @?= freedByLastOnly (map fst trace)
+        snd (last trace) @?= Just "archive 0/1 (aborted: 503) · reminders skipped: 503",
+      testCase "a fully successful batch clears the status" $
+        snd (last (batchTrace (batchEvents (outcomeOf [("a", Right True)]) remindersOk))) @?= Nothing
+    ]
+  where
+    remindersOk = scriptedOutcome [((BookmarkItemId "r", batchTime), Right True)]
+
+-- | A call that answers ok, except for the items it fails with an exception.
+throwingOn :: [(Int, IO Bool)] -> Int -> IO Bool
+throwingOn failures i = fromMaybe (pure True) (lookup i failures)
+
+stepExceptionTests :: TestTree
+stepExceptionTests =
+  testGroup
+    "exceptions in a batch step"
+    [ testCase "a non-ClientError mid-step aborts it and keeps the successes so far" $ do
+        o <- runCalls (throwingOn [(2, throwIO (userError "disk full"))]) [1, 2, 3]
+        (o ^. soOk, o ^. soSkipped, o ^. soAborted) @?= ([1], [2, 3], Just "user error (disk full)"),
+      testCase "a ClientError is scoped by classify: a 404 fails only that item" $ do
+        o <- runCalls (throwingOn [(2, throwIO (failure 404))]) [1, 2, 3]
+        (o ^. soOk, map fst (o ^. soFailed), o ^. soAborted) @?= ([1, 3], [2], Nothing),
+      testCase "a step that throws before its first call skips every item" $ do
+        o <- guardStep [1 :: Int, 2] (throwIO (userError "no log dir"))
+        (o ^. soOk, o ^. soSkipped, o ^. soAborted) @?= ([], [1, 2], Just "user error (no log dir)"),
+      testCase "the batch reports such a step as aborted, holds the slot, and skips the rest" $ do
+        let trace = batchTrace (batchEvents (abortedBefore [BookmarkItemId "a"] "user error (no log dir)") remindersOk)
+        map fst trace @?= freedByLastOnly (map fst trace)
+        snd (last trace) @?= Just "archive 0/1 (aborted: user error (no log dir)) · reminders skipped: user error (no log dir)"
+    ]
+  where
+    remindersOk = scriptedOutcome [((BookmarkItemId "r", batchTime), Right True)]

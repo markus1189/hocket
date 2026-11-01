@@ -64,8 +64,7 @@ import qualified Control.Monad.Catch as Catch
 import Control.Monad.IO.Class (liftIO)
 import Control.Monad.Logger (LoggingT, logErrorN, logInfoN, runFileLoggingT, runStdoutLoggingT)
 import Control.Monad.Loops (unfoldrM)
-import Data.Bifunctor (bimap, first, second)
-import qualified Data.CaseInsensitive as CI
+import Data.Bifunctor (first)
 import Data.Foldable (for_)
 #if MIN_VERSION_base(4,20,0)
 import Data.List (find, findIndex, isPrefixOf)
@@ -73,10 +72,9 @@ import Data.List (find, findIndex, isPrefixOf)
 import Data.List (find, findIndex, foldl', isPrefixOf)
 #endif
 import qualified Data.Map as Map
-import Data.Maybe (fromMaybe, isJust, isNothing)
+import Data.Maybe (fromMaybe, isJust)
 import Data.Text (Text)
 import qualified Data.Text as T
-import qualified Data.Text.Encoding as T
 import Data.Text.Zipper.Generic.Words (deletePrevWord)
 import Data.Time (UTCTime, addDays, getCurrentTime)
 import Data.Time.Clock.POSIX (posixSecondsToUTCTime, utcTimeToPOSIXSeconds)
@@ -128,7 +126,7 @@ import Network.Bookmark.Agent.Protocol
     WriteCmd (..),
   )
 import Network.Bookmark.Agent.Snapshot (AgentSnapshot, asVersion, emptySnapshot, takeSnapshot)
-import Network.Bookmark.Batch (StepOutcome, concatOutcome, runItems, soAborted, soOk)
+import Network.Bookmark.Batch (StepOutcome, concatOutcome, soOk)
 import Network.Bookmark.Types
   ( BookmarkCredentials,
     BookmarkItem,
@@ -214,7 +212,7 @@ import Network.Bookmark.Ui.Sync
     spSearch,
   )
 import Network.Bookmark.Ui.Widgets (sanitizeForDisplay)
-import Network.Raindrop (classify, raindrop)
+import Network.Raindrop (raindrop)
 import qualified Network.Raindrop as R
 import Network.URI
   ( URI (uriAuthority, uriPath, uriQuery),
@@ -252,7 +250,7 @@ import Options.Applicative
     (<**>),
   )
 import qualified Options.Applicative as Opt
-import Servant.Client (ClientError (..), ResponseF (..))
+import Servant.Client (ClientError (..))
 import System.Directory (XdgDirectory (..), createDirectoryIfMissing, doesFileExist, getXdgDirectory, removeFile, removePathForcibly)
 import System.Environment (lookupEnv)
 import System.Exit (ExitCode (..), exitFailure)
@@ -265,7 +263,7 @@ import System.Process
     waitForProcess,
   )
 import System.Process.Internals (StdStream (CreatePipe))
-import Worker (exceptionMessage, fetchResultEvents, runWhile, stepEvents, trySync)
+import Worker (errorMessageFromException, exceptionMessage, fetchResultEvents, guardStep, postOutcome, runBatch, runCalls, trySync)
 
 makeLensesFor [("std_in", "stdIn"), ("std_err", "stdErr"), ("std_out", "stdOut")] ''CreateProcess
 
@@ -532,45 +530,41 @@ nextDayAt7AM = do
       tomorrowAt7AM = LocalTime tomorrow sevenAM
   pure $ localTimeToUTC tz tomorrowAt7AM
 
--- The three 'X' sub-op bodies, run sequentially by 'runBatchOp'. Each answers
--- whether the batch may go on, i.e. whether it ended without a global error.
-runArchiveOp :: BChan HocketEvent -> HocketState -> IO Bool
+-- The three 'X' sub-op bodies, run sequentially by 'runBatchOp'.
+runArchiveOp :: BChan HocketEvent -> HocketState -> IO (StepOutcome () Text)
 runArchiveOp es s = do
   es `trigger` setStatusEvt (Just "archiving")
-  outcome <- performArchive (s ^. hsCredentials) (getItemsWithPendingAction ToBeArchived s)
-  postStep es archivedItemsEvt (second renderClientError outcome)
+  let items = getItemsWithPendingAction ToBeArchived s
+  outcome <- guardStep (map (view biId) items) (performArchive (s ^. hsCredentials) items)
+  postOutcome (trigger es) archivedItemsEvt outcome
 
-runSetRemindersOp :: BChan HocketEvent -> HocketState -> IO Bool
+runSetRemindersOp :: BChan HocketEvent -> HocketState -> IO (StepOutcome () Text)
 runSetRemindersOp es s = do
   es `trigger` setStatusEvt (Just "setting reminders")
-  outcome <- performSetReminders (s ^. hsCredentials) (getItemsToBeReminded s)
-  postStep es remindersSetEvt (bimap (first (view biId)) renderClientError outcome)
+  let items = getItemsToBeReminded s
+  outcome <- guardStep items (performSetReminders (s ^. hsCredentials) items)
+  postOutcome (trigger es) remindersSetEvt (first (first (view biId)) outcome)
 
-runRemoveRemindersOp :: BChan HocketEvent -> HocketState -> IO Bool
+runRemoveRemindersOp :: BChan HocketEvent -> HocketState -> IO (StepOutcome () Text)
 runRemoveRemindersOp es s = do
   es `trigger` setStatusEvt (Just "removing reminders")
-  outcome <- performRemoveReminders (s ^. hsCredentials) (getItemsWithPendingAction ReminderToBeRemoved s)
-  postStep es remindersRemovedEvt (bimap (view biId) renderClientError outcome)
-
-postStep :: BChan HocketEvent -> (StepOutcome a Text -> HocketEvent) -> StepOutcome a Text -> IO Bool
-postStep es done outcome = do
-  for_ (stepEvents done outcome) (trigger es)
-  pure (isNothing (outcome ^. soAborted))
+  let items = getItemsWithPendingAction ReminderToBeRemoved s
+  outcome <- guardStep items (performRemoveReminders (s ^. hsCredentials) items)
+  postOutcome (trigger es) remindersRemovedEvt (first (view biId) outcome)
 
 -- Run every bucket that has pending work, in order, in one async thread. The
 -- slot is held for the whole batch and freed exactly once via
 -- 'executeBatchDoneEvt', guarded by 'finally' so a sub-op failure can't leak it.
 runBatchOp :: BChan HocketEvent -> HocketState -> IO ()
 runBatchOp es s =
-  runWhile
-    ( map
-        ( \case
-            StepArchive -> runArchiveOp es s
-            StepSetReminders -> runSetRemindersOp es s
-            StepRemoveReminders -> runRemoveRemindersOp es s
-        )
-        (batchStepsWithWork s)
+  runBatch
+    (trigger es)
+    ( \case
+        StepArchive -> runArchiveOp es s
+        StepSetReminders -> runSetRemindersOp es s
+        StepRemoveReminders -> runRemoveRemindersOp es s
     )
+    (batchStepsWithWork s)
     `finally` (es `trigger` executeBatchDoneEvt)
 
 asyncCommandEventHandler ::
@@ -592,9 +586,6 @@ asyncCommandEventHandler es FetchItems =
 asyncCommandEventHandler _ (FetchCompleted wasAllCollectionsFetch batches) =
   id %= applyFetchCompleted wasAllCollectionsFetch batches
 asyncCommandEventHandler es (FetchFailed err) = do
-  id %= completeAsyncOp
-  liftIO (es `trigger` setStatusEvt (Just ("failed" <> maybe "<no err>" (": " <>) err)))
-asyncCommandEventHandler es (AsyncActionFailed err) = do
   id %= completeAsyncOp
   liftIO (es `trigger` setStatusEvt (Just ("failed" <> maybe "<no err>" (": " <>) err)))
 asyncCommandEventHandler es ExecuteBatch = do
@@ -1071,18 +1062,18 @@ retrieveItems cred searchParam collectionId = do
         0
 
 -- | One batch call, so its outcome applies to every id.
-performArchive :: BookmarkCredentials -> [BookmarkItem] -> IO (StepOutcome BookmarkItemId ClientError)
+performArchive :: BookmarkCredentials -> [BookmarkItem] -> IO (StepOutcome BookmarkItemId Text)
 performArchive cred items =
   runTuiLoggingT $
-    concatOutcome <$> runItems classify (Catch.try . raindrop cred . BatchArchiveBookmarks) [map (view biId) items]
+    concatOutcome <$> runCalls (raindrop cred . BatchArchiveBookmarks) [map (view biId) items]
 
-performSetReminders :: BookmarkCredentials -> [(BookmarkItem, UTCTime)] -> IO (StepOutcome (BookmarkItem, UTCTime) ClientError)
+performSetReminders :: BookmarkCredentials -> [(BookmarkItem, UTCTime)] -> IO (StepOutcome (BookmarkItem, UTCTime) Text)
 performSetReminders cred =
-  runTuiLoggingT . runItems classify (\(item, reminderTime) -> Catch.try (raindrop cred (SetReminder (view biId item) reminderTime)))
+  runTuiLoggingT . runCalls (\(item, reminderTime) -> raindrop cred (SetReminder (view biId item) reminderTime))
 
-performRemoveReminders :: BookmarkCredentials -> [BookmarkItem] -> IO (StepOutcome BookmarkItem ClientError)
+performRemoveReminders :: BookmarkCredentials -> [BookmarkItem] -> IO (StepOutcome BookmarkItem Text)
 performRemoveReminders cred =
-  runTuiLoggingT . runItems classify (Catch.try . raindrop cred . RemoveReminder . view biId)
+  runTuiLoggingT . runCalls (raindrop cred . RemoveReminder . view biId)
 
 -- | vty owns the terminal while the TUI runs, so stdout logging would draw over it.
 runTuiLoggingT :: LoggingT IO a -> IO a
@@ -1209,14 +1200,3 @@ runClipboardCmd cmd args text = do
   exitCode <- waitForProcess ph
   unless (exitCode == ExitSuccess) $
     ioError (userError (cmd <> " exited with code " <> show exitCode))
-
-renderClientError :: ClientError -> Text
-renderClientError = fromMaybe "<no err>" . errorMessageFromException
-
-errorMessageFromException :: ClientError -> Maybe Text
-errorMessageFromException (FailureResponse _ resp) = xError <|> code
-  where
-    xError = T.decodeUtf8 . snd <$> find (\(k, _) -> k == CI.mk "x-error") (responseHeaders resp)
-    code = Just . T.pack $ "Got status: " <> show (responseStatusCode resp)
-errorMessageFromException (DecodeFailure msg _) = Just ("Unexpected response from Raindrop: " <> msg)
-errorMessageFromException e = Just . T.pack $ show e
