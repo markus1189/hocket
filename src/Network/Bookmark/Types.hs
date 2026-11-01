@@ -5,15 +5,12 @@
 {-# LANGUAGE TemplateHaskell #-}
 
 module Network.Bookmark.Types
-  ( RaindropToken (..),
-    _RaindropToken,
-    BookmarkItemId (..),
+  ( BookmarkItemId (..),
     _BookmarkItemId,
     RaindropCollectionId (..),
     _RaindropCollectionId,
     BookmarkItem (..),
     BookmarkRequest (..),
-    BookmarkCredentials (..),
     URL (..),
     BookmarkItemBatch (..),
     PendingAction (..),
@@ -36,8 +33,6 @@ module Network.Bookmark.Types
     batchTS,
     batchItems,
     batchTotal,
-    raindropToken,
-    archiveCollectionId,
   )
 where
 
@@ -51,13 +46,8 @@ import qualified Data.Text as Text
 import Data.Time (UTCTime)
 import Data.Time.Clock.POSIX (POSIXTime)
 import Data.Time.Format.ISO8601 (iso8601ParseM, iso8601Show)
-import Dhall (FromDhall)
 import GHC.Generics
 import Numeric.Natural (Natural)
-
-newtype RaindropToken = RaindropToken Text deriving (Show, Eq, FromDhall, Generic)
-
-makePrisms ''RaindropToken
 
 newtype BookmarkItemId = BookmarkItemId Text deriving (Show, Eq, Ord)
 
@@ -70,16 +60,6 @@ makePrisms ''RaindropCollectionId
 newtype URL = URL String deriving (Show, Eq, Generic)
 
 data PendingAction = None | ToBeArchived | ToBeReminded UTCTime | ReminderToBeRemoved deriving (Show, Eq, Ord)
-
-data BookmarkCredentials = BookmarkCredentials
-  { _raindropToken :: RaindropToken,
-    _archiveCollectionId :: Natural
-  }
-  deriving (Generic)
-
-makeLenses ''BookmarkCredentials
-
-instance FromDhall BookmarkCredentials
 
 data BookmarkItem = BookmarkItem
   { _biId :: !BookmarkItemId,

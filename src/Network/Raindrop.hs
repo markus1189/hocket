@@ -18,8 +18,9 @@ import Control.Retry (RetryPolicyM, RetryStatus (rsIterNumber), exponentialBacko
 import Data.Maybe (fromMaybe)
 import qualified Data.Text as T
 import Network.Bookmark.Batch (ErrorScope (..))
+import Network.Bookmark.Credentials (BookmarkCredentials, RaindropToken (..), archiveCollectionId, raindropToken)
 import Network.Bookmark.Port (RaindropPort (..))
-import Network.Bookmark.Types (BookmarkCredentials, BookmarkItemId (..), BookmarkRequest (..), RaindropCollectionId (RaindropCollectionId), RaindropToken (..), archiveCollectionId, raindropToken, _BookmarkItemId)
+import Network.Bookmark.Types (BookmarkItemId (..), BookmarkRequest (..), RaindropCollectionId (RaindropCollectionId), _BookmarkItemId)
 import Network.HTTP.Types.Status (statusCode)
 import Network.Raindrop.Api
 import Servant.Client (ClientError (..), ClientM, ResponseF (responseStatusCode), runClientM)
