@@ -69,6 +69,7 @@ import PlanTests (planTests)
 import Properties (propertyTests)
 import ReminderTests (reminderTests)
 import Signals (Terminated (..), exitOnTerminated, unwindOnTermination)
+import SnapshotGoldenTests (snapshotGoldenTests)
 import System.Directory (createDirectory, createDirectoryIfMissing, doesDirectoryExist, doesFileExist, getTemporaryDirectory, pathIsSymbolicLink, removeDirectoryRecursive, removeFile)
 import System.Exit (ExitCode (..))
 import System.FilePath ((</>))
@@ -97,7 +98,7 @@ import WorkerTests (workerTests)
 main = defaultMain tests
 
 tests :: TestTree
-tests = testGroup "Tests" [xKeyBatchConcurrencyTests, propertyTests, visibleTests, navTests, intentTests, keyIntentTests, planTests, systemTests, fakeTests, fixtureTests, reminderTests, hocketStateTests, raindropParsingTests, raindropApiBodyTests, classifyTests, characterizationTests, updateTests, workerTests, batchTests, dateTimeParsingTests, jsonRoundtripTests, sanitizeForDisplayTests, fuzzyMatchTests, fuzzyFilterMatchTests, filterStateTests, filterTuningTests, agentSnapshotTests, agentProtocolTests, agentServerIntegrationTests]
+tests = testGroup "Tests" [snapshotGoldenTests, xKeyBatchConcurrencyTests, propertyTests, visibleTests, navTests, intentTests, keyIntentTests, planTests, systemTests, fakeTests, fixtureTests, reminderTests, hocketStateTests, raindropParsingTests, raindropApiBodyTests, classifyTests, characterizationTests, updateTests, workerTests, batchTests, dateTimeParsingTests, jsonRoundtripTests, sanitizeForDisplayTests, fuzzyMatchTests, fuzzyFilterMatchTests, filterStateTests, filterTuningTests, agentSnapshotTests, agentProtocolTests, agentServerIntegrationTests]
 
 -- Expected bodies are what the pre-servant wreq client sent.
 raindropApiBodyTests :: TestTree

@@ -114,6 +114,7 @@ test-suite test
                      , FakeTests
                      , FixtureTests
                      , Gen
+                     , SnapshotGoldenTests
                      , IntentTests
                      , NavTests
                      , VisibleTests
