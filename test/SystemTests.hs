@@ -4,8 +4,13 @@ module SystemTests (systemTests) where
 
 import Brick.BChan (newBChan)
 import CharacterizationTests (emptyState, item)
-import Control.Exception (throwIO)
+import Control.Concurrent (threadDelay)
+import Control.Concurrent.Async (AsyncCancelled (..), cancel, waitCatch, withAsync)
+import Control.Concurrent.MVar (newEmptyMVar, putMVar, takeMVar)
+import Control.Exception (fromException, throwIO)
 import Control.Lens ((&), (.~), (^.))
+import Control.Monad (forever)
+import Data.Foldable (for_)
 import Data.IORef (IORef, modifyIORef', newIORef, readIORef, writeIORef)
 import Data.Time (utc)
 import Interpret (Env (..), copyCleaned, interpret, step)
@@ -16,7 +21,7 @@ import Network.Bookmark.Types (BookmarkItemId (..), URL (..), biLink)
 import Network.Bookmark.Ui.State (hsStatus, insertItems)
 import System (cleanUrl, urlReplacements)
 import Test.Tasty (TestTree, testGroup)
-import Test.Tasty.HUnit (testCase, (@?=))
+import Test.Tasty.HUnit (assertFailure, testCase, (@?=))
 
 systemTests :: TestTree
 systemTests = testGroup "system" [cleanUrlTests, copyTests, systemPortTests, stepTests]
@@ -52,6 +57,18 @@ systemPortTests =
         (env, _) <- recordingEnv
         msgs <- interpret env {envSystem = SystemPort (\_ _ -> throwIO (userError "no firefox")) (\_ -> pure ())} (OpenUrl XdgOpen "https://example.org/")
         msgs @?= [SystemFailed "user error (no firefox)"],
+      testCase "a cancel during the browser or the copy is rethrown, not reported" $
+        for_ [OpenUrl Firefox "https://example.org/", CopyText "https://example.org/"] $ \effect -> do
+          entered <- newEmptyMVar
+          (env, _) <- recordingEnv
+          let hang = putMVar entered () >> forever (threadDelay 1000000)
+          r <- withAsync (interpret env {envSystem = SystemPort (\_ _ -> hang) (const hang)} effect) $ \running -> do
+            takeMVar entered
+            cancel running
+            waitCatch running
+          case r of
+            Left e -> fromException e @?= Just AsyncCancelled
+            Right msgs -> assertFailure ("interpret answered " <> show msgs <> " to a cancel"),
       testCase "CopyText copies the cleaned URL through sysCopy" $ do
         (env, calls) <- recordingEnv
         msgs <- interpret env (CopyText "https://m.imdb.com/title/tt0111161/")

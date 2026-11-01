@@ -16,7 +16,7 @@ where
 import Brick.BChan (BChan, writeBChan)
 import Control.Concurrent.Async (async)
 import Control.Concurrent.STM (TVar, atomically, modifyTVar')
-import Control.Exception (SomeException, onException, try)
+import Control.Exception (onException, try)
 import Control.Lens (view, (^.))
 import Control.Monad (foldM)
 import Control.Monad.Loops (unfoldrM)
@@ -72,7 +72,7 @@ interpret :: Env -> Effect -> IO [Msg]
 interpret env = \case
   -- The shell halts the event loop itself.
   Halt -> pure []
-  OpenUrl opener url -> failed <$> try @SomeException (sysOpenUrl (envSystem env) (program opener) (URL (T.unpack url)))
+  OpenUrl opener url -> failed <$> trySync (sysOpenUrl (envSystem env) (program opener) (URL (T.unpack url)))
   StartFetch plan -> [] <$ async (fetch plan)
   StartBatch plan -> [] <$ async (batchWorker post (envPort env) plan)
   CopyText link -> copyCleaned (sysCopy (envSystem env)) link
@@ -113,7 +113,7 @@ retrieveItems port searchParam collectionId = do
 copyCleaned :: (String -> IO ()) -> Text -> IO [Msg]
 copyCleaned copy link = do
   let url = cleanUrl (T.unpack link)
-  r <- try @SomeException (copy url)
+  r <- trySync (copy url)
   pure [either (SystemFailed . ("Copy failed: " <>) . T.pack . show) (const (Copied (T.pack url))) r]
 
 -- | One batch call, so its outcome applies to every id.
