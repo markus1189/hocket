@@ -110,7 +110,6 @@ test-suite test
                      , http-types
                      , lens
                      , network
-                     , servant-client
                      , servant-client-core
                      , stm
                      , unix

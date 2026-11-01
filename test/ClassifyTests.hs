@@ -6,12 +6,14 @@ import Control.Exception (toException)
 import Data.Bifunctor (bimap)
 import Data.Foldable (for_)
 import qualified Data.Sequence as Seq
+import Gen (genClientErrorWithScope)
+import Hedgehog (cover, forAll, property, verifiedTermination, (===))
 import Network.HTTP.Types (http11, mkStatus)
 import Network.Raindrop (ErrorScope (..), classify)
-import Servant.Client (BaseUrl (..), ClientError (..), Response, ResponseF (..), Scheme (Https))
-import Servant.Client.Core.Request (defaultRequest)
+import Servant.Client.Core (BaseUrl (..), ClientError (..), Response, ResponseF (..), Scheme (Https), defaultRequest)
 import Test.Tasty
 import Test.Tasty.HUnit
+import Test.Tasty.Hedgehog (testProperty)
 
 response :: Int -> Response
 response code = Response (mkStatus code "") Seq.empty http11 ""
@@ -43,5 +45,12 @@ classifyTests =
       testCase "global: unsupported content type" $
         classify (UnsupportedContentType "text/html" (response 200)) @?= Global,
       testCase "global: invalid content-type header" $
-        classify (InvalidContentTypeHeader (response 200)) @?= Global
+        classify (InvalidContentTypeHeader (response 200)) @?= Global,
+      -- 1 of 10 generator rows is item-scoped; verified termination judges
+      -- coverage statistically instead of failing on a low 100-sample draw.
+      testProperty "classify maps every generated ClientError to its labelled scope" $ verifiedTermination $ property $ do
+        (err, scope) <- forAll genClientErrorWithScope
+        cover 5 "item-scoped" (scope == ItemScoped)
+        cover 5 "global" (scope == Global)
+        classify err === scope
     ]

@@ -1,4 +1,5 @@
 {-# LANGUAGE OverloadedStrings #-}
+{-# LANGUAGE TupleSections #-}
 
 -- | Hedgehog generators shared by every property and state-machine test (D9).
 module Gen
@@ -9,6 +10,7 @@ module Gen
     genUTCTime,
     genModel,
     genClientError,
+    genClientErrorWithScope,
     genFailureScript,
     genAgentCmd,
     genAgentSnapshot,
@@ -37,6 +39,7 @@ import Network.Bookmark.Types
 import Network.Bookmark.Ui.State
 import Network.HTTP.Media (MediaType, (//))
 import Network.HTTP.Types (Status, http11, mkStatus)
+import Network.Raindrop (ErrorScope (..))
 import Servant.Client.Core (BaseUrl (..), ClientError (..), RequestF (..), ResponseF (..), Scheme (Https), defaultRequest)
 import System.IO.Error (userError)
 
@@ -138,22 +141,29 @@ genStatus codes = (`mkStatus` "") <$> Gen.element codes
 genMediaType :: Gen MediaType
 genMediaType = Gen.element ["text" // "html", "text" // "plain", "application" // "xml"]
 
--- | One generator per D6 row, so every row shows up in a 100-test run.
-genClientError :: Gen ClientError
-genClientError =
+-- | One generator per D6 row (plan §5, rulings in §11), each labelled with
+-- its scope by hand so a property can check 'classify' against it.
+genClientErrorWithScope :: Gen (ClientError, ErrorScope)
+genClientErrorWithScope =
   Gen.choice
-    [ failure [400, 404, 409, 422],
-      failure [401, 403],
-      failure [429],
-      failure [500, 502, 503, 504],
-      pure (ConnectionError (toException (userError "connection refused"))),
-      DecodeFailure "Error in $: key \"items\" not found" <$> (genStatus [200] >>= genResponse),
-      UnsupportedContentType <$> genMediaType <*> (genStatus [200] >>= genResponse),
-      InvalidContentTypeHeader <$> (genStatus [200] >>= genResponse)
+    [ failure ItemScoped [400, 404, 405, 409, 410, 422, 499],
+      failure Global [401, 403],
+      failure Global [408],
+      failure Global [429],
+      failure Global [500, 502, 503, 504, 599],
+      failure Global [100, 301, 302, 304],
+      pure (ConnectionError (toException (userError "connection refused")), Global),
+      labelled Global $ DecodeFailure "Error in $: key \"items\" not found" <$> (genStatus [200] >>= genResponse),
+      labelled Global $ UnsupportedContentType <$> genMediaType <*> (genStatus [200] >>= genResponse),
+      labelled Global $ InvalidContentTypeHeader <$> (genStatus [200] >>= genResponse)
     ]
   where
-    failure codes = FailureResponse req <$> (genStatus codes >>= genResponse)
+    labelled scope = fmap (,scope)
+    failure scope codes = labelled scope $ FailureResponse req <$> (genStatus codes >>= genResponse)
     req = defaultRequest {requestBody = Nothing, requestPath = (BaseUrl Https "api.raindrop.io" 443 "/rest/v1", "")}
+
+genClientError :: Gen ClientError
+genClientError = fst <$> genClientErrorWithScope
 
 -- | Per-call outcomes for a scripted fake: 'Right False' is Raindrop's
 -- @result: false@ answer.
