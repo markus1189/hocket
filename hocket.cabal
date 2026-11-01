@@ -52,6 +52,7 @@ executable hocket
                      , AgentServer
                      , Events
                      , Keys
+                     , Worker
   build-depends:       aeson
                      , async
                      , base
@@ -95,7 +96,9 @@ test-suite test
                      , Events
                      , Gen
                      , Keys
+                     , Worker
                      , Properties
+                     , WorkerTests
   build-depends:       base
                      , aeson
                      , async

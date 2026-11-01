@@ -3,7 +3,7 @@
 
 -- | Phase 0 pins of today's behaviour (plan §6), bugs included. Rows marked
 -- "pins bug" are expected to flip in Phase 1.
-module CharacterizationTests (characterizationTests) where
+module CharacterizationTests (characterizationTests, emptyState, item) where
 
 import qualified Brick.Widgets.List as L
 import Control.Lens

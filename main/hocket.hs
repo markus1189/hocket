@@ -64,6 +64,7 @@ import qualified Control.Monad.Catch as Catch
 import Control.Monad.IO.Class (liftIO)
 import Control.Monad.Logger (LoggingT, logErrorN, logInfoN, runFileLoggingT, runStdoutLoggingT)
 import Control.Monad.Loops (unfoldrM)
+import Data.Bifunctor (first)
 import qualified Data.CaseInsensitive as CI
 import Data.Foldable (for_)
 #if MIN_VERSION_base(4,20,0)
@@ -105,7 +106,6 @@ import Events
     executeBatchDoneEvt,
     executeBatchEvt,
     fetchItemsEvt,
-    fetchedItemsEvt,
     remindersRemovedEvt,
     remindersSetEvt,
     setAgentErrorEvt,
@@ -262,6 +262,7 @@ import System.Process
     waitForProcess,
   )
 import System.Process.Internals (StdStream (CreatePipe))
+import Worker (fetchResultEvents)
 
 makeLensesFor [("std_in", "stdIn"), ("std_err", "stdErr"), ("std_out", "stdOut")] ''CreateProcess
 
@@ -602,12 +603,7 @@ asyncCommandEventHandler es FetchItems =
           suffix = maybe "" (\since -> " since: " <> formatPOSIXTime (since - 86400)) $ s ^. hsLastUpdated
       es `trigger` setStatusEvt (Just ("fetching" <> suffix))
       eitherErrorBis <- retrieveItems (s ^. hsCredentials) (plan ^. spSearch) (plan ^. spCollection)
-      case eitherErrorBis of
-        Left e -> es `trigger` asyncActionFailedEvt (errorMessageFromException e)
-        Right batches -> do
-          es `trigger` setStatusEvt Nothing
-          for_ batches $ \(BookmarkItemBatch ts bis _) -> do
-            es `trigger` fetchedItemsEvt ts bis isUpdateFetch
+      for_ (fetchResultEvents isUpdateFetch (first errorMessageFromException eitherErrorBis)) (trigger es)
     pure ()
 asyncCommandEventHandler _ (FetchedItems ts bis wasAllCollectionsFetch) =
   id %= applyFetched ts bis wasAllCollectionsFetch

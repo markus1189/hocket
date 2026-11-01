@@ -73,11 +73,12 @@ import System.Posix.Time (epochTime)
 import Test.Tasty
 import Test.Tasty.Golden (goldenVsString)
 import Test.Tasty.HUnit
+import WorkerTests (workerTests)
 
 main = defaultMain tests
 
 tests :: TestTree
-tests = testGroup "Tests" [xKeyBatchConcurrencyTests, propertyTests, hocketStateTests, raindropParsingTests, raindropApiBodyTests, classifyTests, characterizationTests, dateTimeParsingTests, jsonRoundtripTests, sanitizeForDisplayTests, fuzzyMatchTests, fuzzyFilterMatchTests, filterStateTests, filterTuningTests, agentSnapshotTests, agentProtocolTests, agentServerIntegrationTests]
+tests = testGroup "Tests" [xKeyBatchConcurrencyTests, propertyTests, hocketStateTests, raindropParsingTests, raindropApiBodyTests, classifyTests, characterizationTests, workerTests, dateTimeParsingTests, jsonRoundtripTests, sanitizeForDisplayTests, fuzzyMatchTests, fuzzyFilterMatchTests, filterStateTests, filterTuningTests, agentSnapshotTests, agentProtocolTests, agentServerIntegrationTests]
 
 -- Expected bodies are what the pre-servant wreq client sent.
 raindropApiBodyTests :: TestTree
