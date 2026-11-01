@@ -20,6 +20,7 @@ import Shell.AgentServerTests (agentServerIntegrationTests)
 import Shell.FakeTests (fakeTests)
 import Shell.FixtureTests (fixtureTests)
 import Shell.HeadlessTests (headlessTests)
+import Shell.SMCoreTests (smCoreTests)
 import Shell.SMFixtureTests (smFixtureTests)
 import Shell.SimulateTests (simulateTests)
 import Shell.SnapshotGoldenTests (snapshotGoldenTests)
@@ -35,7 +36,8 @@ tests :: TestTree
 tests =
   testGroup
     "Tests"
-    [ smFixtureTests,
+    [ smCoreTests,
+      smFixtureTests,
       simulateTests,
       agentParallelTests,
       snapshotGoldenTests,

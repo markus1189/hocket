@@ -146,6 +146,7 @@ test-suite test
                      , Shell.FixtureTests
                      , Shell.HeadlessTests
                      , Shell.AgentParallelTests
+                     , Shell.SMCoreTests
                      , Shell.SMFixtureTests
                      , Shell.SimulateTests
                      , Shell.SnapshotGoldenTests
