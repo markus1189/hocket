@@ -46,7 +46,7 @@ import qualified Brick.Widgets.List as L
 import Control.Applicative ((<|>))
 import Control.Concurrent.Async (async)
 import Control.Concurrent.STM (TVar, atomically, modifyTVar', newTVarIO)
-import Control.Exception (SomeException, finally)
+import Control.Exception (SomeException, bracket, finally)
 import Control.Exception.Base (try)
 import Control.Lens (at, view)
 import Control.Lens.Combinators (use)
@@ -62,7 +62,7 @@ import Control.Monad.Logger (LoggingT, defaultOutput, logErrorN, logInfoN, runLo
 import Control.Monad.Loops (unfoldrM)
 import Data.Bifunctor (first)
 import qualified Data.ByteString.Lazy as LBS
-import Data.Foldable (for_)
+import Data.Foldable (for_, traverse_)
 import Data.IORef (newIORef, readIORef)
 import Signals (exitOnTerminated, unwindOnTermination)
 #if MIN_VERSION_base(4,20,0)
@@ -733,18 +733,22 @@ runTui :: Maybe AgentSocketOpt -> Bool -> RaindropPort -> HocketState -> IO ()
 runTui mAgentOpt isFixture port s0 = do
   events <- newBChan 10
   tz <- getCurrentTimeZone
-  mAgent <- for mAgentOpt (startAgentServer events)
   unwindOnTermination
-  vty <- mkVty Vty.defaultConfig
-  void
-    ( customMain
-        vty
-        (mkVty Vty.defaultConfig)
-        (Just events)
-        (app tz isFixture (Env events port) (snd <$> mAgent))
-        s0
-    )
-    `finally` for_ mAgent (\((path, ours, bound), _) -> cleanupAgentSocket bound ours path)
+  -- bracket, not finally around customMain: a signal during mkVty must
+  -- still remove the socket, and one during startAgentServer is held off
+  -- until the server is recorded for cleanup.
+  bracket
+    (for mAgentOpt (startAgentServer events))
+    (traverse_ (\((path, ours, bound), _) -> cleanupAgentSocket bound ours path))
+    $ \mAgent -> do
+      vty <- mkVty Vty.defaultConfig
+      void $
+        customMain
+          vty
+          (mkVty Vty.defaultConfig)
+          (Just events)
+          (app tz isFixture (Env events port) (snd <$> mAgent))
+          s0
 
 -- | Bind the agent control socket and keep serving it in the background.
 -- Server failures surface in the TUI status bar instead of killing the app.
