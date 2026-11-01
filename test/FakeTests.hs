@@ -76,7 +76,7 @@ withRule :: Text -> FakeRaindrop -> FakeRaindrop
 withRule spec fr = either (error . T.unpack) (\r -> fr & frRules %~ (<> [r])) (parseFixtureFail spec)
 
 fakeTests :: TestTree
-fakeTests = testGroup "Fake Raindrop" [requestTests, failureTests, parserTests, seedTests, fakeProperties]
+fakeTests = testGroup "Fake Raindrop" [requestTests, failureTests, parserTests, seedTests, emptySeedTest, fakeProperties]
 
 requestTests :: TestTree
 requestTests =
@@ -173,7 +173,7 @@ parserTests =
       testCase "invalid specs are rejected" $
         mapM_
           (\s -> either (const (pure ())) (\r -> assertFailure (show s <> " parsed as " <> show r)) (parseFixtureFail s))
-          ["add=500", "archive:0=500", "archive:x=500", "archive=99", "archive=600", "archive=oops", "archive", "archive=1=2", ""]
+          ["add=500", "archive=200", "archive=299", "archive:0=500", "archive:x=500", "archive=99", "archive=600", "archive=oops", "archive", "archive=1=2", ""]
     ]
 
 seedTests :: TestTree
@@ -185,6 +185,16 @@ seedTests =
       Right fr -> do
         Map.size (fr ^. frItems) @?= 18
         all ((== (-1)) . (^. biCollectionId)) (fr ^. frItems) @?= True
+
+-- | The B1 E2E seed: an empty account.
+emptySeedTest :: TestTree
+emptySeedTest =
+  testCase "seed from an empty list response" $
+    case seedFake archive "{\"items\":[],\"count\":0}" of
+      Left e -> assertFailure e
+      Right fr -> do
+        Map.null (fr ^. frItems) @?= True
+        fetch 0 "-1" Nothing fr @?= Right (0, [])
 
 genFake :: Gen FakeRaindrop
 genFake = do
@@ -221,7 +231,9 @@ fakeProperties =
         fr' ^. frItems === expected,
       testProperty "lastUpdate:> returns exactly the items updated on a later day" $ property $ do
         fr <- forAll genFake
-        d <- forAll genDay
+        let days = map (utctDay . view biLastUpdate) (Map.elems (fr ^. frItems))
+        -- Item days hit the boundary, which random days almost never do.
+        d <- forAll (if null days then genDay else Gen.choice [genDay, Gen.element days])
         let search = "lastUpdate:>" <> T.pack (formatTime defaultTimeLocale "%Y-%m-%d" d)
         fmap ids (fetchAll "0" (Just search) fr) === Right (ids (filter (\i -> utctDay (i ^. biLastUpdate) > d) (Map.elems (fr ^. frItems)))),
       testProperty "paging returns every item exactly once" $ property $ do

@@ -19,6 +19,20 @@
 --    endpoints usually do. Failing instead would make one item deleted
 --    elsewhere abort the whole archive step, a failure no test could pin
 --    to real behaviour.
+--
+-- Deliberate semantics:
+--
+-- 4. No retry: the fake answers at the 'BookmarkRequest' level, above
+--    'Network.Raindrop.raindrop's retry (plan §11 #16), so a 503 fails
+--    once and 'isTransient' is never exercised.
+-- 5. @STEP:N@ counts calls of that step since the fixture started, failed
+--    ones included; a second @X@ keeps counting, so @set-reminders:2=404@
+--    fires only once. The TUI sends reminder items in 'Map' order of the
+--    'Text' id (@"10" < "9"@), so E2E seeds should use same-width ids.
+-- 6. A search other than @lastUpdate:>@ is a 400, so unmodelled queries
+--    fail loudly.
+-- 7. @result: false@, decode and content-type failures cannot be scripted
+--    ('FailStatus' is HTTP status or connection); Phase 1 pins them purely.
 module Network.Bookmark.Fake
   ( FakeRaindrop,
     frItems,
@@ -145,7 +159,7 @@ serve now req fr = case req of
     inCollection coll i = coll == 0 || i ^. biCollectionId == coll
 
 -- | @lastUpdate:>YYYY-MM-DD@, the only search the client sends ('planSync').
--- Assumption 1 decides the comparison; anything else is a 400.
+-- Assumption 1 decides the comparison; anything else is item 6.
 parseSearch :: Text -> Maybe Day
 parseSearch s = T.stripPrefix "lastUpdate:>" s >>= parseTimeM False defaultTimeLocale "%Y-%m-%d" . T.unpack
 
@@ -181,8 +195,8 @@ parseFixtureFail spec = case T.splitOn "=" spec of
     status <- case rhs of
       "conn" -> Right FailConn
       _ -> case readInt rhs of
-        Just c | c >= 100 && c <= 599 -> Right (FailHttp c)
-        _ -> Left ("status must be an HTTP code or conn: " <> rhs)
+        Just c | c >= 100 && c <= 599 && (c < 200 || c >= 300) -> Right (FailHttp c)
+        _ -> Left ("status must be a non-2xx HTTP code or conn: " <> rhs)
     pure (FailRule st nth status)
   _ -> Left ("expected STEP[:N]=STATUS: " <> spec)
   where
