@@ -1,6 +1,7 @@
 {-# LANGUAGE OverloadedStrings #-}
 {-# OPTIONS_GHC -Wno-orphans #-}
 
+import qualified Brick.Widgets.List as L
 import Control.DeepSeq (NFData (..))
 import Control.Lens (view, (^.))
 import Data.Text (Text)
@@ -14,6 +15,7 @@ import Network.Bookmark.Agent.Snapshot (asItems, siVisible, takeSnapshot)
 import Network.Bookmark.App.Msg (Msg (Intent), Now (..))
 import Network.Bookmark.App.Update (update)
 import Network.Bookmark.Types
+import Network.Bookmark.Ui.Reconcile (UiState, initialUi, reconcile, uiList)
 import Network.Bookmark.Ui.State
 import Test.Tasty.Bench
 
@@ -91,17 +93,29 @@ mkState n =
 itemId :: Int -> BookmarkItemId
 itemId = BookmarkItemId . T.pack . show
 
-flagMany :: [Int] -> HocketState -> HocketState
-flagMany is s0 = foldl' step s0 is
+flagMany :: [Int] -> (HocketState, UiState) -> (HocketState, UiState)
+flagMany is v0 = foldl' step v0 is
   where
-    step st i = case validateWrite (takeSnapshot 0 st) (CmdSetFlag (itemId i) FlagArchive) of
+    step (st, ui) i = case validateWrite (takeSnapshot 0 st) (CmdSetFlag (itemId i) FlagArchive) of
       Left e -> error (T.unpack e)
-      Right cmd -> applyWrite cmd st
+      Right cmd -> applyWrite cmd (st, ui)
 
--- | An agent write as the TUI applies it: update, then the settle that
--- follows every event.
-applyWrite :: WriteCmd -> HocketState -> HocketState
-applyWrite cmd = settle . fst . update (Intent (toIntent benchNow cmd))
+-- | An agent write as the TUI applies it: update, then the settle and
+-- reconcile that follow every event. Both are forced per write, as the
+-- strict model forced syncForRender's list write before Phase 4.
+applyWrite :: WriteCmd -> (HocketState, UiState) -> (HocketState, UiState)
+applyWrite cmd (st, ui) = st' `seq` ui' `seq` (st', ui')
+  where
+    st' = settle (fst (update (Intent (toIntent benchNow cmd)) st))
+    ui' = reconcile st' ui
+
+-- | After a filter change: the model settles and the view follows, the
+-- work syncForRender did alone while the list lived in the model.
+render :: HocketState -> Int
+render st = length (reconcile (settle st) initialUi ^. uiList . L.listElementsL)
+
+shownCount :: (HocketState, UiState) -> Int
+shownCount = length . view (uiList . L.listElementsL) . snd
 
 benchNow :: Now
 benchNow = Now (posixSecondsToUTCTime 1700000000) utc
@@ -112,9 +126,6 @@ sizes = [1000, 5000, 20000]
 queries :: [(String, Text)]
 queries = [("empty", ""), ("1 word", "haskell"), ("3 words", "haskell lens tui"), ("miss", "zzqx")]
 
-visibleCount :: HocketState -> Int
-visibleCount = length . view hsVisible
-
 main :: IO ()
 main =
   defaultMain
@@ -122,12 +133,12 @@ main =
         (show n)
         [ bgroup
             "syncForRender"
-            [ bench name $ nf (visibleCount . settle . setFilterQuery q) s
+            [ bench name $ nf (render . setFilterQuery q) s
             | (name, q) <- queries
             ],
           bgroup
             "videoFilter"
-            [ bench name $ nf (visibleCount . settle . setVideoFilterMode m) s
+            [ bench name $ nf (render . setVideoFilterMode m) s
             | (name, m) <- [("only", ShowOnlyVideos), ("hide", HideVideos)]
             ],
           bgroup
@@ -136,8 +147,8 @@ main =
               bench "validateWrite last" $ nf (either (const 0) (const 1 :: WriteCmd -> Int) . validateWrite (takeSnapshot 0 s)) (CmdSetFlag (itemId 1) FlagArchive),
               -- What the server + TUI do per flag write: validate against the
               -- current snapshot, apply, re-render, re-snapshot.
-              bench "flag 100 (validate+sync)" $ nf (visibleCount . flagMany [1 .. 100]) s,
-              bench "flag 100 (sync only)" $ nf (visibleCount . foldl' (\st i -> applyWrite (CmdSetFlag (itemId i) FlagArchive) st) s) [1 .. 100]
+              bench "flag 100 (validate+sync)" $ nf (shownCount . flagMany [1 .. 100]) (s, ui),
+              bench "flag 100 (sync only)" $ nf (shownCount . foldl' (\v i -> applyWrite (CmdSetFlag (itemId i) FlagArchive) v) (s, ui)) [1 .. 100]
             ],
           bench "hsNumItems" $ nf (\st -> let c = hsNumItems st in c ^. icNone + c ^. icFutureReminders) s,
           -- SnapshotItem fields are strict, so WHNF of each list cell forces the projection.
@@ -145,4 +156,5 @@ main =
         ]
     | n <- sizes,
       let s = mkState n
+          ui = reconcile s initialUi
     ]
