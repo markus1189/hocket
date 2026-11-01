@@ -66,6 +66,7 @@ import System.IO
     hFlush,
     hSetBuffering,
   )
+import System.IO.Temp (withSystemTempDirectory)
 import System.Posix.Files (fileMode, getFileStatus, setFileMode)
 import System.Posix.Process (getProcessID)
 import System.Posix.Time (epochTime)
@@ -869,11 +870,8 @@ waitUntilReachable attempts path
 withAgentServer ::
   (TVar AgentSnapshot -> BChan HocketEvent -> FilePath -> IO a) ->
   IO a
-withAgentServer action = do
-  tmp <- getTemporaryDirectory
-  e <- epochTime
-  pid <- getProcessID
-  let path = tmp </> ("hocket-test-" ++ show pid ++ "-" ++ show e ++ ".sock")
+withAgentServer action = withSystemTempDirectory "hk" $ \dir -> do
+  let path = dir </> "s.sock"
   snapVar <- newTVarIO emptySnapshot
   atomically (modifyTVar' snapVar (const (buildTestSnapshot 1)))
   events <- newBChan 10
@@ -885,7 +883,23 @@ withAgentServer action = do
               pure True,
             aeReminderTime = pure (read "2020-01-01 07:00:00 UTC" :: UTCTime)
           }
-  withAsync (runAgentServer path env) $ \_ -> action snapVar events path
+  withAsync (runAgentServer path env) $ \_ -> do
+    awaitListener path
+    action snapVar events path
+
+-- | The server binds asynchronously; connecting before that races it.
+awaitListener :: FilePath -> IO ()
+awaitListener path = go (200 :: Int)
+  where
+    go n = do
+      sock <- socket AF_UNIX Stream defaultProtocol
+      r <- try @IOException (connect sock (SockAddrUnix path))
+      close sock
+      case r of
+        Right () -> pure ()
+        Left e
+          | n <= 0 -> assertFailure ("agent server never listened: " ++ show e)
+          | otherwise -> threadDelay 10000 >> go (n - 1)
 
 -- | Drain (up to n) injected events from the BChan, returning the UiCommands.
 drainUI :: BChan HocketEvent -> Int -> IO [UiCommand]
