@@ -15,6 +15,7 @@ import Core.ReminderTests (reminderTests)
 import Core.StateTests (hocketStateTests, xKeyBatchConcurrencyTests)
 import Core.UpdateTests (updateTests)
 import Core.VisibleTests (visibleTests)
+import Shell.AgentParallelTests (agentParallelTests)
 import Shell.AgentServerTests (agentServerIntegrationTests)
 import Shell.FakeTests (fakeTests)
 import Shell.FixtureTests (fixtureTests)
@@ -36,6 +37,7 @@ tests =
     "Tests"
     [ smFixtureTests,
       simulateTests,
+      agentParallelTests,
       snapshotGoldenTests,
       xKeyBatchConcurrencyTests,
       propertyTests,

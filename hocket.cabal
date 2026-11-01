@@ -145,6 +145,7 @@ test-suite test
                      , Shell.FakeTests
                      , Shell.FixtureTests
                      , Shell.HeadlessTests
+                     , Shell.AgentParallelTests
                      , Shell.SMFixtureTests
                      , Shell.SimulateTests
                      , Shell.SnapshotGoldenTests
@@ -162,6 +163,7 @@ test-suite test
                      , exceptions
                      , filepath
                      , hedgehog
+                     , monad-control
                      , hocket
                      , hocket:core
                      , http-media
