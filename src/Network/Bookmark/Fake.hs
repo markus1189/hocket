@@ -6,6 +6,19 @@
 -- | The fixture backend's pure core (plan D8): an in-memory Raindrop that
 -- answers 'BookmarkRequest's. The shell wraps it in an 'IORef'; Phase 6
 -- reuses it as the state-machine model.
+--
+-- Unchecked assumptions about the real API, for the E2E run to confirm:
+--
+-- 1. @lastUpdate:>DATE@ compares the item's UTC day, strictly. Raindrop may
+--    mean another boundary or time zone; the strict reading hides less, so
+--    a missing safety margin in 'planSync' shows up here first.
+-- 2. The default sort is @-created@ (ties by id), recalled from Raindrop's
+--    docs. Paging only needs a stable order, so a wrong guess changes page
+--    contents, not which items a full fetch returns.
+-- 3. The batch move silently skips ids Raindrop does not have, as bulk
+--    endpoints usually do. Failing instead would make one item deleted
+--    elsewhere abort the whole archive step, a failure no test could pin
+--    to real behaviour.
 module Network.Bookmark.Fake
   ( FakeRaindrop,
     frItems,
@@ -110,7 +123,7 @@ serve now req fr = case req of
        in (Right (Just bid), fr & frItems . at bid ?~ item)
   ArchiveBookmark bid -> patch bid (biCollectionId .~ fr ^. frArchive)
   BatchArchiveBookmarks bids ->
-    -- Raindrop's batch move ignores ids it does not have.
+    -- Unknown ids are skipped: assumption 3.
     (Right True, foldr (\bid -> frItems . ix bid %~ bump . (biCollectionId .~ fr ^. frArchive)) fr bids)
   SetReminder bid t -> patch bid (biReminder ?~ t)
   RemoveReminder bid -> patch bid (biReminder .~ Nothing)
@@ -132,7 +145,7 @@ serve now req fr = case req of
     inCollection coll i = coll == 0 || i ^. biCollectionId == coll
 
 -- | @lastUpdate:>YYYY-MM-DD@, the only search the client sends ('planSync').
--- Read as "updated on a later day than DATE" (UTC); anything else is a 400.
+-- Assumption 1 decides the comparison; anything else is a 400.
 parseSearch :: Text -> Maybe Day
 parseSearch s = T.stripPrefix "lastUpdate:>" s >>= parseTimeM False defaultTimeLocale "%Y-%m-%d" . T.unpack
 
