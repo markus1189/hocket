@@ -349,9 +349,15 @@ scenario_keys_flags() {
 # items in a 50-row pane every page move reaches an end.
 scenario_keys_view() {
   start keys-view seed-mixed.json || return 1
-  key v && wait_for 5 "v: only videos" state_is '.counts.visible == 2' || return 1
-  key V && wait_for 5 "V: videos hidden" state_is '.counts.visible == 3' || return 1
-  key V && wait_for 5 "V: no video filter" state_is '.counts.visible == 5' || return 1
+  # Every transition of both keys, V from no filter first, its common use.
+  key V && wait_for 5 "V from none: videos hidden" state_is '.counts.visible == 3' || return 1
+  key v && wait_for 5 "v from hidden: only videos" state_is '.counts.visible == 2' || return 1
+  key v && wait_for 5 "v from only: no filter" state_is '.counts.visible == 5' || return 1
+  key V && wait_for 5 "V from none: videos hidden" state_is '.counts.visible == 3' || return 1
+  key V && wait_for 5 "V from hidden: no filter" state_is '.counts.visible == 5' || return 1
+  key v && wait_for 5 "v from none: only videos" state_is '.counts.visible == 2' || return 1
+  key V && wait_for 5 "V from only: videos hidden" state_is '.counts.visible == 3' || return 1
+  key V && wait_for 5 "V from hidden: no filter" state_is '.counts.visible == 5' || return 1
   key S && wait_for 5 "S: the reminder shown" state_is '.counts.visible == 6' || return 1
   key S && wait_for 5 "S: the reminder hidden" state_is '.counts.visible == 5' || return 1
   local ids
