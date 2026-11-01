@@ -58,6 +58,7 @@ import Network.Socket
     socketToHandle,
   )
 import Properties (propertyTests)
+import ReminderTests (reminderTests)
 import System.Directory (createDirectoryIfMissing, getTemporaryDirectory, removeDirectoryRecursive, removeFile)
 import System.FilePath ((</>))
 import System.IO
@@ -79,7 +80,7 @@ import WorkerTests (workerTests)
 main = defaultMain tests
 
 tests :: TestTree
-tests = testGroup "Tests" [xKeyBatchConcurrencyTests, propertyTests, hocketStateTests, raindropParsingTests, raindropApiBodyTests, classifyTests, characterizationTests, workerTests, batchTests, dateTimeParsingTests, jsonRoundtripTests, sanitizeForDisplayTests, fuzzyMatchTests, fuzzyFilterMatchTests, filterStateTests, filterTuningTests, agentSnapshotTests, agentProtocolTests, agentServerIntegrationTests]
+tests = testGroup "Tests" [xKeyBatchConcurrencyTests, propertyTests, reminderTests, hocketStateTests, raindropParsingTests, raindropApiBodyTests, classifyTests, characterizationTests, workerTests, batchTests, dateTimeParsingTests, jsonRoundtripTests, sanitizeForDisplayTests, fuzzyMatchTests, fuzzyFilterMatchTests, filterStateTests, filterTuningTests, agentSnapshotTests, agentProtocolTests, agentServerIntegrationTests]
 
 -- Expected bodies are what the pre-servant wreq client sent.
 raindropApiBodyTests :: TestTree

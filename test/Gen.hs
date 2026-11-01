@@ -8,6 +8,7 @@ module Gen
     genPendingAction,
     genNow,
     genUTCTime,
+    genTimeZone,
     genModel,
     genClientError,
     clientErrorRows,
@@ -28,9 +29,10 @@ import qualified Data.Map as Map
 import Data.Maybe (isJust)
 import Data.Text (Text)
 import qualified Data.Text as T
-import Data.Time.Calendar (fromGregorian)
+import Data.Time.Calendar (Day (ModifiedJulianDay), fromGregorian, toModifiedJulianDay)
 import Data.Time.Clock (UTCTime (..), secondsToDiffTime)
 import Data.Time.Clock.POSIX (POSIXTime)
+import Data.Time.LocalTime (TimeZone, minutesToTimeZone)
 import Hedgehog (Gen)
 import qualified Hedgehog.Gen as Gen
 import qualified Hedgehog.Range as Range
@@ -48,9 +50,14 @@ import System.IO.Error (userError)
 -- encoder we round-trip through.
 genUTCTime :: Gen UTCTime
 genUTCTime = do
-  day <- fromGregorian <$> Gen.integral (Range.linear 2015 2030) <*> Gen.int (Range.linear 1 12) <*> Gen.int (Range.linear 1 28)
+  day <- ModifiedJulianDay <$> Gen.integral (Range.linear (toModifiedJulianDay (fromGregorian 2015 1 1)) (toModifiedJulianDay (fromGregorian 2030 12 31)))
   ms <- Gen.integral (Range.linear 0 (86400 * 1000 - 1))
   pure (UTCTime day (secondsToDiffTime ms / 1000))
+
+-- | Every real offset is a multiple of 15 minutes within −12:00..+14:00,
+-- which covers +05:30 and +05:45.
+genTimeZone :: Gen TimeZone
+genTimeZone = minutesToTimeZone . (* 15) <$> Gen.int (Range.linearFrom 0 (-48) 56)
 
 genNow :: Gen UTCTime
 genNow = genUTCTime

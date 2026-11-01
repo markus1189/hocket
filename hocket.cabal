@@ -22,6 +22,7 @@ library
                      , Network.Raindrop.Api
                      , Network.Bookmark.Agent.Protocol
                      , Network.Bookmark.Agent.Snapshot
+                     , Network.Bookmark.Reminder
                      , Network.Bookmark.Types
                      , Network.Bookmark.Ui.State
                      , Network.Bookmark.Ui.Sync
@@ -99,6 +100,7 @@ test-suite test
                      , ClassifyTests
                      , Events
                      , Gen
+                     , ReminderTests
                      , Keys
                      , Worker
                      , Properties

@@ -76,16 +76,12 @@ import Data.Maybe (fromMaybe, isJust)
 import Data.Text (Text)
 import qualified Data.Text as T
 import Data.Text.Zipper.Generic.Words (deletePrevWord)
-import Data.Time (UTCTime, addDays, getCurrentTime)
+import Data.Time (UTCTime, getCurrentTime)
 import Data.Time.Clock.POSIX (posixSecondsToUTCTime, utcTimeToPOSIXSeconds)
 import Data.Time.Format (defaultTimeLocale, formatTime)
 import Data.Time.LocalTime
-  ( LocalTime (LocalTime),
-    TimeOfDay (TimeOfDay),
-    TimeZone,
+  ( TimeZone,
     getCurrentTimeZone,
-    localDay,
-    localTimeToUTC,
     utcToLocalTime,
   )
 import Data.Traversable (for)
@@ -127,6 +123,7 @@ import Network.Bookmark.Agent.Protocol
   )
 import Network.Bookmark.Agent.Snapshot (AgentSnapshot, asVersion, emptySnapshot, takeSnapshot)
 import Network.Bookmark.Batch (StepOutcome, concatOutcome, soOk)
+import Network.Bookmark.Reminder (reminderPolicy)
 import Network.Bookmark.Types
   ( BookmarkCredentials,
     BookmarkItem,
@@ -521,14 +518,7 @@ withAsyncSlot op run = do
       run
 
 nextDayAt7AM :: IO UTCTime
-nextDayAt7AM = do
-  tz <- getCurrentTimeZone
-  now <- getCurrentTime
-  let localNow = utcToLocalTime tz now
-      tomorrow = addDays 1 (localDay localNow)
-      sevenAM = TimeOfDay 7 0 0
-      tomorrowAt7AM = LocalTime tomorrow sevenAM
-  pure $ localTimeToUTC tz tomorrowAt7AM
+nextDayAt7AM = reminderPolicy <$> getCurrentTimeZone <*> getCurrentTime
 
 -- The three 'X' sub-op bodies, run sequentially by 'runBatchOp'.
 runArchiveOp :: BChan HocketEvent -> HocketState -> IO (StepOutcome () Text)
