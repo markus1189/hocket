@@ -21,6 +21,8 @@ import Data.Maybe (fromMaybe)
 import qualified Data.Text as T
 import Data.Time (UTCTime)
 import Events
+import Network.Bookmark.App.Msg (Intent (Refresh), Msg (..))
+import Network.Bookmark.App.Update (update)
 import Network.Bookmark.Batch
 import Network.Bookmark.Types (BookmarkItemBatch (..), BookmarkItemId (..), PendingAction (..))
 import Network.Bookmark.Ui.State
@@ -42,11 +44,11 @@ fetchEmissionTests =
   testGroup
     "fetch emission"
     [ testCase "a failed fetch posts FetchFailed" $
-        fetchResultEvents False (Left (Just "boom")) @?= [fetchFailedEvt (Just "boom")],
+        fetchResult False (Left (Just "boom")) @?= FetchFailed (Just "boom"),
       testCase "a fetch posts one FetchCompleted with every page" $
-        fetchResultEvents True (Right [page1, page2]) @?= [setStatusEvt Nothing, fetchCompletedEvt True [page1, page2]],
+        fetchResult True (Right [page1, page2]) @?= FetchCompleted True [page1, page2],
       testCase "an empty fetch still posts FetchCompleted" $
-        fetchResultEvents False (Right []) @?= [setStatusEvt Nothing, fetchCompletedEvt False []],
+        fetchResult False (Right []) @?= FetchCompleted False [],
       testCase "FetchCompleted merges the pages in order, as page-by-page delivery did" $ do
         let s = applyFetchCompleted False [page1, page2] emptyState
         Map.keys (s ^. hsContents) @?= [BookmarkItemId "a", BookmarkItemId "b"]
@@ -59,17 +61,12 @@ fetchEmissionTests =
         either Just (const Nothing) r @?= Just ThreadKilled
     ]
 
--- | Deliver a fetch's events the way the handlers apply them, starting from
--- an acquired fetch slot; whether the slot is still held after each event.
-slotTrace :: [HocketEvent] -> [Bool]
-slotTrace = map asyncOpRunning . drop 1 . scanl deliver acquired
+-- | Refresh, then the worker's one message, both through update: whether
+-- the fetch slot is held after each.
+fetchTrace :: Msg -> [Bool]
+fetchTrace terminal = map asyncOpRunning [started, maybe started fst (update terminal started)]
   where
-    Just acquired = tryAcquireAsyncOp OpFetchItems emptyState
-    deliver s = \case
-      HocketAsync (FetchCompleted isAll batches) -> applyFetchCompleted isAll batches s
-      HocketAsync (FetchFailed _) -> completeAsyncOp s
-      HocketUi (SetStatus _) -> s
-      other -> error ("unexpected event from a fetch: " <> show other)
+    Just (started, _) = update (Intent Refresh) emptyState
 
 -- | Held through every event but the last, which frees it.
 freedByLastOnly :: [Bool] -> [Bool]
@@ -80,11 +77,12 @@ fetchSlotTests =
   testGroup
     "fetch slot"
     [ testCase "an empty fetch frees the slot (B1)" $
-        let trace = slotTrace (fetchResultEvents False (Right [])) in trace @?= freedByLastOnly trace,
-      testCase "a multi-page fetch holds the slot until its last event (B1b)" $
-        let trace = slotTrace (fetchResultEvents True (Right [page1, page2])) in trace @?= freedByLastOnly trace,
+        fetchTrace (fetchResult False (Right [])) @?= [True, False],
+      -- One message carries every page, so no page can free the slot early.
+      testCase "a multi-page fetch holds the slot until its one message (B1b)" $
+        fetchTrace (fetchResult True (Right [page1, page2])) @?= [True, False],
       testCase "a failed fetch frees the slot" $
-        let trace = slotTrace (fetchResultEvents False (Left Nothing)) in trace @?= freedByLastOnly trace
+        fetchTrace (fetchResult False (Left Nothing)) @?= [True, False]
     ]
 
 -- | A step outcome from a script; errors starting with "5" are global.

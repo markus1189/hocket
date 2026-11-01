@@ -40,7 +40,6 @@ import qualified Data.Text as T
 import Events
   ( HocketEvent (HocketMsg),
     executeBatchEvt,
-    fetchItemsEvt,
   )
 import Network.Bookmark.Agent.Intent (toIntent)
 import Network.Bookmark.Agent.Protocol
@@ -256,6 +255,5 @@ dispatch env rid = \case
 toEvent :: AgentEnv -> WriteCmd -> IO HocketEvent
 toEvent env cmd = case cmd of
   CmdExecute -> pure executeBatchEvt
-  CmdRefresh -> pure fetchItemsEvt
   -- The groups Phase 3 has moved go through update, as the same Intent.
   _ -> HocketMsg . Intent . (`toIntent` cmd) <$> aeNow env

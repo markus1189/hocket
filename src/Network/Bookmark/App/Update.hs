@@ -4,6 +4,10 @@
 -- | The TUI core as one pure function. Until the end of Phase 3 it only
 -- covers the handler groups that have moved; 'Nothing' means a message is
 -- still handled the old way (its producer still posts the old event).
+--
+-- Invariant: whether the answer is 'Nothing' depends only on the 'Msg'
+-- constructor, never on the state. The shell routes a key to update only
+-- when update covers all its intents, and relies on that.
 module Network.Bookmark.App.Update (update) where
 
 import qualified Brick.Widgets.List as L
@@ -16,6 +20,7 @@ import Network.Bookmark.App.Msg
 import Network.Bookmark.Reminder (reminderPolicy)
 import Network.Bookmark.Types
 import Network.Bookmark.Ui.State
+import Network.Bookmark.Ui.Sync (applyFetchCompleted, formatPOSIXTime, planSync)
 
 update :: Msg -> HocketState -> Maybe (HocketState, [Effect])
 update msg s = case msg of
@@ -46,10 +51,18 @@ update msg s = case msg of
   AgentClients n -> Just (setAgentClients n s, [])
   -- The status line is overwritten within a frame, so the header keeps it.
   AgentServerDied err -> Just (s & hsStatus ?~ ("agent socket failed: " <> err) & setAgentError (Just err), [])
+  -- One async op at a time: a refresh while one runs is dropped, as before.
+  Intent Refresh -> Just $ case tryAcquireAsyncOp OpFetchItems s of
+    Nothing -> (s, [])
+    Just fetching -> (fetching & hsStatus ?~ ("fetching" <> since), [StartFetch (planSync lastUpdated)])
+  FetchCompleted wasAllCollectionsFetch batches -> Just (applyFetchCompleted wasAllCollectionsFetch batches (s & hsStatus .~ Nothing), [])
+  FetchFailed err -> Just (completeAsyncOp s & hsStatus ?~ ("failed" <> maybe "<no err>" (": " <>) err), [])
   SystemFailed err -> Just (s & hsStatus ?~ err, [])
   Copied url -> Just (s & hsStatus ?~ ("Copied: " <> url), [])
   _ -> Nothing
   where
+    lastUpdated = s ^. hsLastUpdated
+    since = maybe "" (\t -> " since: " <> formatPOSIXTime (t - 86400)) lastUpdated
     -- What is visible changes, so the list follows at once, as before.
     refilter f = Just (syncForRender (f s), [])
     target = maybe [] pure . targetItem s

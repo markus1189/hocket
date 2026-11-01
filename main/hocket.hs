@@ -60,7 +60,6 @@ import Control.Monad (unless, void)
 import qualified Control.Monad.Catch as Catch
 import Control.Monad.IO.Class (liftIO)
 import Control.Monad.Logger (LoggingT, defaultOutput, logErrorN, logInfoN, runLoggingT, runStdoutLoggingT)
-import Control.Monad.Loops (unfoldrM)
 import Data.Bifunctor (first)
 import qualified Data.ByteString.Lazy as LBS
 import Data.Foldable (for_, traverse_)
@@ -77,7 +76,7 @@ import Data.Text (Text)
 import qualified Data.Text as T
 import Data.Text.Zipper.Generic.Words (deletePrevWord)
 import Data.Time (UTCTime, getCurrentTime)
-import Data.Time.Clock.POSIX (posixSecondsToUTCTime, utcTimeToPOSIXSeconds)
+import Data.Time.Clock.POSIX (posixSecondsToUTCTime)
 import Data.Time.Format (defaultTimeLocale, formatTime)
 import Data.Time.LocalTime
   ( TimeZone,
@@ -94,10 +93,8 @@ import Events
     archivedItemsEvt,
     executeBatchDoneEvt,
     executeBatchEvt,
-    fetchItemsEvt,
     remindersRemovedEvt,
     remindersSetEvt,
-    setStatusEvt,
   )
 import Fixture (FixtureOpts (..), fixtureParser, fixtureStore)
 import Formatting (sformat, (%))
@@ -127,16 +124,13 @@ import Network.Bookmark.Fake (encodeFixtureDump, fakePort)
 import Network.Bookmark.Port (RaindropPort (..))
 import Network.Bookmark.Types
   ( BookmarkItem,
-    BookmarkItemBatch (..),
     BookmarkItemId (..),
-    BookmarkRequest (AddBookmark, BatchArchiveBookmarks, RemoveReminder, RetrieveBookmarks, SetReminder),
+    BookmarkRequest (AddBookmark, BatchArchiveBookmarks, RemoveReminder, SetReminder),
     PendingAction (..),
-    RaindropCollectionId,
     biCreated,
     biExcerpt,
     biId,
     biImportant,
-    biLastUpdate,
     biLink,
     biNote,
     biReminder,
@@ -180,16 +174,9 @@ import Network.Bookmark.Ui.State
     tryAcquireAsyncOp,
   )
 import Network.Bookmark.Ui.Sync
-  ( SyncKind (..),
-    applyArchived,
-    applyFetchCompleted,
+  ( applyArchived,
     applyRemindersRemoved,
     applyRemindersSet,
-    formatPOSIXTime,
-    planSync,
-    spCollection,
-    spKind,
-    spSearch,
   )
 import Network.Bookmark.Ui.Widgets (sanitizeForDisplay)
 import Network.Raindrop (servantPort)
@@ -229,12 +216,11 @@ import Options.Applicative
     (<**>),
   )
 import qualified Options.Applicative as Opt
-import Servant.Client (ClientError (..))
 import System.Directory (XdgDirectory (..), createDirectoryIfMissing, doesFileExist, getXdgDirectory)
 import System.Exit (exitFailure)
 import System.FilePath ((</>))
 import System.IO (BufferMode (LineBuffering), IOMode (AppendMode), hPutStrLn, hSetBuffering, stderr, withFile)
-import Worker (errorMessageFromException, exceptionMessage, fetchResultEvents, runBatch, runCalls, runStep, trySync)
+import Worker (runBatch, runCalls, runStep)
 
 data HocketCommand
   = RunTUI !(Maybe AgentSocketOpt) !(Maybe FixtureOpts)
@@ -436,9 +422,6 @@ vtyEventHandlerNormal ::
   BChan HocketEvent ->
   Event ->
   EventM Name HocketState ()
-vtyEventHandlerNormal es (EvKey (KChar 'r') []) = do
-  liftIO $ es `trigger` fetchItemsEvt
-  pure ()
 vtyEventHandlerNormal es (EvKey (KChar 'X') []) = do
   liftIO $ es `trigger` executeBatchEvt
   pure ()
@@ -514,23 +497,6 @@ asyncCommandEventHandler ::
   Env ->
   AsyncCommand ->
   EventM Name HocketState ()
-asyncCommandEventHandler (Env es port) FetchItems =
-  withAsyncSlot OpFetchItems $ do
-    s <- use id
-    _ <- liftIO . async $ do
-      let plan = planSync (s ^. hsLastUpdated)
-          isUpdateFetch = plan ^. spKind == IncrementalAll
-          suffix = maybe "" (\since -> " since: " <> formatPOSIXTime (since - 86400)) $ s ^. hsLastUpdated
-      es `trigger` setStatusEvt (Just ("fetching" <> suffix))
-      result <- trySync (retrieveItems port (plan ^. spSearch) (plan ^. spCollection))
-      let rendered = either (Left . Just . exceptionMessage) (first errorMessageFromException) result
-      for_ (fetchResultEvents isUpdateFetch rendered) (trigger es)
-    pure ()
-asyncCommandEventHandler _ (FetchCompleted wasAllCollectionsFetch batches) =
-  id %= applyFetchCompleted wasAllCollectionsFetch batches
-asyncCommandEventHandler (Env es _) (FetchFailed err) = do
-  id %= completeAsyncOp
-  liftIO (es `trigger` setStatusEvt (Just ("failed" <> maybe "<no err>" (": " <>) err)))
 asyncCommandEventHandler env ExecuteBatch = do
   s <- use id
   case batchStepsWithWork s of
@@ -710,7 +676,7 @@ app tz isFixture env mSnapVar =
           s <- use id
           liftIO . atomically . modifyTVar' snapVar $ \old ->
             takeSnapshot (asVersion old + 1) s,
-      appStartEvent = liftIO (envEvents env `trigger` fetchItemsEvt),
+      appStartEvent = applyMsg env (Intent I.Refresh),
       appAttrMap = const hocketAttrMap
     }
 
@@ -927,25 +893,6 @@ hBarWithHints :: Text -> Text -> Widget Name
 hBarWithHints leftText rightText =
   withAttr (attrName "bar") (txt leftText <+> padLeft Max (txt rightText))
 
-retrieveItems :: RaindropPort -> Maybe Text -> RaindropCollectionId -> IO (Either ClientError [BookmarkItemBatch])
-retrieveItems port searchParam collectionId = do
-  tryClientError $
-    unfoldrM
-      ( \currentPage -> do
-          (_, items) <- runRaindrop port (RetrieveBookmarks currentPage collectionId searchParam)
-
-          let mostRecentUpdate =
-                if null items
-                  then 0
-                  else maximum (map (utcTimeToPOSIXSeconds . view biLastUpdate) items)
-
-          pure $
-            if null items
-              then Nothing
-              else Just (BookmarkItemBatch mostRecentUpdate items (fromIntegral $ length items), currentPage + 1)
-      )
-      0
-
 -- | One batch call, so its outcome applies to every id.
 performArchive :: RaindropPort -> [BookmarkItem] -> IO (StepOutcome BookmarkItemId Text)
 performArchive port items =
@@ -966,9 +913,6 @@ withTuiLog k = do
   withFile (dir </> "hocket.log") AppendMode $ \h -> do
     hSetBuffering h LineBuffering
     k (`runLoggingT` defaultOutput h)
-
-tryClientError :: IO a -> IO (Either ClientError a)
-tryClientError = try @ClientError
 
 txtDisplay :: BookmarkItem -> Widget Name
 txtDisplay bit =

@@ -89,7 +89,6 @@ executable hocket
                      , network-uri
                      , optparse-applicative
                      , process
-                     , servant-client
                      , servant-client-core
                      , stm
                      , text
@@ -144,6 +143,7 @@ test-suite test
                      , http-media
                      , http-types
                      , lens
+                     , monad-loops
                      , mtl
                      , network
                      , optparse-applicative

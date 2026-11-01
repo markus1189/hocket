@@ -7,6 +7,7 @@ module Network.Bookmark.App.Effect
 where
 
 import Data.Text (Text)
+import Network.Bookmark.Ui.Sync (SyncPlan)
 
 -- | Bookmarks open in firefox; Raindrop's edit page with the desktop default.
 data Opener = Firefox | XdgOpen
@@ -17,4 +18,7 @@ data Effect
   | OpenUrl !Opener !Text
   | -- | The raw link; the clipboard adapter cleans it, as 'browseItem' does.
     CopyText !Text
+  | -- | Fetch in the background; answered by exactly one 'FetchCompleted' or
+    -- 'FetchFailed'.
+    StartFetch !SyncPlan
   deriving (Show, Eq)

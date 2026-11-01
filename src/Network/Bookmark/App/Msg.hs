@@ -13,7 +13,7 @@ where
 import Data.Text (Text)
 import Data.Time (TimeZone, UTCTime)
 import Network.Bookmark.Agent.Protocol (FlagAction)
-import Network.Bookmark.Types (BookmarkItemId)
+import Network.Bookmark.Types (BookmarkItemBatch, BookmarkItemId)
 import Network.Bookmark.Ui.State (VideoFilterMode)
 
 -- | Sampled by the shell only, once per key press or agent request.
@@ -65,4 +65,8 @@ data Msg
     AgentClients !Int
   | -- | The agent socket server stopped; the reason stays in the header.
     AgentServerDied !Text
+  | -- | The one terminal message of a fetch: whether it was incremental, and
+    -- every page. Only this or 'FetchFailed' frees the fetch slot.
+    FetchCompleted !Bool ![BookmarkItemBatch]
+  | FetchFailed !(Maybe Text)
   deriving (Show, Eq)

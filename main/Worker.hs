@@ -5,7 +5,7 @@
 -- | What the async workers post, as pure functions of what their calls
 -- returned, so the posting rules can be tested without IO.
 module Worker
-  ( fetchResultEvents,
+  ( fetchResult,
     postOutcome,
     runSteps,
     runBatch,
@@ -34,6 +34,7 @@ import Data.Text (Text)
 import qualified Data.Text as T
 import qualified Data.Text.Encoding as T
 import Events
+import Network.Bookmark.App.Msg (Msg (FetchCompleted, FetchFailed))
 import Network.Bookmark.Batch
 import Network.Bookmark.Types (BookmarkItemBatch)
 import Network.Bookmark.Ui.State (BatchStep (..))
@@ -41,10 +42,11 @@ import Network.HTTP.Types (statusCode)
 import Network.Raindrop (classify)
 import Servant.Client.Core (ClientError (..), ResponseF (..))
 
--- | The events a finished fetch posts, given the rendered error or the pages.
-fetchResultEvents :: Bool -> Either (Maybe Text) [BookmarkItemBatch] -> [HocketEvent]
-fetchResultEvents _ (Left err) = [fetchFailedEvt err]
-fetchResultEvents isUpdateFetch (Right batches) = [setStatusEvt Nothing, fetchCompletedEvt isUpdateFetch batches]
+-- | The one message a finished fetch posts, given the rendered error or the
+-- pages; one by type, so an empty fetch frees the slot too (B1).
+fetchResult :: Bool -> Either (Maybe Text) [BookmarkItemBatch] -> Msg
+fetchResult _ (Left err) = FetchFailed err
+fetchResult isUpdateFetch (Right batches) = FetchCompleted isUpdateFetch batches
 
 -- | Post a finished step's outcome; what is left for the batch status.
 postOutcome :: (Monad m) => (HocketEvent -> m ()) -> (StepOutcome a Text -> HocketEvent) -> StepOutcome a Text -> m (StepOutcome () Text)

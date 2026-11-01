@@ -20,6 +20,7 @@ import Network.Bookmark.App.Msg
 import Network.Bookmark.App.Update
 import Network.Bookmark.Types
 import Network.Bookmark.Ui.State
+import Network.Bookmark.Ui.Sync (planSync)
 import Test.Tasty
 import Test.Tasty.HUnit
 
@@ -97,6 +98,25 @@ updateTests =
         (^. hsAgentClients) . fst <$> update (AgentClients 2) twoItems @?= Just 2
         ((\s' -> (s' ^. hsAgentError, s' ^. hsStatus)) . fst <$> update (AgentServerDied "bind: busy") twoItems)
           @?= Just (Just "bind: busy", Just "agent socket failed: bind: busy"),
+      testCase "Refresh takes the slot and starts the first fetch from Unsorted" $ do
+        let Just (s', fx) = update (Intent Refresh) emptyState
+        (fx, asyncOpRunning s', s' ^. hsStatus) @?= ([StartFetch (planSync Nothing)], True, Just "fetching"),
+      testCase "Refresh after a sync fetches what changed since a day before it" $ do
+        let synced = emptyState & hsLastUpdated ?~ 1761393600 -- 2025-10-25 12:00 UTC
+            Just (s', fx) = update (Intent Refresh) synced
+        (fx, s' ^. hsStatus) @?= ([StartFetch (planSync (Just 1761393600))], Just "fetching since: 2025-10-24"),
+      testCase "Refresh while an async op runs is dropped" $ do
+        let Just busy = tryAcquireAsyncOp OpExecuteBatch emptyState
+        fmap (\(s', fx) -> (fx, s' ^. hsAsyncOp, s' ^. hsStatus)) (update (Intent Refresh) busy) @?= Just ([], Just OpExecuteBatch, Nothing),
+      testCase "FetchCompleted merges, clears the status and frees the slot" $ do
+        let Just (fetching, _) = update (Intent Refresh) emptyState
+            Just (s', fx) = update (FetchCompleted False [BookmarkItemBatch 5 [item "n" (-1)] 1]) fetching
+        (fx, asyncOpRunning s', s' ^. hsStatus, Map.keys (s' ^. hsContents)) @?= ([], False, Nothing, [BookmarkItemId "n"]),
+      testCase "FetchFailed frees the slot and names the error" $ do
+        let Just (fetching, _) = update (Intent Refresh) emptyState
+            failed err = (\(s', fx) -> (fx, asyncOpRunning s', s' ^. hsStatus)) <$> update (FetchFailed err) fetching
+        failed (Just "offline") @?= Just ([], False, Just "failed: offline")
+        failed Nothing @?= Just ([], False, Just "failed<no err>"),
       testCase "SystemFailed and Copied go to the status line" $ do
         (^. hsStatus) . fst <$> update (SystemFailed "no firefox") emptyState @?= Just (Just "no firefox")
         (^. hsStatus) . fst <$> update (Copied "https://example.com/a") emptyState @?= Just (Just "Copied: https://example.com/a")
@@ -127,12 +147,13 @@ migrated =
     ToggleHideVideos,
     ToggleFutureReminders,
     SetShowFutureReminders True,
-    SetStatus "agent: hi"
+    SetStatus "agent: hi",
+    Refresh
   ]
 
 -- | The keys hocket.hs sends through keyIntents and update so far.
 routedKeys :: [Char]
-routedKeys = "asu\n eyUQSvV"
+routedKeys = "asu\n eyUQSvVr"
 
 keyOf :: Char -> Vty.Key
 keyOf '\n' = Vty.KEnter
@@ -150,7 +171,8 @@ routedWrites =
     CmdSetVideoFilter HideVideos,
     CmdSetShowFutureReminders True,
     CmdSelectItem (BookmarkItemId "b"),
-    CmdSetStatus "hi"
+    CmdSetStatus "hi",
+    CmdRefresh
   ]
 
 now0 :: Now

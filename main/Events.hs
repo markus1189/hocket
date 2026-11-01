@@ -2,9 +2,6 @@ module Events
   ( HocketEvent (..),
     AsyncCommand (..),
     UiCommand (..),
-    fetchItemsEvt,
-    fetchCompletedEvt,
-    fetchFailedEvt,
     executeBatchEvt,
     executeBatchDoneEvt,
     archivedItemsEvt,
@@ -29,12 +26,7 @@ data HocketEvent
   deriving (Show, Eq)
 
 data AsyncCommand
-  = FetchItems
-  | -- | The one terminal message of a fetch: all pages, and whether it was
-    -- incremental. Only this or 'FetchFailed' frees the fetch slot.
-    FetchCompleted !Bool ![BookmarkItemBatch]
-  | FetchFailed !(Maybe Text)
-  | ExecuteBatch
+  = ExecuteBatch
   | ExecuteBatchDone
   | ArchivedItems !(StepOutcome BookmarkItemId Text)
   | RemindersSet !(StepOutcome (BookmarkItemId, UTCTime) Text)
@@ -44,15 +36,6 @@ data AsyncCommand
 -- | A worker's progress line; the fetch and batch steps move it into update.
 newtype UiCommand = SetStatus (Maybe Text)
   deriving (Show, Eq)
-
-fetchItemsEvt :: HocketEvent
-fetchItemsEvt = HocketAsync FetchItems
-
-fetchCompletedEvt :: Bool -> [BookmarkItemBatch] -> HocketEvent
-fetchCompletedEvt isAllCollections batches = HocketAsync (FetchCompleted isAllCollections batches)
-
-fetchFailedEvt :: Maybe Text -> HocketEvent
-fetchFailedEvt err = HocketAsync (FetchFailed err)
 
 executeBatchEvt :: HocketEvent
 executeBatchEvt = HocketAsync ExecuteBatch
