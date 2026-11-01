@@ -17,6 +17,13 @@
 -- here: it returns once any later event was applied, also one queued before
 -- the write (with it in place of the drain, this property fails).
 --
+-- What no test here can see: a write applied twice. Every agent write sets
+-- a state rather than toggling one, so a second application changes nothing
+-- a read shows; QS's mutant that injects each write twice passes smAgent.
+-- fullChannel catches that mutant only by a side effect: the first copy
+-- lands, the second is refused, the write is answered "full", and each retry
+-- adds a copy until the deadline.
+--
 -- smAgentExecute: agents write while a batch runs. Flags are not modelled;
 -- a write lands, is retried on "channel full", or is a set_flag rejected for
 -- one of the reasons a concurrent archive or reminder can cause.
