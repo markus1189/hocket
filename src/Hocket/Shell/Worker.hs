@@ -1,11 +1,14 @@
 {-# LANGUAGE LambdaCase #-}
 {-# LANGUAGE OverloadedStrings #-}
+{-# LANGUAGE RankNTypes #-}
 {-# LANGUAGE ScopedTypeVariables #-}
 
 -- | What the async workers post, as pure functions of what their calls
 -- returned, so the posting rules can be tested without IO.
 module Hocket.Shell.Worker
-  ( fetchResult,
+  ( runFetch,
+    runBatch,
+    fetchResult,
     postOutcome,
     runSteps,
     runCalls,
@@ -20,9 +23,10 @@ where
 
 import Control.Applicative ((<|>))
 import Control.Exception (SomeAsyncException, SomeException (..), displayException, fromException)
-import Control.Lens ((^.))
+import Control.Lens (view, (^.))
 import Control.Monad (mfilter)
-import Control.Monad.Catch (MonadCatch, throwM, try)
+import Control.Monad.Catch (MonadCatch, onException, throwM, try)
+import Control.Monad.Loops (unfoldrM)
 import Data.Bifunctor (first, second)
 import qualified Data.CaseInsensitive as CI
 import Data.Char (isControl)
@@ -31,13 +35,69 @@ import Data.Maybe (isJust)
 import Data.Text (Text)
 import qualified Data.Text as T
 import qualified Data.Text.Encoding as T
+import Data.Time (UTCTime)
+import Data.Time.Clock.POSIX (utcTimeToPOSIXSeconds)
 import Hocket.Adapter.Raindrop (classify)
 import Hocket.App.Batch
 import Hocket.App.Model (BatchStep (..))
-import Hocket.App.Msg (Msg (..), StepResult)
-import Hocket.Domain.Bookmark (BookmarkItemBatch)
+import Hocket.App.Msg (Msg (..), StepResult (..))
+import Hocket.App.Plan (BatchPlan (..), planSteps)
+import Hocket.App.Sync (SyncKind (IncrementalAll), SyncPlan, spCollection, spKind, spSearch)
+import Hocket.Domain.Bookmark (BookmarkItemBatch (..), BookmarkItemId, BookmarkRequest (..), RaindropCollectionId, biLastUpdate)
 import Network.HTTP.Types (statusCode)
 import Servant.Client.Core (ClientError (..), ResponseF (..))
+
+-- | The fetch worker over any request function: exactly one terminal
+-- message, whatever happens short of a cancel (trySync rethrows
+-- asynchronous exceptions). The TUI runs it in IO over a RaindropPort, a
+-- simulation over the pure fake (Hocket.Shell.Simulate).
+runFetch :: (MonadCatch m) => (forall a. BookmarkRequest a -> m a) -> (Msg -> m ()) -> SyncPlan -> m ()
+runFetch call post plan = do
+  result <- trySync (retrieveItems call (plan ^. spSearch) (plan ^. spCollection))
+  let rendered = either (Left . Just . exceptionMessage) (first errorMessageFromException) result
+  post (fetchResult (plan ^. spKind == IncrementalAll) rendered)
+
+-- | Every page of a collection, until the first empty one.
+retrieveItems :: (MonadCatch m) => (forall a. BookmarkRequest a -> m a) -> Maybe Text -> RaindropCollectionId -> m (Either ClientError [BookmarkItemBatch])
+retrieveItems call searchParam collectionId =
+  try $
+    unfoldrM
+      ( \currentPage -> do
+          (_, items) <- call (RetrieveBookmarks currentPage collectionId searchParam)
+
+          let mostRecentUpdate =
+                if null items
+                  then 0
+                  else maximum (map (utcTimeToPOSIXSeconds . view biLastUpdate) items)
+
+          pure $
+            if null items
+              then Nothing
+              else Just (BookmarkItemBatch mostRecentUpdate items (fromIntegral $ length items), currentPage + 1)
+      )
+      0
+
+-- | The batch worker over any request function: one BatchFinished at the
+-- end, also if the steps throw (runCalls already catches per call) or the
+-- thread is cancelled, as a headless loop's or a test's teardown does.
+runBatch :: (MonadCatch m) => (forall a. BookmarkRequest a -> m a) -> (Msg -> m ()) -> BatchPlan -> m ()
+runBatch call post plan = do
+  let run = \case
+        StepArchive -> runStep post StepArchive Archived (performArchive call (bpArchive plan))
+        StepSetReminders -> runStep post StepSetReminders RemindersSetAt (performSetReminders call (bpSetReminders plan))
+        StepRemoveReminders -> runStep post StepRemoveReminders RemindersRemoved (performRemoveReminders call (bpRemoveReminders plan))
+  r <- trySync (runSteps run (planSteps plan)) `onException` post (BatchFinished (Just "batch interrupted"))
+  post (BatchFinished (either (Just . exceptionMessage) (const Nothing) r))
+
+-- | One batch call, so its outcome applies to every id.
+performArchive :: (MonadCatch m) => (forall a. BookmarkRequest a -> m a) -> [BookmarkItemId] -> m (StepOutcome BookmarkItemId Text)
+performArchive call ids = concatOutcome <$> runCalls (call . BatchArchiveBookmarks) [ids]
+
+performSetReminders :: (MonadCatch m) => (forall a. BookmarkRequest a -> m a) -> [(BookmarkItemId, UTCTime)] -> m (StepOutcome (BookmarkItemId, UTCTime) Text)
+performSetReminders call = runCalls (\(bid, reminderTime) -> call (SetReminder bid reminderTime))
+
+performRemoveReminders :: (MonadCatch m) => (forall a. BookmarkRequest a -> m a) -> [BookmarkItemId] -> m (StepOutcome BookmarkItemId Text)
+performRemoveReminders call = runCalls (call . RemoveReminder)
 
 -- | The one message a finished fetch posts, given the rendered error or the
 -- pages; one by type, so an empty fetch frees the slot too (B1).
