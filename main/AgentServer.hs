@@ -19,7 +19,8 @@ module AgentServer
   )
 where
 
-import Control.Concurrent (forkFinally)
+import Control.Concurrent (forkFinally, threadDelay)
+import Control.Concurrent.Async (withAsync)
 import Control.Concurrent.STM
   ( TVar,
     atomically,
@@ -184,27 +185,35 @@ runAgentServer (BoundSocket ref) path env = do
     writeIORef ref (Just (deviceID st, fileID st))
     setFileMode path 0o600
     listen sock 5
-    forever $ do
+    -- Counting is STM only, so nothing on the accept path can fail or block
+    -- on the TUI; postCounts mirrors the count into the header.
+    withAsync (postCounts clients) $ \_ -> forever $ do
       (conn, _) <- accept sock
-      -- One connection's failure must not end the loop: the listener would
-      -- close and leave a silently dead socket file. Async exceptions (the
-      -- cancel on exit) still propagate.
-      tracked clients 1
+      count clients 1
       void $
         forkFinally
           (serveClient env conn)
-          (\_ -> tracked clients (-1))
+          (\_ -> count clients (-1))
   where
-    -- The count is only for the header, so a failure to post it is
-    -- reported and the client served anyway.
-    tracked clients d =
-      trySync (announce clients d) >>= either (report . ("agent: client tracking failed: " <>) . exceptionMessage) pure
+    count clients d = atomically (modifyTVar' clients (+ d))
+    -- A post carries the absolute count, so only the newest matters: wait
+    -- for a change, post it, and retry one the full channel dropped (False)
+    -- or that failed, so the header heals instead of keeping a stale count.
+    -- A failure is reported once per streak; async exceptions (the cancel on
+    -- exit) still propagate.
+    postCounts clients = go 0 False
+      where
+        go posted failing = do
+          n <- atomically (readTVar clients >>= \n -> n <$ check (n /= posted))
+          trySync (aeInject env (AgentClients n)) >>= \case
+            Right True -> go n False
+            Right False -> retry posted failing
+            Left e -> do
+              unless failing (report ("agent: client count failed: " <> exceptionMessage e))
+              retry posted True
+        retry posted failing = threadDelay 50000 >> go posted failing
     -- Best effort: if posting is what fails, this can fail the same way.
     report t = void (trySync (aeInject env (Intent (SetStatus t))))
-    -- Track connected clients and mirror the count into the TUI header.
-    announce clients d = do
-      n <- atomically (modifyTVar' clients (+ d) >> readTVar clients)
-      void (aeInject env (AgentClients n))
 
 serveClient :: AgentEnv -> Socket -> IO ()
 serveClient env conn = do

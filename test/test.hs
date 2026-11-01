@@ -1230,6 +1230,24 @@ agentServerIntegrationTests =
             stopped <- timeout 2000000 (cancel a)
             putMVar gate True -- keeps the gate reachable: no BlockedIndefinitelyOnMVar
             stopped @?= Just (),
+      testCase "a count post dropped by a full channel is posted again" $
+        withSystemTempDirectory "hk" $ \root -> do
+          let path = root </> "s.sock"
+          posted <- newIORef []
+          full <- newIORef True
+          snapVar <- newTVarIO (buildTestSnapshot 1)
+          let inject m = readIORef full >>= \f -> if f then pure False else atomicModifyIORef' posted (\ms -> (m : ms, True))
+              env = AgentEnv {aeSnapshot = snapVar, aeInject = inject, aeNow = pure testNow}
+          bound <- newBoundSocket
+          withAsync (runAgentServer bound path env) $ \_ -> do
+            waitUntilReachable 100 path
+            h <- connectAgentClient path
+            _ <- sendRequest h "{\"id\":1,\"method\":\"get_state\"}"
+            threadDelay 100000
+            writeIORef full False -- the TUI drained its queue; the client stays
+            healed <- waitFor 100 ((== Just 1) <$> latestCount posted)
+            hClose h
+            healed @?= True,
       testCase "the client count returns to 0 when clients leave" $
         withSystemTempDirectory "hk" $ \root -> do
           let path = root </> "s.sock"
@@ -1262,8 +1280,10 @@ agentServerIntegrationTests =
             case resp of
               A.Object o -> KM.lookup (AKey.fromText "ok") o @?= Just (A.Bool True)
               _ -> assertFailure "no answer after a failed announce"
+            -- The poster thread reports asynchronously.
+            reported <- waitFor 100 (any reportsFailure <$> readIORef injected)
             ms <- readIORef injected
-            assertBool ("the failure was not reported: " <> show ms) (any reportsFailure ms),
+            assertBool ("the failure was not reported: " <> show ms) reported,
       testCase "a second server on the same path fails instead of hijacking" $
         withAgentServer $ \snapVar events path -> do
           -- First server is live on `path`. Attempt to start a second one on

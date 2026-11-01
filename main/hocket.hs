@@ -38,7 +38,7 @@ import Brick
     zoom,
     (<+>),
   )
-import Brick.BChan (newBChan, writeBChanNonBlocking)
+import Brick.BChan (newBChan, writeBChan, writeBChanNonBlocking)
 import Brick.Widgets.Border (hBorder)
 import Brick.Widgets.Edit (applyEdit, editFocusedAttr, handleEditorEvent, renderEditor)
 import qualified Brick.Widgets.List as L
@@ -490,7 +490,9 @@ startAgentServer env opt = do
   _ <- async $ do
     r <- try @SomeException (runAgentServer bound path agentEnv)
     case r of
-      Left e -> void (writeBChanNonBlocking events (AgentServerDied (T.pack (show e))))
+      -- Blocking: rare, the main loop drains, and a dropped report would
+      -- leave a dead socket looking alive.
+      Left e -> writeBChan events (AgentServerDied (T.pack (show e)))
       Right () -> pure ()
   pure ((path, ours, bound), snapVar)
 
