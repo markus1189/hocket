@@ -39,12 +39,10 @@ import Data.IORef (IORef, newIORef, readIORef, writeIORef)
 import qualified Data.Text as T
 import Data.Time (UTCTime)
 import Events
-  ( HocketEvent,
+  ( HocketEvent (HocketMsg),
     clearAllFlagsEvt,
     executeBatchEvt,
     fetchItemsEvt,
-    openAndFlagEvt,
-    openItemByIdEvt,
     selectItemEvt,
     setAgentClientsEvt,
     setAllFlagsToArchiveEvt,
@@ -67,6 +65,8 @@ import Network.Bookmark.Agent.Protocol
     validateWrite,
   )
 import Network.Bookmark.Agent.Snapshot (AgentSnapshot, asVersion)
+import Network.Bookmark.App.Msg (Msg (Intent))
+import qualified Network.Bookmark.App.Msg as I
 import Network.Bookmark.Types (PendingAction (..))
 import Network.Socket
   ( Family (AF_UNIX),
@@ -281,6 +281,6 @@ toEvent env = \case
   CmdSetVideoFilter m -> pure (setVideoFilterModeEvt m)
   CmdSetShowFutureReminders b -> pure (setShowFutureRemindersEvt b)
   CmdSelectItem bid -> pure (selectItemEvt bid)
-  CmdOpenItem bid -> pure (openItemByIdEvt bid)
-  CmdOpenAndFlag bid -> pure (openAndFlagEvt bid)
+  CmdOpenItem bid -> pure (HocketMsg (Intent (I.Open (I.ById bid))))
+  CmdOpenAndFlag bid -> pure (HocketMsg (Intent (I.OpenAndFlag bid)))
   CmdSetStatus t -> pure (setStatusEvt (Just ("agent: " <> t)))

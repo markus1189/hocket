@@ -1,6 +1,7 @@
--- | What the TUI core reacts to (plan §4.2). Keyboard and agent both arrive
--- as an 'Intent', so the agent can do nothing a key cannot (G2). Phase 3
--- moves the handlers over one group at a time; 'Msg' grows with them.
+-- | What the TUI core reacts to (plan §4.2). Every flag, batch and view
+-- action of the keyboard and the agent arrives as an 'Intent' (G2);
+-- navigation and the filter editor follow in Phase 4. Phase 3 moves the
+-- handlers over one group at a time; 'Msg' grows with them.
 module Network.Bookmark.App.Msg
   ( Now (..),
     Target (..),
@@ -54,5 +55,10 @@ data Intent
   | Quit
   deriving (Show, Eq)
 
-newtype Msg = Intent Intent
+data Msg
+  = Intent !Intent
+  | -- | A browser or clipboard call failed; the text goes to the status line.
+    SystemFailed !Text
+  | -- | The cleaned URL that reached the clipboard.
+    Copied !Text
   deriving (Show, Eq)

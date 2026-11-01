@@ -48,11 +48,12 @@ import Control.Concurrent.Async (async)
 import Control.Concurrent.STM (TVar, atomically, modifyTVar', newTVarIO)
 import Control.Exception (SomeException, bracket, finally)
 import Control.Exception.Base (try)
-import Control.Lens (at, view)
+import Control.Lens (view)
 import Control.Lens.Combinators (use)
 import Control.Lens.Operators
   ( (%=),
     (.=),
+    (?=),
     (^.),
   )
 import Control.Monad (unless, void)
@@ -91,10 +92,7 @@ import Events
     HocketEvent (..),
     UiCommand (..),
     archivedItemsEvt,
-    browseItemEvt,
     clearAllFlagsEvt,
-    copyUrlEvt,
-    editItemInBrowserEvt,
     executeBatchDoneEvt,
     executeBatchEvt,
     fetchItemsEvt,
@@ -114,6 +112,7 @@ import Graphics.Vty (Event (EvKey), Key (KChar, KDown, KUp), Modifier (MCtrl))
 import qualified Graphics.Vty as Vty
 import Graphics.Vty.Input.Events (Key (KEnter, KEsc))
 import Graphics.Vty.Platform.Unix (mkVty)
+import Interpret (Env (..), interpret)
 import Keys (ItemKey (..), itemKeyEvents)
 import Network.Bookmark.Agent.Protocol
   ( AgentCmd (..),
@@ -139,7 +138,6 @@ import Network.Bookmark.Types
     BookmarkRequest (AddBookmark, BatchArchiveBookmarks, RemoveReminder, RetrieveBookmarks, SetReminder),
     PendingAction (..),
     RaindropCollectionId,
-    URL (..),
     biCreated,
     biExcerpt,
     biId,
@@ -252,7 +250,6 @@ import Options.Applicative
   )
 import qualified Options.Applicative as Opt
 import Servant.Client (ClientError (..))
-import System (browseItem, cleanUrl, copyToClipboard)
 import System.Directory (XdgDirectory (..), createDirectoryIfMissing, doesFileExist, getXdgDirectory)
 import System.Exit (exitFailure)
 import System.FilePath ((</>))
@@ -410,10 +407,6 @@ opts =
         <> header "hocket - Your command-line bookmark helper"
     )
 
--- | What the async handlers need from outside: where to post events, and
--- Raindrop. The keyboard and UI handlers only post, so they take the channel.
-data Env = Env {envEvents :: !(BChan HocketEvent), envPort :: !RaindropPort}
-
 trigger :: BChan HocketEvent -> HocketEvent -> IO ()
 trigger = writeBChan
 
@@ -438,14 +431,20 @@ vtyEventHandler env e = do
       EvKey (KChar 'Q') [] -> applyMsg env (Intent I.Quit)
       _ -> vtyEventHandlerNormal (envEvents env) e
 
--- | Run one message through 'update' and its effects through the shell.
+-- | Run one message through 'update', its effects through 'interpret', and
+-- what those answer right away through 'update' again.
 applyMsg :: Env -> Msg -> EventM Name HocketState ()
-applyMsg _ m = do
+applyMsg env m = do
   s <- use id
-  for_ (update m s) $ \(s', effects) -> do
-    id .= s'
-    for_ effects $ \case
-      Halt -> halt
+  case update m s of
+    -- A producer posted a group Phase 3 has not moved yet: say so rather
+    -- than drop the key or agent write.
+    Nothing -> hsStatus ?= ("unhandled: " <> T.pack (show m))
+    Just (s', effects) -> do
+      id .= s'
+      for_ effects $ \case
+        Halt -> halt
+        effect -> liftIO (interpret env effect) >>= traverse_ (applyMsg env)
 
 vtyEventHandlerNormal ::
   BChan HocketEvent ->
@@ -496,10 +495,10 @@ vtyEventHandlerNormal es (EvKey (KChar 'V') []) = do
   pure ()
 vtyEventHandlerNormal es (EvKey (KChar 'e') []) = do
   s <- use id
-  liftIO . for_ (focusedItem s) $ \bit -> es `trigger` editItemInBrowserEvt bit
+  liftIO . for_ (focusedItem s) $ \bit -> es `trigger` HocketMsg (Intent (I.EditInRaindrop (I.ById (view biId bit))))
 vtyEventHandlerNormal es (EvKey (KChar 'y') []) = do
   s <- use id
-  liftIO . for_ (focusedItem s) $ \bit -> es `trigger` copyUrlEvt bit
+  liftIO . for_ (focusedItem s) $ \bit -> es `trigger` HocketMsg (Intent (I.CopyUrl (I.ById (view biId bit))))
 vtyEventHandlerNormal _ (EvKey (KChar '/') []) =
   -- Flip into filter mode synchronously so the very next keystroke is already
   -- seen under the editing guard; routing this through the BChan would leave a
@@ -635,37 +634,8 @@ uiCommandEventHandler _ (SelectItem bid) = do
   s <- use id
   let mIdx = V.findIndex (\bit -> view biId bit == bid) (s ^. itemList . L.listElementsL)
   for_ mIdx $ \i -> itemList %= L.listMoveTo i
-uiCommandEventHandler es (OpenItemById bid) = do
-  s <- use id
-  liftIO . for_ (s ^. hsContents . at bid) $ \(_, bit) -> es `trigger` browseItemEvt bit
-uiCommandEventHandler es (OpenAndFlagItem bid) = do
-  s <- use id
-  case s ^. hsContents . at bid of
-    Just (_, bit) -> do
-      id %= setPendingAction bid ToBeArchived
-      id %= syncForRender
-      liftIO (es `trigger` browseItemEvt bit)
-    Nothing -> pure ()
 uiCommandEventHandler _ (SetAgentClients n) = id %= setAgentClients n
 uiCommandEventHandler _ (SetAgentError e) = id %= setAgentError e
-uiCommandEventHandler es (BrowseItem bit) = do
-  res <- liftIO . try @SomeException $ browseItem "firefox" (URL . T.unpack $ view biLink bit)
-  case res of
-    Left e -> liftIO $ es `trigger` setStatusEvt (Just (T.pack $ show e))
-    Right () -> pure ()
-uiCommandEventHandler es (CopyUrl bit) = do
-  let url = cleanUrl (T.unpack (view biLink bit))
-  eitherClipError <- liftIO . try @SomeException $ copyToClipboard url
-  case eitherClipError of
-    Right () -> liftIO $ es `trigger` setStatusEvt (Just ("Copied: " <> T.pack url))
-    Left e -> liftIO $ es `trigger` setStatusEvt (Just ("Copy failed: " <> T.pack (show e)))
-uiCommandEventHandler es (EditItemInBrowser bit) = do
-  let itemId = view biId bit ^. _BookmarkItemId
-      editUrl = "https://app.raindrop.io/my/-1/item/" <> T.unpack itemId <> "/edit"
-  res <- liftIO . try @SomeException $ browseItem "xdg-open" (URL editUrl)
-  case res of
-    Left e -> liftIO $ es `trigger` setStatusEvt (Just (T.pack $ show e))
-    Right () -> pure ()
 
 myEventHandler ::
   Env ->

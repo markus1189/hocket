@@ -6,6 +6,7 @@ where
 
 import Control.Lens (view)
 import Events
+import Network.Bookmark.App.Msg (Intent (Open), Msg (Intent), Target (ById))
 import Network.Bookmark.Types (PendingAction (..), biId)
 import Network.Bookmark.Ui.State
 
@@ -22,9 +23,11 @@ itemKeyEvents key s = case focusedItem s of
   Just bit ->
     let bid = view biId bit
         action = getPendingActionForItem bid s
+        -- By id: the item focused when the key was pressed.
+        open = HocketMsg (Intent (Open (ById bid)))
      in case key of
-          KeySpace -> [browseItemEvt bit]
-          KeyEnter -> [browseItemEvt bit, shiftItemEvt bid]
+          KeySpace -> [open]
+          KeyEnter -> [open, shiftItemEvt bid]
           KeyArchive -> [archiveItemEvt bid | action /= ToBeArchived]
           KeyRemind -> [shiftItemReminderEvt bid | not (isToBeReminded action)]
           KeyUnflag ->

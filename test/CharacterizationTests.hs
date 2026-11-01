@@ -14,6 +14,7 @@ import Data.Time.Clock (UTCTime)
 import Data.Time.Clock.POSIX (POSIXTime, utcTimeToPOSIXSeconds)
 import Events
 import Keys
+import Network.Bookmark.App.Msg (Intent (Open), Msg (Intent), Target (ById))
 import Network.Bookmark.Types
 import Network.Bookmark.Ui.State
 import Network.Bookmark.Ui.Sync
@@ -170,7 +171,7 @@ press key s0 = foldl deliver (syncForRender s0, []) (itemKeyEvents key s0)
       HocketUi (ShiftItem bid) -> (syncForRender (shiftItem bid s), browsed)
       HocketUi (ArchiveItem bid) -> (syncForRender (archiveItem bid s), browsed)
       HocketUi (ShiftItemReminder bid) -> (syncForRender (shiftItemReminder bid t7 s), browsed)
-      HocketUi (BrowseItem bit) -> (s, browsed <> [bit ^. biId . _BookmarkItemId])
+      HocketMsg (Intent (Open (ById (BookmarkItemId b)))) -> (s, browsed <> [b])
       other -> error ("unexpected event from a key: " <> show other)
 
 -- | Key, target has a reminder, flag before, flag after, cursor moves down.

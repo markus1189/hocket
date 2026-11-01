@@ -14,9 +14,6 @@ module Events
     archiveItemEvt,
     shiftItemReminderEvt,
     setStatusEvt,
-    browseItemEvt,
-    editItemInBrowserEvt,
-    copyUrlEvt,
     clearAllFlagsEvt,
     setAllFlagsToArchiveEvt,
     toggleRemindersEvt,
@@ -27,8 +24,6 @@ module Events
     setVideoFilterModeEvt,
     setShowFutureRemindersEvt,
     selectItemEvt,
-    openItemByIdEvt,
-    openAndFlagEvt,
     setAgentClientsEvt,
     setAgentErrorEvt,
   )
@@ -67,9 +62,6 @@ data UiCommand
   | ArchiveItem !BookmarkItemId
   | ShiftItemReminder !BookmarkItemId
   | SetStatus !(Maybe Text)
-  | BrowseItem !BookmarkItem
-  | EditItemInBrowser !BookmarkItem
-  | CopyUrl !BookmarkItem
   | ClearAllFlags
   | SetAllFlagsToArchive
   | ToggleReminders
@@ -81,8 +73,6 @@ data UiCommand
   | SetVideoFilterMode !VideoFilterMode
   | SetShowFutureReminders !Bool
   | SelectItem !BookmarkItemId
-  | OpenItemById !BookmarkItemId
-  | OpenAndFlagItem !BookmarkItemId
   | SetAgentClients !Int
   | SetAgentError !(Maybe Text)
   deriving (Show, Eq)
@@ -123,15 +113,6 @@ shiftItemReminderEvt bid = HocketUi (ShiftItemReminder bid)
 setStatusEvt :: Maybe Text -> HocketEvent
 setStatusEvt mstatus = HocketUi (SetStatus mstatus)
 
-browseItemEvt :: BookmarkItem -> HocketEvent
-browseItemEvt bit = HocketUi (BrowseItem bit)
-
-editItemInBrowserEvt :: BookmarkItem -> HocketEvent
-editItemInBrowserEvt bit = HocketUi (EditItemInBrowser bit)
-
-copyUrlEvt :: BookmarkItem -> HocketEvent
-copyUrlEvt bit = HocketUi (CopyUrl bit)
-
 clearAllFlagsEvt :: HocketEvent
 clearAllFlagsEvt = HocketUi ClearAllFlags
 
@@ -161,12 +142,6 @@ setShowFutureRemindersEvt b = HocketUi (SetShowFutureReminders b)
 
 selectItemEvt :: BookmarkItemId -> HocketEvent
 selectItemEvt bid = HocketUi (SelectItem bid)
-
-openItemByIdEvt :: BookmarkItemId -> HocketEvent
-openItemByIdEvt bid = HocketUi (OpenItemById bid)
-
-openAndFlagEvt :: BookmarkItemId -> HocketEvent
-openAndFlagEvt bid = HocketUi (OpenAndFlagItem bid)
 
 setAgentClientsEvt :: Int -> HocketEvent
 setAgentClientsEvt n = HocketUi (SetAgentClients n)
