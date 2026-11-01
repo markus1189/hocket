@@ -46,7 +46,7 @@ import qualified Hedgehog.Gen as Gen
 import qualified Hedgehog.Range as Range
 import Hocket.Adapter.Fake (FakeRaindrop, fakePort, frItems, seedFake)
 import Hocket.Agent.Protocol (AgentCmd (..), FlagAction (..), ReadCmd (..), WriteCmd (..))
-import Hocket.Agent.Snapshot (asAsyncOp)
+import Hocket.Agent.Snapshot (asAsyncOp, asVersion)
 import Hocket.App.Model (AsyncOp (OpExecuteBatch), initialModel)
 import Hocket.App.Msg (Now (..))
 import Hocket.Domain.Bookmark (BookmarkItemId (..), biReminder)
@@ -141,11 +141,16 @@ write sut op = do
   case r of
     Right v | isChannelFullError v -> threadDelay 2000 >> write sut op
     Right v -> do
-      drained <- timeout 10000000 . atomically $ do
+      drained <- timeout 5000000 . atomically $ do
         pending <- readTVar (envPending (sutEnv sut))
         busy <- readTVar (loopBusy (sutLoop sut))
         STM.check (pending == 0 && not busy)
-      pure (okOf v <* drained)
+      -- Fail here, not after every later write has waited out its timeout.
+      maybe (fail "SM-agent: a landed write was not applied within 5 s") pure drained
+      -- Its own event was applied and published since: past the version the
+      -- write answered with.
+      now <- asVersion <$> readTVarIO (loopSnapshot (sutLoop sut))
+      pure ((&&) <$> okOf v <*> ((< now) <$> versionOf v))
     Left _ -> pure Nothing
   where
     toCmd = \case
@@ -157,6 +162,9 @@ write sut op = do
 
 okOf :: Value -> Maybe Bool
 okOf = parseMaybe (withObject "response" (.: "ok"))
+
+versionOf :: Value -> Maybe Int
+versionOf = parseMaybe (withObject "response" (\o -> o .: "result" >>= withObject "result" (.: "version")))
 
 -- | The flag writes get commands of their own, so that they are common: a
 -- lost write only shows when a read follows it.

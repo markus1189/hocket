@@ -26,10 +26,13 @@ import Shell.SimulateTests (simulateTests)
 import Shell.SnapshotGoldenTests (snapshotGoldenTests)
 import Shell.SystemTests (systemTests)
 import Shell.WorkerTests (workerTests)
-import Test.Tasty (TestTree, defaultMain, testGroup)
+import Test.Tasty (TestTree, defaultMain, localOption, mkTimeout, testGroup)
 
 main :: IO ()
-main = defaultMain tests
+-- Every test, a whole property with its shrinks included, gets two minutes
+-- (the suite takes about ten seconds): a regression that makes something
+-- wait forever fails instead of hanging the run.
+main = defaultMain (localOption (mkTimeout (120 * 1000000)) tests)
 
 -- One group per line, so parallel branches adding groups do not conflict.
 tests :: TestTree
