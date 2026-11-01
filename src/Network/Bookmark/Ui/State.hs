@@ -56,6 +56,7 @@ module Network.Bookmark.Ui.State
     getPendingActionForItem,
     shiftItem,
     archiveItem,
+    unflagItem,
     shiftItemReminder,
     setAllFlagsToArchive,
     toggleShowFutureReminders,
@@ -281,6 +282,11 @@ shiftItem bid = (itemList %~ L.listMoveDown) . togglePendingAction bid
 -- | Archive from any flag; 'shiftItem' would clear a reminder flag instead.
 archiveItem :: BookmarkItemId -> HocketState -> HocketState
 archiveItem bid = (itemList %~ L.listMoveDown) . setPendingAction bid ToBeArchived
+
+-- | Key @u@: what 'shiftItem' and 'shiftItemReminder' do to a flagged item,
+-- which ends at 'None' whatever the reminder time.
+unflagItem :: BookmarkItemId -> HocketState -> HocketState
+unflagItem bid = (itemList %~ L.listMoveDown) . setPendingAction bid None
 
 shiftItemReminder :: BookmarkItemId -> UTCTime -> HocketState -> HocketState
 shiftItemReminder bid reminderTime = (itemList %~ L.listMoveDown) . togglePendingActionToReminder bid reminderTime

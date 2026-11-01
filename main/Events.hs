@@ -10,16 +10,10 @@ module Events
     archivedItemsEvt,
     remindersSetEvt,
     remindersRemovedEvt,
-    shiftItemEvt,
-    archiveItemEvt,
-    shiftItemReminderEvt,
     setStatusEvt,
-    clearAllFlagsEvt,
-    setAllFlagsToArchiveEvt,
     toggleRemindersEvt,
     toggleVideoFilterEvt,
     toggleInvertedVideoFilterEvt,
-    setPendingActionEvt,
     setFilterQueryEvt,
     setVideoFilterModeEvt,
     setShowFutureRemindersEvt,
@@ -58,18 +52,12 @@ data AsyncCommand
   deriving (Show, Eq)
 
 data UiCommand
-  = ShiftItem !BookmarkItemId
-  | ArchiveItem !BookmarkItemId
-  | ShiftItemReminder !BookmarkItemId
-  | SetStatus !(Maybe Text)
-  | ClearAllFlags
-  | SetAllFlagsToArchive
+  = SetStatus !(Maybe Text)
   | ToggleReminders
   | ToggleVideoFilter
   | ToggleInvertedVideoFilter
   | -- Agent-socket commands: idempotent variants of the keyboard toggles.
-    SetPendingAction !BookmarkItemId !PendingAction
-  | SetFilterQuery !Text
+    SetFilterQuery !Text
   | SetVideoFilterMode !VideoFilterMode
   | SetShowFutureReminders !Bool
   | SelectItem !BookmarkItemId
@@ -101,23 +89,8 @@ remindersSetEvt outcome = HocketAsync (RemindersSet outcome)
 remindersRemovedEvt :: StepOutcome BookmarkItemId Text -> HocketEvent
 remindersRemovedEvt outcome = HocketAsync (RemindersRemoved outcome)
 
-shiftItemEvt :: BookmarkItemId -> HocketEvent
-shiftItemEvt bid = HocketUi (ShiftItem bid)
-
-archiveItemEvt :: BookmarkItemId -> HocketEvent
-archiveItemEvt bid = HocketUi (ArchiveItem bid)
-
-shiftItemReminderEvt :: BookmarkItemId -> HocketEvent
-shiftItemReminderEvt bid = HocketUi (ShiftItemReminder bid)
-
 setStatusEvt :: Maybe Text -> HocketEvent
 setStatusEvt mstatus = HocketUi (SetStatus mstatus)
-
-clearAllFlagsEvt :: HocketEvent
-clearAllFlagsEvt = HocketUi ClearAllFlags
-
-setAllFlagsToArchiveEvt :: HocketEvent
-setAllFlagsToArchiveEvt = HocketUi SetAllFlagsToArchive
 
 toggleRemindersEvt :: HocketEvent
 toggleRemindersEvt = HocketUi ToggleReminders
@@ -127,9 +100,6 @@ toggleVideoFilterEvt = HocketUi ToggleVideoFilter
 
 toggleInvertedVideoFilterEvt :: HocketEvent
 toggleInvertedVideoFilterEvt = HocketUi ToggleInvertedVideoFilter
-
-setPendingActionEvt :: BookmarkItemId -> PendingAction -> HocketEvent
-setPendingActionEvt bid act = HocketUi (SetPendingAction bid act)
 
 setFilterQueryEvt :: Text -> HocketEvent
 setFilterQueryEvt q = HocketUi (SetFilterQuery q)

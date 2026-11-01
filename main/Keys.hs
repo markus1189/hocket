@@ -1,41 +1,13 @@
 module Keys
-  ( ItemKey (..),
-    itemKeyEvents,
-    keyIntents,
+  ( keyIntents,
   )
 where
 
-import Control.Lens (view, (^.))
-import Events
+import Control.Lens ((^.))
 import Graphics.Vty (Event (EvKey), Key (KChar, KEnter))
-import Network.Bookmark.App.Msg (Intent (Open), Msg (Intent), Now, Target (ById))
+import Network.Bookmark.App.Msg (Intent, Now)
 import qualified Network.Bookmark.App.Msg as I
-import Network.Bookmark.Types (PendingAction (..), biId)
 import Network.Bookmark.Ui.State
-
--- | The normal-mode keys that act on the focused item.
-data ItemKey = KeyArchive | KeyRemind | KeyUnflag | KeyEnter | KeySpace
-  deriving (Show, Eq, Enum, Bounded)
-
--- | What a key posts, decided on the state at key time; the flag change
--- itself happens when the posted 'ShiftItem' / 'ArchiveItem' /
--- 'ShiftItemReminder' arrives.
-itemKeyEvents :: ItemKey -> HocketState -> [HocketEvent]
-itemKeyEvents key s = case focusedItem s of
-  Nothing -> []
-  Just bit ->
-    let bid = view biId bit
-        action = getPendingActionForItem bid s
-        -- By id: the item focused when the key was pressed.
-        open = HocketMsg (Intent (Open (ById bid)))
-     in case key of
-          KeySpace -> [open]
-          KeyEnter -> [open, shiftItemEvt bid]
-          KeyArchive -> [archiveItemEvt bid | action /= ToBeArchived]
-          KeyRemind -> [shiftItemReminderEvt bid | not (isToBeReminded action)]
-          KeyUnflag ->
-            [shiftItemEvt bid | action == ToBeArchived]
-              <> [shiftItemReminderEvt bid | isReminderAction action]
 
 -- | Normal-mode keys as Intents. 'Nothing' is a key the shell keeps:
 -- navigation (j/k/arrows, J/K to the next flagged item), @/@ (enters filter

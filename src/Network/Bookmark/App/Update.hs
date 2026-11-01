@@ -7,8 +7,11 @@
 module Network.Bookmark.App.Update (update) where
 
 import Control.Lens
+import Data.Time (UTCTime)
+import Network.Bookmark.Agent.Protocol (FlagAction (..))
 import Network.Bookmark.App.Effect
 import Network.Bookmark.App.Msg
+import Network.Bookmark.Reminder (reminderPolicy)
 import Network.Bookmark.Types
 import Network.Bookmark.Ui.State
 
@@ -21,12 +24,38 @@ update msg s = case msg of
   Intent (OpenAndFlag bid) -> Just $ case s ^? hsContents . ix bid . _2 of
     Just bit -> (syncForRender (setPendingAction bid ToBeArchived s), [OpenUrl Firefox (bit ^. biLink)])
     Nothing -> (s, [])
+  -- The key intents carry no guard (keyIntents); the no-ops of the old key
+  -- handlers live here, and a no-op does not move the cursor either.
+  Intent (SetArchive t) -> Just (onTarget t $ \bid flag -> [archiveItem bid | flag /= ToBeArchived])
+  Intent (ToggleArchive t) -> Just (onTarget t $ \bid _ -> [shiftItem bid])
+  Intent (ToggleReminder t now) -> Just (onTarget t $ \bid flag -> [shiftItemReminder bid (reminderAt now) | not (isToBeReminded flag)])
+  Intent (Unflag t) -> Just (onTarget t $ \bid flag -> [unflagItem bid | flag /= None])
+  Intent (SetFlag bid act now) -> Just (setPendingAction bid (flagFor now act) s, [])
+  Intent ClearAllFlags -> Just (clearAllFlags s, [])
+  Intent FlagAllArchive -> Just (setAllFlagsToArchive s, [])
   SystemFailed err -> Just (s & hsStatus ?~ err, [])
   Copied url -> Just (s & hsStatus ?~ ("Copied: " <> url), [])
   _ -> Nothing
   where
     target = maybe [] pure . targetItem s
+    -- Apply the change the item's flag calls for, if any.
+    onTarget t change = case targetItem s t of
+      Just bit -> case change (bit ^. biId) (getPendingActionForItem (bit ^. biId) s) of
+        f : _ -> (f s, [])
+        [] -> (s, [])
+      Nothing -> (s, [])
     editUrl bit = "https://app.raindrop.io/my/-1/item/" <> bit ^. biId . _BookmarkItemId <> "/edit"
+
+reminderAt :: Now -> UTCTime
+reminderAt now = reminderPolicy (nowZone now) (nowUtc now)
+
+-- | The agent's idempotent flags.
+flagFor :: Now -> FlagAction -> PendingAction
+flagFor now = \case
+  FlagArchive -> ToBeArchived
+  FlagReminder -> ToBeReminded (reminderAt now)
+  FlagRemoveReminder -> ReminderToBeRemoved
+  FlagNone -> None
 
 -- | Keys act on the focused item; an unknown id is no item.
 targetItem :: HocketState -> Target -> Maybe BookmarkItem

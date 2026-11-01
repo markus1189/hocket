@@ -39,6 +39,7 @@ import Data.Time.Calendar (toGregorian)
 import Data.Time.Clock (DiffTime, UTCTime (..))
 import Data.Time.Clock.POSIX (POSIXTime)
 import Data.Time.Format.ISO8601 (iso8601ParseM)
+import Data.Time.LocalTime (utc)
 import qualified Data.Vector as V
 import Events
 import FakeTests (fakeTests)
@@ -47,6 +48,7 @@ import IntentTests (intentTests)
 import KeyIntentTests (keyIntentTests)
 import Network.Bookmark.Agent.Protocol
 import Network.Bookmark.Agent.Snapshot
+import qualified Network.Bookmark.App.Msg as I
 import Network.Bookmark.Types
 import Network.Bookmark.Ui.State
 import Network.Bookmark.Ui.Widgets (fuzzyFilterMatch, fuzzyMatch, sanitizeForDisplay)
@@ -838,15 +840,18 @@ sendRequest h line = do
       Left e -> assertFailure ("bad response json: " ++ show e)
       Right v -> pure v
 
--- | Observe the next, non-announcement UiCommand injected into the event
+-- | Observe the next, non-announcement event injected into the event
 -- channel (blocking). Skips SetAgentClients connect/disconnect bookkeeping.
-readAgentInjected :: BChan HocketEvent -> IO UiCommand
+readAgentInjected :: BChan HocketEvent -> IO HocketEvent
 readAgentInjected ch = do
   ev <- readBChan ch
   case ev of
     HocketUi (SetAgentClients _) -> readAgentInjected ch
-    HocketUi u -> pure u
-    _ -> readAgentInjected ch
+    _ -> pure ev
+
+-- | What the agent server's clock reads in these tests.
+testNow :: I.Now
+testNow = I.Now (read "2020-01-01 06:00:00 UTC") utc
 
 -- | Poll-connect to a socket until a listener accepts (server fully bound),
 -- retrying a bounded number of times with a short sleep. Guards against the
@@ -885,7 +890,7 @@ withAgentServer action = withSystemTempDirectory "hk" $ \dir -> do
             aeInject = \evt -> do
               void (writeBChan events evt)
               pure True,
-            aeReminderTime = pure (read "2020-01-01 07:00:00 UTC" :: UTCTime)
+            aeNow = pure testNow
           }
   -- The readiness probe is a real client: the server announces it with two
   -- SetAgentClients events (+1, then -1 from its own thread, so possibly
@@ -907,7 +912,7 @@ serveThenCleanup path whileUp = do
   cleanupAgentSocket bound ours path
 
 quietEnv :: AgentEnv
-quietEnv = AgentEnv {aeSnapshot = undefined, aeInject = const (pure True), aeReminderTime = pure (read "2020-01-01 07:00:00 UTC")}
+quietEnv = AgentEnv {aeSnapshot = undefined, aeInject = const (pure True), aeNow = pure testNow}
 
 -- | Start a server on a path that holds something else; under the old
 -- reclaim it unlinked that and served forever, hence the timeout.
@@ -980,7 +985,7 @@ agentServerIntegrationTests =
             _ -> assertFailure "set_filter response not an object"
           -- The injected event must be a SetFilterQuery "haskell".
           injected <- readAgentInjected events
-          injected @?= SetFilterQuery "haskell",
+          injected @?= HocketUi (SetFilterQuery "haskell"),
       testCase "wait_version unblocks once the snapshot version advances" $
         withAgentServer $ \snapVar events path -> do
           atomically (modifyTVar' snapVar (const (buildTestSnapshot 4)))
@@ -1023,7 +1028,7 @@ agentServerIntegrationTests =
               KM.lookup (AKey.fromText "ok") o @?= Just (A.Bool True)
             Right _ -> assertFailure "client response not an object"
           injected <- readAgentInjected events
-          injected @?= SetPendingAction (BookmarkItemId "in-1") ToBeArchived,
+          injected @?= HocketMsg (I.Intent (I.SetFlag (BookmarkItemId "in-1") FlagArchive testNow)),
       testCase "the shipped client reports an unreachable socket" $ do
         res <- callAgent "/nonexistent/hocket-agent-absent.sock" (ARead CmdGetState)
         assertBool "expected a transport error" (isLeft res),
@@ -1057,7 +1062,7 @@ agentServerIntegrationTests =
                   aeInject = \evt -> do
                     void (writeBChan events evt)
                     pure True,
-                  aeReminderTime = pure (read "2020-01-01 07:00:00 UTC" :: UTCTime)
+                  aeNow = pure testNow
                 }
         bound <- newBoundSocket
         withAsync (runAgentServer bound path env) $ \_ -> do
@@ -1155,7 +1160,7 @@ agentServerIntegrationTests =
                     aeInject = \evt -> do
                       void (writeBChan events2 evt)
                       pure True,
-                    aeReminderTime = pure (read "2020-01-01 07:00:00 UTC" :: UTCTime)
+                    aeNow = pure testNow
                   }
           -- Ensure server 1 has actually bound the path before we probe, so
           -- server 2's bind can genuinely be rejected rather than racing

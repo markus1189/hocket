@@ -92,7 +92,6 @@ import Events
     HocketEvent (..),
     UiCommand (..),
     archivedItemsEvt,
-    clearAllFlagsEvt,
     executeBatchDoneEvt,
     executeBatchEvt,
     fetchItemsEvt,
@@ -113,7 +112,7 @@ import qualified Graphics.Vty as Vty
 import Graphics.Vty.Input.Events (Key (KEnter, KEsc))
 import Graphics.Vty.Platform.Unix (mkVty)
 import Interpret (Env (..), interpret)
-import Keys (ItemKey (..), itemKeyEvents)
+import Keys (keyIntents)
 import Network.Bookmark.Agent.Protocol
   ( AgentCmd (..),
     FlagAction (..),
@@ -130,7 +129,6 @@ import Network.Bookmark.App.Update (update)
 import Network.Bookmark.Batch (StepOutcome, concatOutcome, soOk)
 import Network.Bookmark.Fake (encodeFixtureDump, fakePort)
 import Network.Bookmark.Port (RaindropPort (..))
-import Network.Bookmark.Reminder (reminderPolicy)
 import Network.Bookmark.Types
   ( BookmarkItem,
     BookmarkItemBatch (..),
@@ -155,10 +153,8 @@ import Network.Bookmark.Ui.State
     HocketState,
     Name (..),
     VideoFilterMode (..),
-    archiveItem,
     batchStepsWithWork,
     cancelFilter,
-    clearAllFlags,
     completeAsyncOp,
     enterFilterMode,
     focusRing,
@@ -186,13 +182,9 @@ import Network.Bookmark.Ui.State
     lockFilter,
     setAgentClients,
     setAgentError,
-    setAllFlagsToArchive,
     setFilterQuery,
-    setPendingAction,
     setShowFutureReminders,
     setVideoFilterMode,
-    shiftItem,
-    shiftItemReminder,
     syncForRender,
     toggleInvertedVideoFilter,
     toggleShowFutureReminders,
@@ -427,9 +419,15 @@ vtyEventHandler env e = do
       -- Brick's editor has no Ctrl-W.
       EvKey (KChar 'w') [MCtrl] -> hsFilterEditor %= applyEdit deletePrevWord
       _ -> zoom hsFilterEditor (handleEditorEvent (VtyEvent e))
-    else case e of
-      EvKey (KChar 'Q') [] -> applyMsg env (Intent I.Quit)
-      _ -> vtyEventHandlerNormal (envEvents env) e
+    else do
+      now <- liftIO (I.Now <$> getCurrentTime <*> getCurrentTimeZone)
+      case keyIntents now e s of
+        -- A key whose intents update already covers; the groups Phase 3
+        -- has not moved yet still take the old path.
+        Just intents
+          | all (\i -> isJust (update (Intent i) s)) intents ->
+              traverse_ (applyMsg env . Intent) intents
+        _ -> vtyEventHandlerNormal (envEvents env) e
 
 -- | Run one message through 'update', its effects through 'interpret', and
 -- what those answer right away through 'update' again.
@@ -450,27 +448,12 @@ vtyEventHandlerNormal ::
   BChan HocketEvent ->
   Event ->
   EventM Name HocketState ()
-vtyEventHandlerNormal es (EvKey (KChar ' ') []) = do
-  s <- use id
-  liftIO $ for_ (itemKeyEvents KeySpace s) (trigger es)
-vtyEventHandlerNormal es (EvKey KEnter []) = do
-  s <- use id
-  liftIO $ for_ (itemKeyEvents KeyEnter s) (trigger es)
 vtyEventHandlerNormal es (EvKey (KChar 'r') []) = do
   liftIO $ es `trigger` fetchItemsEvt
   pure ()
 vtyEventHandlerNormal es (EvKey (KChar 'X') []) = do
   liftIO $ es `trigger` executeBatchEvt
   pure ()
-vtyEventHandlerNormal es (EvKey (KChar 'a') []) = do
-  s <- use id
-  liftIO $ for_ (itemKeyEvents KeyArchive s) (trigger es)
-vtyEventHandlerNormal es (EvKey (KChar 's') []) = do
-  s <- use id
-  liftIO $ for_ (itemKeyEvents KeyRemind s) (trigger es)
-vtyEventHandlerNormal es (EvKey (KChar 'u') []) = do
-  s <- use id
-  liftIO $ for_ (itemKeyEvents KeyUnflag s) (trigger es)
 vtyEventHandlerNormal _ (EvKey (KChar 'J') []) = do
   s <- use id
   case findNextFlaggedItem s of
@@ -481,9 +464,6 @@ vtyEventHandlerNormal _ (EvKey (KChar 'K') []) = do
   case findPrevFlaggedItem s of
     Just newIdx -> itemList %= L.listMoveTo newIdx
     Nothing -> pure ()
-vtyEventHandlerNormal es (EvKey (KChar 'U') []) = do
-  liftIO $ es `trigger` clearAllFlagsEvt
-  pure ()
 vtyEventHandlerNormal es (EvKey (KChar 'S') []) = do
   liftIO $ es `trigger` toggleRemindersEvt
   pure ()
@@ -493,12 +473,6 @@ vtyEventHandlerNormal es (EvKey (KChar 'v') []) = do
 vtyEventHandlerNormal es (EvKey (KChar 'V') []) = do
   liftIO $ es `trigger` toggleInvertedVideoFilterEvt
   pure ()
-vtyEventHandlerNormal es (EvKey (KChar 'e') []) = do
-  s <- use id
-  liftIO . for_ (focusedItem s) $ \bit -> es `trigger` HocketMsg (Intent (I.EditInRaindrop (I.ById (view biId bit))))
-vtyEventHandlerNormal es (EvKey (KChar 'y') []) = do
-  s <- use id
-  liftIO . for_ (focusedItem s) $ \bit -> es `trigger` HocketMsg (Intent (I.CopyUrl (I.ById (view biId bit))))
 vtyEventHandlerNormal _ (EvKey (KChar '/') []) =
   -- Flip into filter mode synchronously so the very next keystroke is already
   -- seen under the editing guard; routing this through the BChan would leave a
@@ -525,9 +499,6 @@ withAsyncSlot op run = do
     Just s' -> do
       id .= s'
       run
-
-nextDayAt7AM :: IO UTCTime
-nextDayAt7AM = reminderPolicy <$> getCurrentTimeZone <*> getCurrentTime
 
 -- The three 'X' sub-op bodies, run sequentially by 'runBatchOp'.
 runArchiveOp :: Env -> HocketState -> IO (StepOutcome () Text)
@@ -601,16 +572,7 @@ uiCommandEventHandler ::
   BChan HocketEvent ->
   UiCommand ->
   EventM Name HocketState ()
-uiCommandEventHandler _ (ShiftItem bid) =
-  id %= shiftItem bid
-uiCommandEventHandler _ (ArchiveItem bid) =
-  id %= archiveItem bid
-uiCommandEventHandler _ (ShiftItemReminder bid) = do
-  reminderTime <- liftIO nextDayAt7AM
-  id %= shiftItemReminder bid reminderTime
 uiCommandEventHandler _ (SetStatus t) = hsStatus .= t
-uiCommandEventHandler _ ClearAllFlags = id %= clearAllFlags
-uiCommandEventHandler _ SetAllFlagsToArchive = id %= setAllFlagsToArchive
 uiCommandEventHandler _ ToggleReminders = do
   id %= toggleShowFutureReminders
   id %= syncForRender
@@ -620,7 +582,6 @@ uiCommandEventHandler _ ToggleVideoFilter = do
 uiCommandEventHandler _ ToggleInvertedVideoFilter = do
   id %= toggleInvertedVideoFilter
   id %= syncForRender
-uiCommandEventHandler _ (SetPendingAction bid act) = id %= setPendingAction bid act
 uiCommandEventHandler _ (SetFilterQuery q) = do
   id %= setFilterQuery q
   id %= syncForRender
@@ -736,7 +697,7 @@ startAgentServer events opt = do
         AgentEnv
           { aeSnapshot = snapVar,
             aeInject = writeBChanNonBlocking events,
-            aeReminderTime = nextDayAt7AM
+            aeNow = I.Now <$> getCurrentTime <*> getCurrentTimeZone
           }
   _ <- async $ do
     r <- try @SomeException (runAgentServer bound path env)

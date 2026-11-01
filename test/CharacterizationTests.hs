@@ -9,12 +9,17 @@ import qualified Brick.Widgets.List as L
 import Control.Lens
 import Data.Foldable (for_)
 import qualified Data.Map as Map
+import Data.Maybe (mapMaybe)
 import Data.Text (Text)
+import qualified Data.Text as T
 import Data.Time.Clock (UTCTime)
 import Data.Time.Clock.POSIX (POSIXTime, utcTimeToPOSIXSeconds)
-import Events
-import Keys
-import Network.Bookmark.App.Msg (Intent (Open), Msg (Intent), Target (ById))
+import Data.Time.LocalTime (minutesToTimeZone)
+import qualified Graphics.Vty as Vty
+import Keys (keyIntents)
+import Network.Bookmark.App.Effect (Effect (OpenUrl), Opener (Firefox))
+import Network.Bookmark.App.Msg (Msg (Intent), Now (..))
+import Network.Bookmark.App.Update (update)
 import Network.Bookmark.Types
 import Network.Bookmark.Ui.State
 import Network.Bookmark.Ui.Sync
@@ -162,17 +167,37 @@ keyState hasReminder flag =
     late = read "2030-01-01 00:00:00 UTC"
     target = item "t" (-1) & biCreated .~ late & biReminder .~ (if hasReminder then Just late else Nothing)
 
--- | Press a key, then deliver what it posted the way the handlers do, with
--- the render sync after every event. Returns the browsed item ids.
+-- | The keys the table covers, named as in Phase 0.
+data ItemKey = KeyArchive | KeyRemind | KeyUnflag | KeyEnter | KeySpace
+  deriving (Show, Eq, Enum, Bounded)
+
+keyEvent :: ItemKey -> Vty.Event
+keyEvent = \case
+  KeyArchive -> Vty.EvKey (Vty.KChar 'a') []
+  KeyRemind -> Vty.EvKey (Vty.KChar 's') []
+  KeyUnflag -> Vty.EvKey (Vty.KChar 'u') []
+  KeyEnter -> Vty.EvKey Vty.KEnter []
+  KeySpace -> Vty.EvKey (Vty.KChar ' ') []
+
+-- | The 's' key's clock: 07:00 CET on the next day is 't7'.
+keyNow :: Now
+keyNow = Now (read "2026-11-01 12:00:00 UTC") (minutesToTimeZone 60)
+
+-- | Press a key the way the shell does: its intents through 'update' within
+-- one event, then the render sync. Returns the opened item ids.
 press :: ItemKey -> HocketState -> (HocketState, [Text])
-press key s0 = foldl deliver (syncForRender s0, []) (itemKeyEvents key s0)
+press key s0 = case keyIntents keyNow (keyEvent key) start of
+  Nothing -> error ("not a keymap key: " <> show key)
+  Just intents ->
+    let (s, effects) = foldl apply (start, []) intents
+     in (syncForRender s, mapMaybe opened effects)
   where
-    deliver (s, browsed) = \case
-      HocketUi (ShiftItem bid) -> (syncForRender (shiftItem bid s), browsed)
-      HocketUi (ArchiveItem bid) -> (syncForRender (archiveItem bid s), browsed)
-      HocketUi (ShiftItemReminder bid) -> (syncForRender (shiftItemReminder bid t7 s), browsed)
-      HocketMsg (Intent (Open (ById (BookmarkItemId b)))) -> (s, browsed <> [b])
-      other -> error ("unexpected event from a key: " <> show other)
+    start = syncForRender s0
+    apply (s, effects) i = case update (Intent i) s of
+      Just (s', more) -> (s', effects <> more)
+      Nothing -> error ("unhandled: " <> show i)
+    opened (OpenUrl Firefox url) = T.stripPrefix "https://example.com/" url
+    opened _ = Nothing
 
 -- | Key, target has a reminder, flag before, flag after, cursor moves down.
 data Row = Row ItemKey Bool PendingAction PendingAction Bool
@@ -181,9 +206,10 @@ keyTableTests :: TestTree
 keyTableTests =
   testGroup "key semantics (focused item, flag before → after)" $
     map rowTest rows
-      <> [ testCase "no focused item: every key posts nothing" $
-             for_ [minBound .. maxBound] $ \k ->
-               (k, length (itemKeyEvents k (syncForRender emptyState))) @?= (k, 0)
+      <> [ testCase "no focused item: every key changes nothing and opens nothing" $
+             for_ [minBound .. maxBound] $ \k -> do
+               let (after, browsed) = press k emptyState
+               (k, browsed, Map.null (after ^. hsContents), after ^. itemList . L.listSelectedL) @?= (k, [], True, Nothing)
          ]
   where
     rowTest (Row k hasReminder from to moves) =

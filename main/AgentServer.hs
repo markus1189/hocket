@@ -37,24 +37,20 @@ import Data.Char (isSpace)
 import Data.Foldable (traverse_)
 import Data.IORef (IORef, newIORef, readIORef, writeIORef)
 import qualified Data.Text as T
-import Data.Time (UTCTime)
 import Events
   ( HocketEvent (HocketMsg),
-    clearAllFlagsEvt,
     executeBatchEvt,
     fetchItemsEvt,
     selectItemEvt,
     setAgentClientsEvt,
-    setAllFlagsToArchiveEvt,
     setFilterQueryEvt,
-    setPendingActionEvt,
     setShowFutureRemindersEvt,
     setStatusEvt,
     setVideoFilterModeEvt,
   )
+import Network.Bookmark.Agent.Intent (toIntent)
 import Network.Bookmark.Agent.Protocol
   ( AgentCmd (..),
-    FlagAction (..),
     RawRequest (..),
     WriteCmd (..),
     decodeCmd,
@@ -65,9 +61,7 @@ import Network.Bookmark.Agent.Protocol
     validateWrite,
   )
 import Network.Bookmark.Agent.Snapshot (AgentSnapshot, asVersion)
-import Network.Bookmark.App.Msg (Msg (Intent))
-import qualified Network.Bookmark.App.Msg as I
-import Network.Bookmark.Types (PendingAction (..))
+import Network.Bookmark.App.Msg (Msg (Intent), Now)
 import Network.Socket
   ( Family (AF_UNIX),
     SockAddr (SockAddrUnix),
@@ -101,8 +95,8 @@ data AgentEnv = AgentEnv
   { aeSnapshot :: !(TVar AgentSnapshot),
     -- | Non-blocking injection into the TUI event channel; False = full.
     aeInject :: !(HocketEvent -> IO Bool),
-    -- | Policy for agent-scheduled reminders (same as the 's' key).
-    aeReminderTime :: !(IO UTCTime)
+    -- | The clock, sampled once per write (reminders: same policy as 's').
+    aeNow :: !(IO Now)
   }
 
 -- | Reclaim a stale socket file left over from a crash or hard kill, but
@@ -264,23 +258,15 @@ dispatch env rid = \case
             else errResponse rid "event channel full, retry"
 
 -- | Translate a validated write into the event the keyboard would have sent.
--- The clock for reminder scheduling is sampled here, in the shell.
+-- The clock is sampled here, in the shell.
 toEvent :: AgentEnv -> WriteCmd -> IO HocketEvent
-toEvent env = \case
-  CmdSetFlag bid FlagArchive -> pure (setPendingActionEvt bid ToBeArchived)
-  CmdSetFlag bid FlagReminder -> do
-    t <- aeReminderTime env
-    pure (setPendingActionEvt bid (ToBeReminded t))
-  CmdSetFlag bid FlagRemoveReminder -> pure (setPendingActionEvt bid ReminderToBeRemoved)
-  CmdSetFlag bid FlagNone -> pure (setPendingActionEvt bid None)
-  CmdClearFlags -> pure clearAllFlagsEvt
-  CmdFlagAllArchive -> pure setAllFlagsToArchiveEvt
+toEvent env cmd = case cmd of
   CmdExecute -> pure executeBatchEvt
   CmdRefresh -> pure fetchItemsEvt
   CmdSetFilter q -> pure (setFilterQueryEvt q)
   CmdSetVideoFilter m -> pure (setVideoFilterModeEvt m)
   CmdSetShowFutureReminders b -> pure (setShowFutureRemindersEvt b)
   CmdSelectItem bid -> pure (selectItemEvt bid)
-  CmdOpenItem bid -> pure (HocketMsg (Intent (I.Open (I.ById bid))))
-  CmdOpenAndFlag bid -> pure (HocketMsg (Intent (I.OpenAndFlag bid)))
   CmdSetStatus t -> pure (setStatusEvt (Just ("agent: " <> t)))
+  -- The groups Phase 3 has moved go through update, as the same Intent.
+  _ -> HocketMsg . Intent . (`toIntent` cmd) <$> aeNow env
