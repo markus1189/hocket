@@ -121,7 +121,13 @@ import Network.Bookmark.Agent.Protocol
     ReadCmd (..),
     WriteCmd (..),
   )
+-- Qualified while the old event constructors of the same names still exist.
+
 import Network.Bookmark.Agent.Snapshot (AgentSnapshot, asVersion, emptySnapshot, takeSnapshot)
+import Network.Bookmark.App.Effect (Effect (..))
+import Network.Bookmark.App.Msg (Msg (..))
+import qualified Network.Bookmark.App.Msg as I
+import Network.Bookmark.App.Update (update)
 import Network.Bookmark.Batch (StepOutcome, concatOutcome, soOk)
 import Network.Bookmark.Fake (encodeFixtureDump, fakePort)
 import Network.Bookmark.Port (RaindropPort (..))
@@ -180,7 +186,6 @@ import Network.Bookmark.Ui.State
     isReminderAction,
     itemList,
     lockFilter,
-    removeItems,
     setAgentClients,
     setAgentError,
     setAllFlagsToArchive,
@@ -413,10 +418,10 @@ trigger :: BChan HocketEvent -> HocketEvent -> IO ()
 trigger = writeBChan
 
 vtyEventHandler ::
-  BChan HocketEvent ->
+  Env ->
   Event ->
   EventM Name HocketState ()
-vtyEventHandler es e = do
+vtyEventHandler env e = do
   s <- use id
   if s ^. hsFilterActive
     then case e of
@@ -429,7 +434,18 @@ vtyEventHandler es e = do
       -- Brick's editor has no Ctrl-W.
       EvKey (KChar 'w') [MCtrl] -> hsFilterEditor %= applyEdit deletePrevWord
       _ -> zoom hsFilterEditor (handleEditorEvent (VtyEvent e))
-    else vtyEventHandlerNormal es e
+    else case e of
+      EvKey (KChar 'Q') [] -> applyMsg env (Intent I.Quit)
+      _ -> vtyEventHandlerNormal (envEvents env) e
+
+-- | Run one message through 'update' and its effects through the shell.
+applyMsg :: Env -> Msg -> EventM Name HocketState ()
+applyMsg _ m = do
+  s <- use id
+  for_ (update m s) $ \(s', effects) -> do
+    id .= s'
+    for_ effects $ \case
+      Halt -> halt
 
 vtyEventHandlerNormal ::
   BChan HocketEvent ->
@@ -489,7 +505,6 @@ vtyEventHandlerNormal _ (EvKey (KChar '/') []) =
   -- seen under the editing guard; routing this through the BChan would leave a
   -- one-event window where a fast 'Q'/paste leaks to normal mode and quits.
   id %= enterFilterMode
-vtyEventHandlerNormal _ (EvKey (KChar 'Q') []) = halt
 vtyEventHandlerNormal _ e = do
   zoom itemList (handleListEventVi handleListEvent e)
 
@@ -499,6 +514,7 @@ internalEventHandler ::
   EventM Name HocketState ()
 internalEventHandler env (HocketAsync e) = asyncCommandEventHandler env e
 internalEventHandler env (HocketUi e) = uiCommandEventHandler (envEvents env) e
+internalEventHandler env (HocketMsg m) = applyMsg env m
 
 -- | Run an async-op body only when the single slot is free; otherwise drop the
 -- op (matching the old 'unlessAsyncRunning' drop-on-busy semantics).
@@ -593,7 +609,6 @@ uiCommandEventHandler _ (ArchiveItem bid) =
 uiCommandEventHandler _ (ShiftItemReminder bid) = do
   reminderTime <- liftIO nextDayAt7AM
   id %= shiftItemReminder bid reminderTime
-uiCommandEventHandler _ (RemoveItems bis) = id %= removeItems bis
 uiCommandEventHandler _ (SetStatus t) = hsStatus .= t
 uiCommandEventHandler _ ClearAllFlags = id %= clearAllFlags
 uiCommandEventHandler _ SetAllFlagsToArchive = id %= setAllFlagsToArchive
@@ -656,7 +671,7 @@ myEventHandler ::
   Env ->
   BrickEvent Name HocketEvent ->
   EventM Name HocketState ()
-myEventHandler env (VtyEvent e) = vtyEventHandler (envEvents env) e
+myEventHandler env (VtyEvent e) = vtyEventHandler env e
 myEventHandler env (AppEvent e) = internalEventHandler env e
 myEventHandler _ _ = pure ()
 

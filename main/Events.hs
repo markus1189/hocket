@@ -13,7 +13,6 @@ module Events
     shiftItemEvt,
     archiveItemEvt,
     shiftItemReminderEvt,
-    removeItemsEvt,
     setStatusEvt,
     browseItemEvt,
     editItemInBrowserEvt,
@@ -35,9 +34,9 @@ module Events
   )
 where
 
-import Data.Set (Set)
 import Data.Text (Text)
 import Data.Time (UTCTime)
+import Network.Bookmark.App.Msg (Msg)
 import Network.Bookmark.Batch (StepOutcome)
 import Network.Bookmark.Types
 import Network.Bookmark.Ui.State (VideoFilterMode)
@@ -45,6 +44,9 @@ import Network.Bookmark.Ui.State (VideoFilterMode)
 data HocketEvent
   = HocketAsync !AsyncCommand
   | HocketUi !UiCommand
+  | -- | Handled by 'Network.Bookmark.App.Update.update'; the other two are
+    -- the handler groups Phase 3 has not moved yet.
+    HocketMsg !Msg
   deriving (Show, Eq)
 
 data AsyncCommand
@@ -64,7 +66,6 @@ data UiCommand
   = ShiftItem !BookmarkItemId
   | ArchiveItem !BookmarkItemId
   | ShiftItemReminder !BookmarkItemId
-  | RemoveItems !(Set BookmarkItemId)
   | SetStatus !(Maybe Text)
   | BrowseItem !BookmarkItem
   | EditItemInBrowser !BookmarkItem
@@ -118,9 +119,6 @@ archiveItemEvt bid = HocketUi (ArchiveItem bid)
 
 shiftItemReminderEvt :: BookmarkItemId -> HocketEvent
 shiftItemReminderEvt bid = HocketUi (ShiftItemReminder bid)
-
-removeItemsEvt :: Set BookmarkItemId -> HocketEvent
-removeItemsEvt bids = HocketUi (RemoveItems bids)
 
 setStatusEvt :: Maybe Text -> HocketEvent
 setStatusEvt mstatus = HocketUi (SetStatus mstatus)

@@ -18,6 +18,9 @@ library
   ghc-options:         -Wall -Wunused-packages -Werror
   hs-source-dirs:      src
   exposed-modules:     Network.Raindrop
+                     , Network.Bookmark.App.Effect
+                     , Network.Bookmark.App.Msg
+                     , Network.Bookmark.App.Update
                      , Network.Bookmark.Batch
                      , Network.Bookmark.Port
                      , Network.Raindrop.Api
@@ -117,6 +120,7 @@ test-suite test
                      , Worker
                      , Properties
                      , SystemTests
+                     , UpdateTests
                      , WorkerTests
   build-depends:       base
                      , aeson
