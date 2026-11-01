@@ -6,6 +6,7 @@
 module Interpret
   ( Env (..),
     interpret,
+    copyCleaned,
   )
 where
 
@@ -40,10 +41,7 @@ interpret env = \case
   Halt -> pure []
   OpenUrl opener url -> failed <$> try @SomeException (browseItem (program opener) (URL (T.unpack url)))
   StartFetch plan -> [] <$ async (fetch plan)
-  CopyText link -> do
-    let url = cleanUrl (T.unpack link)
-    r <- try @SomeException (copyToClipboard url)
-    pure [either (SystemFailed . ("Copy failed: " <>) . T.pack . show) (const (Copied (T.pack url))) r]
+  CopyText link -> copyCleaned copyToClipboard link
   where
     -- The fetch worker: exactly one terminal message, whatever happens short
     -- of a cancel (trySync rethrows asynchronous exceptions).
@@ -74,6 +72,14 @@ retrieveItems port searchParam collectionId = do
               else Just (BookmarkItemBatch mostRecentUpdate items (fromIntegral $ length items), currentPage + 1)
       )
       0
+
+-- | Copy a link the way @y@ always did: cleaned first ('cleanUrl'), and the
+-- cleaned text is what the status line reports.
+copyCleaned :: (String -> IO ()) -> Text -> IO [Msg]
+copyCleaned copy link = do
+  let url = cleanUrl (T.unpack link)
+  r <- try @SomeException (copy url)
+  pure [either (SystemFailed . ("Copy failed: " <>) . T.pack . show) (const (Copied (T.pack url))) r]
 
 tryClientError :: IO a -> IO (Either ClientError a)
 tryClientError = try @ClientError
