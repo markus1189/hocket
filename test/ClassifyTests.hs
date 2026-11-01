@@ -1,9 +1,10 @@
 {-# LANGUAGE OverloadedStrings #-}
 
-module ClassifyTests (classifyTests, failure) where
+module ClassifyTests (classifyTests, failure, failureWithXError, response) where
 
 import Control.Exception (toException)
 import Data.Bifunctor (bimap)
+import qualified Data.ByteString as BS
 import Data.Foldable (for_)
 import qualified Data.Sequence as Seq
 import Data.String (fromString)
@@ -21,6 +22,12 @@ response code = Response (mkStatus code "") Seq.empty http11 ""
 
 failure :: Int -> ClientError
 failure = FailureResponse (bimap (const ()) (const (BaseUrl Https "api.raindrop.io" 443 "", "")) defaultRequest) . response
+
+-- | A failure response carrying Raindrop's @x-error@ header.
+failureWithXError :: Int -> BS.ByteString -> ClientError
+failureWithXError code msg = case failure code of
+  FailureResponse req r -> FailureResponse req r {responseHeaders = Seq.fromList [("x-error", msg)]}
+  other -> other
 
 -- | One row per D6 case (plan §5, rulings in §11).
 classifyTests :: TestTree

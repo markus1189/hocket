@@ -6,11 +6,12 @@
 module WorkerTests (workerTests) where
 
 import CharacterizationTests (emptyState, item)
-import ClassifyTests (failure)
-import Control.Exception (AsyncException (ThreadKilled), throwIO, try)
+import ClassifyTests (failure, failureWithXError, response)
+import Control.Exception (AsyncException (ThreadKilled), throwIO, toException, try)
 import Control.Lens ((&), (.~), (^.))
 import Control.Monad.State.Strict (execState, modify, runState)
 import Data.Bifunctor (first)
+import qualified Data.ByteString.Char8 as BSC
 import Data.Functor.Identity (runIdentity)
 import qualified Data.Map as Map
 import Data.Maybe (fromMaybe)
@@ -21,12 +22,13 @@ import Network.Bookmark.Batch
 import Network.Bookmark.Types (BookmarkItemBatch (..), BookmarkItemId (..), PendingAction (..))
 import Network.Bookmark.Ui.State
 import Network.Bookmark.Ui.Sync
+import Servant.Client.Core (ClientError (..))
 import Test.Tasty
 import Test.Tasty.HUnit
 import Worker
 
 workerTests :: TestTree
-workerTests = testGroup "async workers" [fetchEmissionTests, fetchSlotTests, stepEmissionTests, batchSlotTests, stepExceptionTests]
+workerTests = testGroup "async workers" [fetchEmissionTests, fetchSlotTests, stepEmissionTests, batchSlotTests, stepExceptionTests, errorRenderingTests]
 
 page1, page2 :: BookmarkItemBatch
 page1 = BookmarkItemBatch 10 [item "a" (-1)] 1
@@ -189,3 +191,25 @@ stepExceptionTests =
     ]
   where
     remindersOk = scriptedOutcome [((BookmarkItemId "r", batchTime), Right True)]
+
+-- | The batch summary names an error the way D6 does ("2 failed: 404").
+errorRenderingTests :: TestTree
+errorRenderingTests =
+  testGroup
+    "batch error rendering"
+    [ testCase "a failure response is its status code" $
+        shortClientError (failure 404) @?= "404",
+      testCase "a short x-error is appended" $
+        shortClientError (failureWithXError 404 "Not found") @?= "404 Not found",
+      testCase "a long x-error is left out" $
+        shortClientError (failureWithXError 400 (BSC.replicate 80 'x')) @?= "400",
+      testCase "a connection error is offline" $
+        shortClientError (ConnectionError (toException (userError "Network.Socket.connect: does not exist"))) @?= "offline",
+      testCase "decode and content-type failures are a bad response" $ do
+        shortClientError (DecodeFailure "Error in $: key \"items\" not found" (response 200)) @?= "bad response"
+        shortClientError (UnsupportedContentType "text/html" (response 200)) @?= "bad response"
+        shortClientError (InvalidContentTypeHeader (response 200)) @?= "bad response",
+      testCase "the batch summary uses the short form" $ do
+        o <- runCalls (throwingOn [(2, throwIO (failure 404))]) [1, 2, 3]
+        map snd (o ^. soFailed) @?= [CallFailed "404"]
+    ]

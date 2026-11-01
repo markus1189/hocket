@@ -66,6 +66,7 @@ executable hocket
                      , filepath
                      , formatting
                      , hocket
+                     , http-types
                      , lens
                      , monad-logger
                      , monad-loops

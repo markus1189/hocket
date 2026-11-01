@@ -13,7 +13,7 @@ module Worker
     runCalls,
     guardStep,
     describeError,
-    renderClientError,
+    shortClientError,
     errorMessageFromException,
     trySync,
     exceptionMessage,
@@ -23,6 +23,7 @@ where
 import Control.Applicative ((<|>))
 import Control.Exception (SomeAsyncException, SomeException (..), displayException, fromException)
 import Control.Lens (view, (^.))
+import Control.Monad (mfilter)
 import Control.Monad.Catch (MonadCatch, throwM, try)
 import Data.Bifunctor (first, second)
 import qualified Data.CaseInsensitive as CI
@@ -35,6 +36,7 @@ import Events
 import Network.Bookmark.Batch
 import Network.Bookmark.Types (BookmarkItemBatch)
 import Network.Bookmark.Ui.State (BatchStep (..))
+import Network.HTTP.Types (statusCode)
 import Network.Raindrop (classify)
 import Servant.Client.Core (ClientError (..), ResponseF (..))
 
@@ -119,10 +121,21 @@ guardStep :: [a] -> IO (StepOutcome a Text) -> IO (StepOutcome a Text)
 guardStep items act = either (abortedBefore items . exceptionMessage) id <$> trySync act
 
 describeError :: SomeException -> (ErrorScope, Text)
-describeError e = maybe (Global, exceptionMessage e) (\ce -> (classify ce, renderClientError ce)) (fromException e)
+describeError e = maybe (Global, exceptionMessage e) (\ce -> (classify ce, shortClientError ce)) (fromException e)
 
-renderClientError :: ClientError -> Text
-renderClientError = fromMaybe "<no err>" . errorMessageFromException
+-- | An error as the batch summary names it (D6: "2 failed: 404"): the status
+-- code, with Raindrop's x-error text when it fits on the line.
+shortClientError :: ClientError -> Text
+shortClientError = \case
+  FailureResponse _ resp -> T.pack (show (statusCode (responseStatusCode resp))) <> maybe "" (" " <>) (shortXError resp)
+  ConnectionError _ -> "offline"
+  DecodeFailure _ _ -> "bad response"
+  UnsupportedContentType _ _ -> "bad response"
+  InvalidContentTypeHeader _ -> "bad response"
+  where
+    shortXError resp =
+      mfilter (\t -> T.length t <= 40 && not (T.any (== '\n') t)) $
+        T.strip . T.decodeUtf8Lenient . snd <$> find ((== CI.mk "x-error") . fst) (responseHeaders resp)
 
 errorMessageFromException :: ClientError -> Maybe Text
 errorMessageFromException (FailureResponse _ resp) = xError <|> code
