@@ -28,7 +28,7 @@ import Test.Tasty.HUnit
 
 characterizationTests :: TestTree
 characterizationTests =
-  testGroup "Characterization (Phase 0 pins)" [syncTests, stepResultTests, keyTableTests]
+  testGroup "Characterization (Phase 0 pins)" [syncTests, stepResultTests, keyTableTests, selectionTests]
 
 emptyState :: HocketState
 emptyState = initialState
@@ -241,3 +241,39 @@ keyTableTests =
         Row KeySpace False (ToBeReminded tPrev) (ToBeReminded tPrev) False,
         Row KeySpace True ReminderToBeRemoved ReminderToBeRemoved False
       ]
+
+-- | Items newest first: "a" (created last) sorts to the top.
+dated :: Text -> String -> BookmarkItem
+dated i day = item i (-1) & biCreated .~ read (day <> " 12:00:00 UTC")
+
+threeItems :: HocketState
+threeItems = syncForRender (insertItems [dated "a" "2026-01-03", dated "b" "2026-01-02", dated "c" "2026-01-01"] emptyState)
+
+selectedId :: HocketState -> Maybe Text
+selectedId s = (\(_, bit) -> bit ^. biId . _BookmarkItemId) <$> L.listSelectedElement (s ^. itemList)
+
+at' :: Int -> HocketState -> HocketState
+at' i = itemList %~ L.listMoveTo i
+
+-- | How the list selection follows changes, before D2 makes it by id.
+selectionTests :: TestTree
+selectionTests =
+  testGroup
+    "selection"
+    [ testCase "nothing selected yet: the first item" $
+        selectedId threeItems @?= Just "a",
+      testCase "the selected item disappears: the one now at its index" $ do
+        selectedId (syncForRender (removeItem (BookmarkItemId "b") (at' 1 threeItems))) @?= Just "c"
+        -- At the end, the index is clamped to the new last item.
+        selectedId (syncForRender (removeItem (BookmarkItemId "c") (at' 2 threeItems))) @?= Just "b"
+        selectedId (syncForRender (removeItems (map BookmarkItemId ["a", "b", "c"]) threeItems)) @?= Nothing,
+      -- pins today's index-stable selection, flipped in Phase 4 (D2, plan §11 #20)
+      testCase "an item inserted above keeps the index, so the cursor lands on another item" $
+        selectedId (syncForRender (insertItem (dated "n" "2026-01-04") (at' 1 threeItems))) @?= Just "a",
+      -- pins today's index-stable selection, flipped in Phase 4 (D2, plan §11 #20)
+      testCase "a refilter that hides items above keeps the index too" $ do
+        -- "a" has a reminder, so hiding future reminders hides it.
+        let shown = syncForRender (threeItems & hsContents . ix (BookmarkItemId "a") . _2 . biReminder ?~ read "2030-01-01 07:00:00 UTC" & setShowFutureReminders True)
+        selectedId (at' 1 shown) @?= Just "b"
+        selectedId (syncForRender (setShowFutureReminders False (at' 1 shown))) @?= Just "c"
+    ]
