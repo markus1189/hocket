@@ -90,6 +90,7 @@ test-suite test
   main-is:             test.hs
   other-modules:       AgentClient
                      , AgentServer
+                     , ClassifyTests
                      , Events
                      , Keys
   build-depends:       base
@@ -101,8 +102,11 @@ test-suite test
                      , directory
                      , filepath
                      , hocket == 0.2.0.0
+                     , http-types
                      , lens
                      , network
+                     , servant-client
+                     , servant-client-core
                      , stm
                      , unix
                      , tasty

@@ -3,6 +3,8 @@
 
 module Network.Raindrop
   ( raindrop,
+    ErrorScope (..),
+    classify,
   )
 where
 
@@ -27,6 +29,20 @@ isTransient :: ClientError -> Bool
 isTransient (ConnectionError _) = True
 isTransient (FailureResponse _ r) = let c = statusCode (responseStatusCode r) in c == 429 || c >= 500
 isTransient _ = False
+
+-- | Whether a failed call says something about its item, or would hit every
+-- following call the same way (plan D6).
+data ErrorScope = ItemScoped | Global deriving (Show, Eq)
+
+-- | Auth, request timeout and rate limiting are not about the item; neither
+-- are 1xx/3xx, connection, decode or content-type failures.
+classify :: ClientError -> ErrorScope
+classify (FailureResponse _ r)
+  | c `elem` [401, 403, 408, 429] = Global
+  | c >= 400 && c < 500 = ItemScoped
+  where
+    c = statusCode (responseStatusCode r)
+classify _ = Global
 
 -- | Run a call, retrying transient failures; the final failure is thrown.
 runRetrying :: (MonadIO m, MonadLogger m) => ClientM a -> m a

@@ -7,6 +7,7 @@ import AgentServer (AgentEnv (..), runAgentServer)
 import Brick.BChan (BChan, newBChan, readBChan, writeBChan)
 import Brick.Widgets.Edit (applyEdit)
 import qualified Brick.Widgets.List as L
+import ClassifyTests (classifyTests)
 import Control.Concurrent (forkIO, threadDelay)
 import Control.Concurrent.Async (withAsync)
 import Control.Concurrent.STM (TVar, atomically, modifyTVar', newTVarIO)
@@ -74,7 +75,7 @@ import Test.Tasty.QuickCheck as QC
 main = defaultMain tests
 
 tests :: TestTree
-tests = testGroup "Tests" [xKeyBatchConcurrencyTests, hocketStateTests, raindropParsingTests, raindropApiBodyTests, dateTimeParsingTests, jsonRoundtripTests, sanitizeForDisplayTests, fuzzyMatchTests, fuzzyFilterMatchTests, filterStateTests, filterTuningTests, agentSnapshotTests, agentProtocolTests, agentServerIntegrationTests]
+tests = testGroup "Tests" [xKeyBatchConcurrencyTests, hocketStateTests, raindropParsingTests, raindropApiBodyTests, classifyTests, dateTimeParsingTests, jsonRoundtripTests, sanitizeForDisplayTests, fuzzyMatchTests, fuzzyFilterMatchTests, filterStateTests, filterTuningTests, agentSnapshotTests, agentProtocolTests, agentServerIntegrationTests]
 
 -- Expected bodies are what the pre-servant wreq client sent.
 raindropApiBodyTests :: TestTree
