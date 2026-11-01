@@ -111,13 +111,15 @@ Wait for the effect itself, not for "something changed": `wait_version`
 returns after the next applied event, and that can be one queued before
 yours (another agent's write, a running fetch or batch). Every agent call
 is such an event too (the client count), so the wait often returns at
-once. Check, wait, check again, until a deadline:
+once; pause a moment each round, or the loop polls about 90 times a second.
+Check, wait, check again, until a deadline:
 
 ```bash
 V=$(hocket agent set_flag 123 --action archive | jq .result.version)
 deadline=$((SECONDS + 30))
 until [ "$(hocket agent get_item 123 | jq -r .result.pending.action)" = archive ]; do
   if [ "$SECONDS" -ge "$deadline" ]; then echo "set_flag 123 has not landed" >&2; break; fi
+  sleep 0.2
   V=$(hocket agent wait_version --after "$V" --timeout-ms 1000 | jq -e .result.version) ||
     V=$(hocket agent get_state | jq .result.version)
 done

@@ -369,9 +369,9 @@ decode → validate → transcribe → inject
 event was queued*, not that the UI has processed or rendered it. To confirm
 the effect landed, wait for the condition: re-read, and while it does not
 hold yet, `wait_version` after the last version seen, until a deadline (the
-skill has the loop). Bound it by time, not by a count of waits: every agent
-connection is itself an event (the client count, `AgentClients`), so a
-wait usually returns at once.
+skill has the loop). Bound it by time, not by a count of waits, and pause
+briefly each round: every agent connection is itself an event (the client
+count, `AgentClients`), so a wait usually returns at once.
 
 Writes are **idempotent by construction** — they are the same events the
 keyboard fires, so replaying a write is no different from the user pressing
@@ -567,8 +567,8 @@ write, or one for a connection (§4.2), which every agent call is. Until the
 protocol can say which event a write became (a sequence number per write
 with a `wait_applied` method, say, or connections that do not render), the
 reliable pattern is the skill's: re-read until the state shows the effect,
-waiting with `wait_version` in between, bounded by a deadline rather than by
-a number of waits. Both fixes change the wire and are left for later.
+waiting with `wait_version` and a short pause in between, bounded by a
+deadline rather than by a number of waits. Both fixes change the wire and are left for later.
 
 ---
 
