@@ -357,7 +357,7 @@ The `s` key provides intelligent reminder management based on the item's current
 ### Architecture
 - **Language**: Haskell (GHC 9.6+)
 - **UI Framework**: [Brick](https://github.com/jtdaugherty/brick) (terminal UI library)
-- **HTTP Client**: [Wreq](http://www.serpentine.com/wreq/) for API communication
+- **HTTP Client**: [servant-client](https://hackage.haskell.org/package/servant-client), with the Raindrop API declared as a servant type; calls that are safe to repeat are retried on transient failures (connection, 429, 5xx)
 - **Configuration**: [Dhall](https://dhall-lang.org/) functional configuration language
 - **Concurrency**: Async operations for non-blocking UI
 
@@ -421,7 +421,7 @@ Contributions are welcome! Please:
 
 #### Code Style Guidelines
 - Use `lens` for record access (avoid `_` prefixed accessors)
-- Prefer `wreq` for HTTP operations
+- HTTP goes through `servant-client`: add endpoints to `Network.Raindrop.Api`, and call Raindrop only via `RaindropPort`
 - Use `tasty` for testing
 - Follow Brick patterns for UI components
 

@@ -56,7 +56,7 @@ Hocket is a terminal-based bookmark manager for Raindrop.io built with Haskell a
 
 ### Dependencies
 - **brick** - Terminal user interface framework
-- **wreq** - HTTP client for API communication
+- **servant-client** - HTTP client; the Raindrop API is a servant type in `Network.Raindrop.Api`
 - **lens** - Functional record access and manipulation
 - **dhall** - Configuration language
 - **aeson** - JSON parsing and serialization
@@ -69,7 +69,7 @@ Hocket is a terminal-based bookmark manager for Raindrop.io built with Haskell a
 ## Code Style Guidelines
 
 - Use `lens` package for record access - avoid underscore-prefixed accessors
-- Use `wreq` package for HTTP operations
+- HTTP goes through `servant-client`: endpoints in `Network.Raindrop.Api`, retries in `Network.Raindrop`, and the app reaches Raindrop only via `RaindropPort` (`Network.Bookmark.Port`)
 - Use `tasty` for testing framework
 - Follow Brick TUI patterns for UI components
 - Run `cabal test` after implementing changes

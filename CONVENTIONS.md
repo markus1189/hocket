@@ -7,7 +7,7 @@
 ## Code Style
 
 - prefer using the `lens` package, don't use record accessors starting with '_' if there are lenses available
-- use `wreq` package for http calls, tutorial at http://www.serpentine.com/wreq/tutorial.html
+- http calls use `servant-client`: endpoints go into the API type in `Network.Raindrop.Api`, callers go through `RaindropPort` (`Network.Bookmark.Port`)
 - use `tasty` for tests
 - the TUI is built using `brick`, user guide at https://github.com/jtdaugherty/brick/blob/master/docs/guide.rst
 
