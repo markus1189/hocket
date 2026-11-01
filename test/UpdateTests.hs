@@ -14,18 +14,18 @@ import qualified Data.Text as T
 import Data.Time (UTCTime)
 import Data.Time.LocalTime (minutesToTimeZone)
 import qualified Graphics.Vty as Vty
-import Keys (keyIntents)
-import Network.Bookmark.Agent.Intent (toIntent)
-import Network.Bookmark.Agent.Protocol (FlagAction (..), WriteCmd (..))
-import Network.Bookmark.App.Effect
-import Network.Bookmark.App.Msg
-import Network.Bookmark.App.Nav (Nav (..))
-import Network.Bookmark.App.Plan (BatchPlan (..))
-import Network.Bookmark.App.Update
-import Network.Bookmark.Batch (ErrorScope (..), StepOutcome, runItems)
-import Network.Bookmark.Types
-import Network.Bookmark.Ui.State
-import Network.Bookmark.Ui.Sync (planSync)
+import Hocket.Agent.Intent (toIntent)
+import Hocket.Agent.Protocol (FlagAction (..), WriteCmd (..))
+import Hocket.App.Batch (ErrorScope (..), StepOutcome, runItems)
+import Hocket.App.Effect
+import Hocket.App.Model
+import Hocket.App.Msg
+import Hocket.App.Nav (Nav (..))
+import Hocket.App.Plan (BatchPlan (..))
+import Hocket.App.Sync (planSync)
+import Hocket.App.Update
+import Hocket.Domain.Bookmark
+import Hocket.Shell.Tui.Keymap (keyIntents)
 import Test.Tasty
 import Test.Tasty.HUnit
 

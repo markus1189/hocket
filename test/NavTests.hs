@@ -14,8 +14,8 @@ import qualified Data.Vector as V
 import Hedgehog (forAll, forAllWith, property, (===))
 import qualified Hedgehog.Gen as Gen
 import qualified Hedgehog.Range as Range
-import Network.Bookmark.App.Nav
-import Network.Bookmark.Types
+import Hocket.App.Nav
+import Hocket.Domain.Bookmark
 import Test.Tasty (TestTree, testGroup)
 import Test.Tasty.HUnit (testCase, (@?=))
 import Test.Tasty.Hedgehog (testProperty)

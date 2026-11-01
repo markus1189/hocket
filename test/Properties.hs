@@ -15,10 +15,10 @@ import Gen
 import Hedgehog
 import qualified Hedgehog.Gen as Gen
 import qualified Hedgehog.Range as Range
-import Network.Bookmark.Agent.Protocol
-import Network.Bookmark.Agent.Snapshot
-import Network.Bookmark.Types
-import Network.Bookmark.Ui.State
+import Hocket.Agent.Protocol
+import Hocket.Agent.Snapshot
+import Hocket.App.Model
+import Hocket.Domain.Bookmark
 import Test.Tasty (TestTree, testGroup)
 import Test.Tasty.Hedgehog (testProperty)
 

@@ -4,10 +4,10 @@ import Control.Lens ((&), (.~))
 import Data.Foldable (for_)
 import Data.Time (utc)
 import Graphics.Vty (Event (EvKey), Key (..), Modifier (MCtrl))
-import Keys (keyIntents)
-import Network.Bookmark.App.Msg
-import Network.Bookmark.App.Nav (Nav (..))
-import Network.Bookmark.Ui.State
+import Hocket.App.Model
+import Hocket.App.Msg
+import Hocket.App.Nav (Nav (..))
+import Hocket.Shell.Tui.Keymap (keyIntents)
 import Test.Tasty (TestTree, testGroup)
 import Test.Tasty.HUnit (testCase, (@?=))
 

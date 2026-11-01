@@ -13,9 +13,9 @@ import Gen (genModel, genVideoFilterMode)
 import Hedgehog
 import qualified Hedgehog.Gen as Gen
 import qualified Hedgehog.Range as Range
-import Network.Bookmark.Types
-import Network.Bookmark.Ui.State
-import Network.Bookmark.Ui.Widgets (fuzzyFilterMatch)
+import Hocket.App.Model
+import Hocket.Domain.Bookmark
+import Hocket.Domain.Filter (fuzzyFilterMatch)
 import Test.Tasty (TestTree, testGroup)
 import Test.Tasty.Hedgehog (testProperty)
 

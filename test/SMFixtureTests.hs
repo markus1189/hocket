@@ -21,10 +21,10 @@ import Gen (genFailRule, genFake, genUTCTime)
 import Hedgehog hiding (classify)
 import qualified Hedgehog.Gen as Gen
 import qualified Hedgehog.Range as Range
-import Network.Bookmark.Fake
-import Network.Bookmark.Port (RaindropPort (..))
-import Network.Bookmark.Types
-import Network.Raindrop (ErrorScope, classify)
+import Hocket.Adapter.Fake
+import Hocket.Adapter.Raindrop (ErrorScope, classify)
+import Hocket.Domain.Bookmark
+import Hocket.Port (RaindropPort (..))
 import Servant.Client.Core (ClientError)
 import Test.Tasty (TestTree)
 import Test.Tasty.Hedgehog (testPropertyNamed)

@@ -16,13 +16,13 @@ import Data.Time.Clock (UTCTime)
 import Data.Time.Clock.POSIX (POSIXTime, utcTimeToPOSIXSeconds)
 import Data.Time.LocalTime (minutesToTimeZone)
 import qualified Graphics.Vty as Vty
-import Keys (keyIntents)
-import Network.Bookmark.App.Effect (Effect (OpenUrl), Opener (Firefox))
-import Network.Bookmark.App.Msg (Msg (Intent), Now (..))
-import Network.Bookmark.App.Update (update)
-import Network.Bookmark.Types
-import Network.Bookmark.Ui.State
-import Network.Bookmark.Ui.Sync
+import Hocket.App.Effect (Effect (OpenUrl), Opener (Firefox))
+import Hocket.App.Model
+import Hocket.App.Msg (Msg (Intent), Now (..))
+import Hocket.App.Sync
+import Hocket.App.Update (update)
+import Hocket.Domain.Bookmark
+import Hocket.Shell.Tui.Keymap (keyIntents)
 import Test.Tasty
 import Test.Tasty.HUnit
 

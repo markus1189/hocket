@@ -10,8 +10,8 @@ import qualified Data.Sequence as Seq
 import Data.String (fromString)
 import Gen (clientErrorRows, genClientErrorRow)
 import Hedgehog (cover, forAll, property, withTests, (===))
+import Hocket.Adapter.Raindrop (ErrorScope (..), classify)
 import Network.HTTP.Types (http11, mkStatus)
-import Network.Raindrop (ErrorScope (..), classify)
 import Servant.Client.Core (BaseUrl (..), ClientError (..), Response, ResponseF (..), Scheme (Https), defaultRequest)
 import Test.Tasty
 import Test.Tasty.HUnit

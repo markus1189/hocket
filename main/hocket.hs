@@ -14,8 +14,6 @@ module Main
   )
 where
 
-import AgentClient (runAgentCommand)
-import AgentServer (resolveAgentSocketPath, withAgentServer)
 import Brick
   ( App (..),
     AttrMap,
@@ -58,7 +56,9 @@ import Control.Monad.Logger (LoggingT, defaultOutput, logErrorN, logInfoN, runLo
 import qualified Data.ByteString.Lazy as LBS
 import Data.Foldable (for_, traverse_)
 import Data.IORef (newIORef, readIORef)
-import Signals (exitOnTerminated, unwindOnTermination)
+import Hocket.Shell.Agent.Client (runAgentCommand)
+import Hocket.Shell.Agent.Server (resolveAgentSocketPath, withAgentServer)
+import Hocket.Shell.Signals (exitOnTerminated, unwindOnTermination)
 #if MIN_VERSION_base(4,20,0)
 import Data.List (find, isPrefixOf)
 #else
@@ -80,7 +80,6 @@ import Data.Time.LocalTime
   )
 import Data.Traversable (for)
 import Dhall (auto, input)
-import Fixture (FixtureOpts (..), fixtureParser, fixtureStore)
 import Formatting (sformat, (%))
 import qualified Formatting as F
 import qualified Formatting.Time as F
@@ -88,36 +87,17 @@ import Graphics.Vty (Event (EvKey), Key (KChar, KDown, KUp), Modifier (MCtrl))
 import qualified Graphics.Vty as Vty
 import Graphics.Vty.Input.Events (Key (KEnter, KEsc))
 import Graphics.Vty.Platform.Unix (mkVty)
-import Interpret (Env (..), newEnv, publish, step, tookMsg)
-import Keys (keyIntents)
-import Network.Bookmark.Agent.Protocol
+import Hocket.Adapter.Fake (encodeFixtureDump, fakePort)
+import Hocket.Adapter.Raindrop (servantPort)
+import Hocket.Adapter.System (systemNow, systemPort)
+import Hocket.Agent.Protocol
   ( AgentCmd (..),
     FlagAction (..),
     ReadCmd (..),
     WriteCmd (..),
   )
-import Network.Bookmark.Agent.Snapshot (AgentSnapshot)
-import Network.Bookmark.App.Msg (Intent (FilterCancel, FilterLock, FilterText, Navigate, Refresh), Msg (..))
-import Network.Bookmark.App.Nav (Nav (..))
-import Network.Bookmark.Fake (encodeFixtureDump, fakePort)
-import Network.Bookmark.Port (RaindropPort (..))
-import Network.Bookmark.Types
-  ( BookmarkItem,
-    BookmarkItemId (..),
-    BookmarkRequest (AddBookmark),
-    PendingAction (..),
-    biCreated,
-    biExcerpt,
-    biId,
-    biImportant,
-    biLink,
-    biNote,
-    biReminder,
-    biTitle,
-    _BookmarkItemId,
-  )
-import Network.Bookmark.Ui.Reconcile (UiState, editorQuery, initialUi, reconcile, uiEditor, uiList)
-import Network.Bookmark.Ui.State
+import Hocket.Agent.Snapshot (AgentSnapshot)
+import Hocket.App.Model
   ( HocketState,
     Name (..),
     VideoFilterMode (..),
@@ -139,8 +119,29 @@ import Network.Bookmark.Ui.State
     initialState,
     settle,
   )
-import Network.Bookmark.Ui.Widgets (sanitizeForDisplay)
-import Network.Raindrop (servantPort)
+import Hocket.App.Msg (Intent (FilterCancel, FilterLock, FilterText, Navigate, Refresh), Msg (..))
+import Hocket.App.Nav (Nav (..))
+import Hocket.Domain.Bookmark
+  ( BookmarkItem,
+    BookmarkItemId (..),
+    BookmarkRequest (AddBookmark),
+    PendingAction (..),
+    biCreated,
+    biExcerpt,
+    biId,
+    biImportant,
+    biLink,
+    biNote,
+    biReminder,
+    biTitle,
+    _BookmarkItemId,
+  )
+import Hocket.Domain.Filter (sanitizeForDisplay)
+import Hocket.Port (RaindropPort (..))
+import Hocket.Shell.Fixture (FixtureOpts (..), fixtureParser, fixtureStore)
+import Hocket.Shell.Interpret (Env (..), newEnv, publish, step, tookMsg)
+import Hocket.Shell.Tui.Keymap (keyIntents)
+import Hocket.Shell.Tui.Reconcile (UiState, editorQuery, initialUi, reconcile, uiEditor, uiList)
 import Network.URI
   ( URI (uriAuthority, uriPath, uriQuery),
     URIAuth (uriRegName),
@@ -177,7 +178,6 @@ import Options.Applicative
     (<**>),
   )
 import qualified Options.Applicative as Opt
-import System (systemNow, systemPort)
 import System.Directory (XdgDirectory (..), createDirectoryIfMissing, doesFileExist, getXdgDirectory)
 import System.Exit (exitFailure)
 import System.FilePath ((</>))

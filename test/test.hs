@@ -2,8 +2,6 @@
 {-# LANGUAGE ScopedTypeVariables #-}
 {-# LANGUAGE TypeApplications #-}
 
-import AgentClient (callAgent, isChannelFullError)
-import AgentServer (AgentEnv (..), BoundSocket, boundSocketId, cleanupAgentSocket, newBoundSocket, runAgentServer, socketDirIsOurs)
 import BatchTests (batchTests)
 import Brick.BChan (BChan, newBChan, readBChan, writeBChan)
 import Brick.Widgets.Edit (applyEdit, editContentsL)
@@ -46,17 +44,20 @@ import qualified Data.Vector as V
 import FakeTests (fakeTests)
 import FixtureTests (fixtureTests)
 import HeadlessTests (headlessTests)
+import Hocket.Adapter.Raindrop.Api (ApiResult (..), BatchMove (..), Created (..), Items (..), NewRaindrop (..), RaindropPatch (..))
+import Hocket.Agent.Protocol
+import Hocket.Agent.Snapshot
+import Hocket.App.Model
+import qualified Hocket.App.Msg as I
+import Hocket.Domain.Bookmark
+import Hocket.Domain.Filter (fuzzyFilterMatch, fuzzyMatch, sanitizeForDisplay)
+import Hocket.Shell.Agent.Client (callAgent, isChannelFullError)
+import Hocket.Shell.Agent.Server (AgentEnv (..), BoundSocket, boundSocketId, cleanupAgentSocket, newBoundSocket, runAgentServer, socketDirIsOurs)
+import Hocket.Shell.Signals (Terminated (..), exitOnTerminated, unwindOnTermination)
+import Hocket.Shell.Tui.Reconcile
 import IntentTests (intentTests)
 import KeyIntentTests (keyIntentTests)
 import NavTests (navTests)
-import Network.Bookmark.Agent.Protocol
-import Network.Bookmark.Agent.Snapshot
-import qualified Network.Bookmark.App.Msg as I
-import Network.Bookmark.Types
-import Network.Bookmark.Ui.Reconcile
-import Network.Bookmark.Ui.State
-import Network.Bookmark.Ui.Widgets (fuzzyFilterMatch, fuzzyMatch, sanitizeForDisplay)
-import Network.Raindrop.Api (ApiResult (..), BatchMove (..), Created (..), Items (..), NewRaindrop (..), RaindropPatch (..))
 import Network.Socket
   ( Family (AF_UNIX),
     SockAddr (SockAddrUnix),
@@ -72,7 +73,6 @@ import PlanTests (planTests)
 import Properties (propertyTests)
 import ReminderTests (reminderTests)
 import SMFixtureTests (smFixtureTests)
-import Signals (Terminated (..), exitOnTerminated, unwindOnTermination)
 import SnapshotGoldenTests (snapshotGoldenTests)
 import System.Directory (createDirectory, createDirectoryIfMissing, doesDirectoryExist, doesFileExist, getTemporaryDirectory, pathIsSymbolicLink, removeDirectoryRecursive, removeFile)
 import System.Exit (ExitCode (..))

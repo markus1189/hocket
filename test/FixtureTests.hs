@@ -5,8 +5,8 @@ module FixtureTests (fixtureTests) where
 import Control.Lens ((^.))
 import qualified Data.ByteString.Lazy as LBS
 import qualified Data.Map as Map
-import Fixture
-import Network.Bookmark.Fake
+import Hocket.Adapter.Fake
+import Hocket.Shell.Fixture
 import Options.Applicative (defaultPrefs, execParserPure, getParseResult, info, optional)
 import Test.Tasty
 import Test.Tasty.HUnit

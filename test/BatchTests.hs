@@ -15,11 +15,11 @@ import Data.Maybe (fromJust, isJust, isNothing)
 import qualified Data.Text as T
 import Gen (genFailureScript)
 import Hedgehog (cover, forAll, property, withTests, (===))
-import Network.Bookmark.Batch
-import Network.Bookmark.Types (BookmarkItemId (..), PendingAction (..))
-import Network.Bookmark.Ui.State
-import Network.Bookmark.Ui.Sync (applyArchived)
-import Network.Raindrop (classify)
+import Hocket.Adapter.Raindrop (classify)
+import Hocket.App.Batch
+import Hocket.App.Model
+import Hocket.App.Sync (applyArchived)
+import Hocket.Domain.Bookmark (BookmarkItemId (..), PendingAction (..))
 import Servant.Client.Core (ClientError)
 import Test.Tasty
 import Test.Tasty.HUnit

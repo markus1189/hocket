@@ -7,7 +7,7 @@
 ## Code Style
 
 - prefer using the `lens` package, don't use record accessors starting with '_' if there are lenses available
-- http calls use `servant-client`: endpoints go into the API type in `Network.Raindrop.Api`, callers go through `RaindropPort` (`Network.Bookmark.Port`)
+- http calls use `servant-client`: endpoints go into the API type in `Hocket.Adapter.Raindrop.Api`, callers go through `RaindropPort` (`Hocket.Port`)
 - use `tasty` for tests
 - the TUI is built using `brick`, user guide at https://github.com/jtdaugherty/brick/blob/master/docs/guide.rst
 

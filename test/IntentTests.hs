@@ -6,11 +6,11 @@ import Data.List (nub)
 import Data.Time (utc)
 import Gen (genAgentCmd)
 import Hedgehog (assert, forAll, property)
-import Network.Bookmark.Agent.Intent (toIntent)
-import Network.Bookmark.Agent.Protocol
-import Network.Bookmark.App.Msg
-import Network.Bookmark.Types (BookmarkItemId (..))
-import Network.Bookmark.Ui.State (VideoFilterMode (..))
+import Hocket.Agent.Intent (toIntent)
+import Hocket.Agent.Protocol
+import Hocket.App.Model (VideoFilterMode (..))
+import Hocket.App.Msg
+import Hocket.Domain.Bookmark (BookmarkItemId (..))
 import Test.Tasty (TestTree, testGroup)
 import Test.Tasty.HUnit (testCase, (@?=))
 import Test.Tasty.Hedgehog (testProperty)

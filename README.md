@@ -422,7 +422,7 @@ Contributions are welcome! Please:
 
 #### Code Style Guidelines
 - Use `lens` for record access (avoid `_` prefixed accessors)
-- HTTP goes through `servant-client`: add endpoints to `Network.Raindrop.Api`, and call Raindrop only via `RaindropPort`
+- HTTP goes through `servant-client`: add endpoints to `Hocket.Adapter.Raindrop.Api`, and call Raindrop only via `RaindropPort`
 - Use `tasty` for testing
 - Follow Brick patterns for UI components
 

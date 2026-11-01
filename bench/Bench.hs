@@ -9,14 +9,14 @@ import qualified Data.Text as T
 import Data.Time (utc)
 import Data.Time.Clock (addUTCTime)
 import Data.Time.Clock.POSIX (posixSecondsToUTCTime)
-import Network.Bookmark.Agent.Intent (toIntent)
-import Network.Bookmark.Agent.Protocol (FlagAction (..), WriteCmd (..), validateWrite)
-import Network.Bookmark.Agent.Snapshot (asItems, siVisible, takeSnapshot)
-import Network.Bookmark.App.Msg (Msg (Intent), Now (..))
-import Network.Bookmark.App.Update (update)
-import Network.Bookmark.Types
-import Network.Bookmark.Ui.Reconcile (UiState, initialUi, reconcile, uiList)
-import Network.Bookmark.Ui.State
+import Hocket.Agent.Intent (toIntent)
+import Hocket.Agent.Protocol (FlagAction (..), WriteCmd (..), validateWrite)
+import Hocket.Agent.Snapshot (asItems, siVisible, takeSnapshot)
+import Hocket.App.Model
+import Hocket.App.Msg (Msg (Intent), Now (..))
+import Hocket.App.Update (update)
+import Hocket.Domain.Bookmark
+import Hocket.Shell.Tui.Reconcile (UiState, initialUi, reconcile, uiList)
 import Test.Tasty.Bench
 
 -- Show forces every field of every item; good enough for one-off setup.

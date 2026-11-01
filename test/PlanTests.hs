@@ -9,9 +9,9 @@ import Data.Text (Text)
 import Data.Time (UTCTime)
 import Gen (genModel)
 import Hedgehog (forAllWith, property, (===))
-import Network.Bookmark.App.Plan
-import Network.Bookmark.Types
-import Network.Bookmark.Ui.State
+import Hocket.App.Model
+import Hocket.App.Plan
+import Hocket.Domain.Bookmark
 import Test.Tasty (TestTree, testGroup)
 import Test.Tasty.HUnit (testCase, (@?=))
 import Test.Tasty.Hedgehog (testProperty)

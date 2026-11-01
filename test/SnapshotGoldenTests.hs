@@ -10,10 +10,10 @@ import qualified Data.Aeson as A
 import Data.Text (Text)
 import Data.Time (UTCTime)
 import qualified Data.Vector as V
-import Network.Bookmark.Agent.Protocol (stateView)
-import Network.Bookmark.Agent.Snapshot (takeSnapshot)
-import Network.Bookmark.Types
-import Network.Bookmark.Ui.State
+import Hocket.Agent.Protocol (stateView)
+import Hocket.Agent.Snapshot (takeSnapshot)
+import Hocket.App.Model
+import Hocket.Domain.Bookmark
 import Test.Tasty (TestTree, testGroup)
 import Test.Tasty.Golden (goldenVsString)
 

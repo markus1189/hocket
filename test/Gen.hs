@@ -38,14 +38,14 @@ import Data.Time.LocalTime (TimeZone, minutesToTimeZone)
 import Hedgehog (Gen)
 import qualified Hedgehog.Gen as Gen
 import qualified Hedgehog.Range as Range
-import Network.Bookmark.Agent.Protocol
-import Network.Bookmark.Agent.Snapshot
-import Network.Bookmark.Fake (FailRule (..), FailStatus (..), FakeRaindrop, emptyFake, frItems, frPageSize)
-import Network.Bookmark.Types
-import Network.Bookmark.Ui.State
+import Hocket.Adapter.Fake (FailRule (..), FailStatus (..), FakeRaindrop, emptyFake, frItems, frPageSize)
+import Hocket.Adapter.Raindrop (ErrorScope (..))
+import Hocket.Agent.Protocol
+import Hocket.Agent.Snapshot
+import Hocket.App.Model
+import Hocket.Domain.Bookmark
 import Network.HTTP.Media (MediaType, (//))
 import Network.HTTP.Types (Status, http11, mkStatus)
-import Network.Raindrop (ErrorScope (..))
 import Servant.Client.Core (BaseUrl (..), ClientError (..), RequestF (..), ResponseF (..), Scheme (Https), defaultRequest)
 import System.IO.Error (userError)
 

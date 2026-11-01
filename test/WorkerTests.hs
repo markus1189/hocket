@@ -24,19 +24,19 @@ import qualified Data.Map as Map
 import Data.Maybe (fromMaybe)
 import qualified Data.Text as T
 import Data.Time (UTCTime)
-import Interpret (batchWorker)
-import Network.Bookmark.App.Msg (Intent (Execute, Refresh), Msg (..), StepResult (..))
-import Network.Bookmark.App.Plan (BatchPlan (..))
-import Network.Bookmark.App.Update (batchStatus, update)
-import Network.Bookmark.Batch
-import Network.Bookmark.Port (RaindropPort (..))
-import Network.Bookmark.Types (BookmarkItemBatch (..), BookmarkItemId (..), PendingAction (..))
-import Network.Bookmark.Ui.State
-import Network.Bookmark.Ui.Sync
+import Hocket.App.Batch
+import Hocket.App.Model
+import Hocket.App.Msg (Intent (Execute, Refresh), Msg (..), StepResult (..))
+import Hocket.App.Plan (BatchPlan (..))
+import Hocket.App.Sync
+import Hocket.App.Update (batchStatus, update)
+import Hocket.Domain.Bookmark (BookmarkItemBatch (..), BookmarkItemId (..), PendingAction (..))
+import Hocket.Port (RaindropPort (..))
+import Hocket.Shell.Interpret (batchWorker)
+import Hocket.Shell.Worker
 import Servant.Client.Core (ClientError (..))
 import Test.Tasty
 import Test.Tasty.HUnit
-import Worker
 
 workerTests :: TestTree
 workerTests = testGroup "async workers" [fetchEmissionTests, fetchSlotTests, stepEmissionTests, batchSlotTests, stepExceptionTests, errorRenderingTests]

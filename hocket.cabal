@@ -17,26 +17,26 @@ cabal-version:       >=1.8
 library
   ghc-options:         -Wall -Wunused-packages -Werror
   hs-source-dirs:      src
-  exposed-modules:     Network.Raindrop
-                     , Network.Bookmark.App.Effect
-                     , Network.Bookmark.App.Msg
-                     , Network.Bookmark.App.Nav
-                     , Network.Bookmark.App.Plan
-                     , Network.Bookmark.App.Update
-                     , Network.Bookmark.Batch
-                     , Network.Bookmark.Port
-                     , Network.Raindrop.Api
-                     , Network.Bookmark.Agent.Intent
-                     , Network.Bookmark.Agent.Protocol
-                     , Network.Bookmark.Agent.Snapshot
-                     , Network.Bookmark.Fake
-                     , Network.Bookmark.Reminder
-                     , Network.Bookmark.Credentials
-                     , Network.Bookmark.Types
-                     , Network.Bookmark.Ui.Reconcile
-                     , Network.Bookmark.Ui.State
-                     , Network.Bookmark.Ui.Sync
-                     , Network.Bookmark.Ui.Widgets
+  exposed-modules:     Hocket.Adapter.Raindrop
+                     , Hocket.App.Effect
+                     , Hocket.App.Msg
+                     , Hocket.App.Nav
+                     , Hocket.App.Plan
+                     , Hocket.App.Update
+                     , Hocket.App.Batch
+                     , Hocket.Port
+                     , Hocket.Adapter.Raindrop.Api
+                     , Hocket.Agent.Intent
+                     , Hocket.Agent.Protocol
+                     , Hocket.Agent.Snapshot
+                     , Hocket.Adapter.Fake
+                     , Hocket.Domain.Reminder
+                     , Hocket.Shell.Config
+                     , Hocket.Domain.Bookmark
+                     , Hocket.Shell.Tui.Reconcile
+                     , Hocket.App.Model
+                     , Hocket.App.Sync
+                     , Hocket.Domain.Filter
   Build-depends:       aeson
                      , base
                      , bytestring
@@ -62,14 +62,14 @@ executable hocket
   ghc-options:         -Wall -Wunused-packages -threaded -Werror
   main-is:             hocket.hs
   hs-source-dirs:      main
-  other-modules:       AgentClient
-                     , AgentServer
-                     , Fixture
-                     , Interpret
-                     , Keys
-                     , Signals
-                     , System
-                     , Worker
+  other-modules:       Hocket.Shell.Agent.Client
+                     , Hocket.Shell.Agent.Server
+                     , Hocket.Shell.Fixture
+                     , Hocket.Shell.Interpret
+                     , Hocket.Shell.Tui.Keymap
+                     , Hocket.Shell.Signals
+                     , Hocket.Adapter.System
+                     , Hocket.Shell.Worker
   build-depends:       aeson
                      , async
                      , base
@@ -105,16 +105,16 @@ test-suite test
   type:                exitcode-stdio-1.0
   hs-source-dirs:      test, main
   main-is:             test.hs
-  other-modules:       AgentClient
-                     , AgentServer
+  other-modules:       Hocket.Shell.Agent.Client
+                     , Hocket.Shell.Agent.Server
                      , BatchTests
                      , CharacterizationTests
                      , ClassifyTests
-                     , Fixture
-                     , Interpret
+                     , Hocket.Shell.Fixture
+                     , Hocket.Shell.Interpret
                      , FakeTests
                      , FixtureTests
-                     , Headless
+                     , Hocket.Shell.Headless
                      , HeadlessTests
                      , Gen
                      , SnapshotGoldenTests
@@ -125,10 +125,10 @@ test-suite test
                      , KeyIntentTests
                      , PlanTests
                      , ReminderTests
-                     , Keys
-                     , Signals
-                     , System
-                     , Worker
+                     , Hocket.Shell.Tui.Keymap
+                     , Hocket.Shell.Signals
+                     , Hocket.Adapter.System
+                     , Hocket.Shell.Worker
                      , Properties
                      , SystemTests
                      , UpdateTests
