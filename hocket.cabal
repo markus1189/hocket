@@ -113,6 +113,8 @@ test-suite test
                      , Interpret
                      , FakeTests
                      , FixtureTests
+                     , Headless
+                     , HeadlessTests
                      , Gen
                      , SnapshotGoldenTests
                      , IntentTests

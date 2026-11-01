@@ -45,6 +45,7 @@ import Data.Time.LocalTime (utc)
 import qualified Data.Vector as V
 import FakeTests (fakeTests)
 import FixtureTests (fixtureTests)
+import HeadlessTests (headlessTests)
 import IntentTests (intentTests)
 import KeyIntentTests (keyIntentTests)
 import NavTests (navTests)
@@ -101,7 +102,7 @@ import WorkerTests (workerTests)
 main = defaultMain tests
 
 tests :: TestTree
-tests = testGroup "Tests" [snapshotGoldenTests, xKeyBatchConcurrencyTests, propertyTests, visibleTests, navTests, intentTests, keyIntentTests, planTests, systemTests, fakeTests, fixtureTests, reminderTests, hocketStateTests, raindropParsingTests, raindropApiBodyTests, classifyTests, characterizationTests, updateTests, workerTests, batchTests, dateTimeParsingTests, jsonRoundtripTests, sanitizeForDisplayTests, fuzzyMatchTests, fuzzyFilterMatchTests, filterStateTests, filterTuningTests, agentSnapshotTests, agentProtocolTests, agentServerIntegrationTests]
+tests = testGroup "Tests" [snapshotGoldenTests, xKeyBatchConcurrencyTests, propertyTests, visibleTests, navTests, intentTests, keyIntentTests, planTests, systemTests, fakeTests, fixtureTests, reminderTests, hocketStateTests, raindropParsingTests, raindropApiBodyTests, classifyTests, characterizationTests, updateTests, workerTests, headlessTests, batchTests, dateTimeParsingTests, jsonRoundtripTests, sanitizeForDisplayTests, fuzzyMatchTests, fuzzyFilterMatchTests, filterStateTests, filterTuningTests, agentSnapshotTests, agentProtocolTests, agentServerIntegrationTests]
 
 -- Expected bodies are what the pre-servant wreq client sent.
 raindropApiBodyTests :: TestTree

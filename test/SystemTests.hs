@@ -2,7 +2,6 @@
 
 module SystemTests (systemTests) where
 
-import Brick.BChan (newBChan)
 import CharacterizationTests (emptyState, item)
 import Control.Concurrent (threadDelay)
 import Control.Concurrent.Async (AsyncCancelled (..), cancel, waitCatch, withAsync)
@@ -13,7 +12,7 @@ import Control.Monad (forever)
 import Data.Foldable (for_)
 import Data.IORef (IORef, modifyIORef', newIORef, readIORef, writeIORef)
 import Data.Time (utc)
-import Interpret (Env (..), copyCleaned, interpret, step)
+import Interpret (Env (..), copyCleaned, interpret, newEnv, step)
 import Network.Bookmark.App.Effect (Effect (..), Opener (..))
 import Network.Bookmark.App.Msg (Intent (..), Msg (..), Now (..), Target (..))
 import Network.Bookmark.Port (RaindropPort (..), SystemPort (..))
@@ -80,10 +79,10 @@ systemPortTests =
 recordingEnv :: IO (Env, IORef [String])
 recordingEnv = do
   calls <- newIORef []
-  events <- newBChan 1
   let record c = modifyIORef' calls (<> [c])
       system = SystemPort (\program (URL url) -> record ("open " <> program <> " " <> url)) (record . ("copy " <>))
-  pure (Env events (RaindropPort (\_ -> fail "no Raindrop here")) system (pure (Now (read "2026-11-01 12:00:00 UTC") utc)), calls)
+  env <- newEnv (RaindropPort (\_ -> fail "no Raindrop here")) system (pure (Now (read "2026-11-01 12:00:00 UTC") utc))
+  pure (env, calls)
 
 -- | The y key's path from CopyText to the clipboard, with the clipboard faked.
 copyTests :: TestTree

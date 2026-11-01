@@ -38,13 +38,12 @@ import Brick
     zoom,
     (<+>),
   )
-import Brick.BChan (newBChan, writeBChan, writeBChanNonBlocking)
 import Brick.Widgets.Border (hBorder)
 import Brick.Widgets.Edit (applyEdit, editFocusedAttr, handleEditorEvent, renderEditor)
 import qualified Brick.Widgets.List as L
 import Control.Applicative ((<|>))
 import Control.Concurrent.Async (async)
-import Control.Concurrent.STM (TVar, newTVarIO)
+import Control.Concurrent.STM (TVar, atomically, newTVarIO)
 import Control.Exception (SomeException, bracket, finally)
 import Control.Exception.Base (try)
 import Control.Lens (makeLenses, uses, view)
@@ -91,7 +90,7 @@ import Graphics.Vty (Event (EvKey), Key (KChar, KDown, KUp), Modifier (MCtrl))
 import qualified Graphics.Vty as Vty
 import Graphics.Vty.Input.Events (Key (KEnter, KEsc))
 import Graphics.Vty.Platform.Unix (mkVty)
-import Interpret (Env (..), publish, step)
+import Interpret (Env (..), injectMsg, newEnv, postMsg, publish, step, tookMsg)
 import Keys (keyIntents)
 import Network.Bookmark.Agent.Protocol
   ( AgentCmd (..),
@@ -448,8 +447,7 @@ runTuiApp mAgentOpt (Just fo) = do
 
 runTui :: Maybe AgentSocketOpt -> Bool -> RaindropPort -> HocketState -> IO ()
 runTui mAgentOpt isFixture port s0 = do
-  events <- newBChan 10
-  let env = Env events port systemPort systemNow
+  env <- newEnv port systemPort systemNow
   tz <- getCurrentTimeZone
   unwindOnTermination
   -- bracket, not finally around customMain: a signal during mkVty must
@@ -464,7 +462,7 @@ runTui mAgentOpt isFixture port s0 = do
         customMain
           vty
           (mkVty Vty.defaultConfig)
-          (Just events)
+          (Just (envEvents env))
           (app tz isFixture env (snd <$> mAgent))
           (AppState s0 initialUi)
 
@@ -480,11 +478,10 @@ startAgentServer env opt = do
   ours <- socketDirIsOurs path
   bound <- newBoundSocket
   snapVar <- newTVarIO emptySnapshot
-  let events = envEvents env
-      agentEnv =
+  let agentEnv =
         AgentEnv
           { aeSnapshot = snapVar,
-            aeInject = writeBChanNonBlocking events,
+            aeInject = injectMsg env,
             aeNow = envNow env
           }
   _ <- async $ do
@@ -492,7 +489,7 @@ startAgentServer env opt = do
     case r of
       -- Blocking: rare, the main loop drains, and a dropped report would
       -- leave a dead socket looking alive.
-      Left e -> writeBChan events (AgentServerDied (T.pack (show e)))
+      Left e -> postMsg env (AgentServerDied (T.pack (show e)))
       Right () -> pure ()
   pure ((path, ours, bound), snapVar)
 
@@ -540,7 +537,10 @@ app tz isFixture env mSnapVar =
         model %= settle
         settled <- use model
         ui %= reconcile settled
-        for_ mSnapVar $ \snapVar -> liftIO . publish snapVar =<< use model,
+        for_ mSnapVar $ \snapVar -> liftIO . publish snapVar =<< use model
+        case e of
+          AppEvent _ -> liftIO (atomically (tookMsg env))
+          _ -> pure (),
       appStartEvent = applyMsg env (Intent Refresh),
       appAttrMap = const hocketAttrMap
     }

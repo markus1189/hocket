@@ -5,6 +5,10 @@
 -- | The shell's only way from an 'Effect' to IO (plan §4.3).
 module Interpret
   ( Env (..),
+    newEnv,
+    postMsg,
+    injectMsg,
+    tookMsg,
     step,
     publish,
     interpret,
@@ -13,12 +17,12 @@ module Interpret
   )
 where
 
-import Brick.BChan (BChan, writeBChan)
+import Brick.BChan (BChan, newBChan, writeBChan, writeBChanNonBlocking)
 import Control.Concurrent.Async (async)
-import Control.Concurrent.STM (TVar, atomically, modifyTVar')
+import Control.Concurrent.STM (STM, TVar, atomically, modifyTVar', newTVarIO)
 import Control.Exception (onException, try)
 import Control.Lens (view, (^.))
-import Control.Monad (foldM)
+import Control.Monad (foldM, unless)
 import Control.Monad.Loops (unfoldrM)
 import Data.Bifunctor (first, second)
 import Data.Text (Text)
@@ -41,11 +45,35 @@ import Worker (errorMessageFromException, exceptionMessage, fetchResult, runCall
 
 -- | Where to post events, Raindrop, the desktop and the clock.
 data Env = Env
-  { envEvents :: !(BChan Msg),
+  { -- | Write only through 'postMsg' and 'injectMsg': they count what is
+    -- in flight, which the headless loop's idle check needs and brick's
+    -- channel cannot tell.
+    envEvents :: !(BChan Msg),
+    -- | Posted and not yet taken by the event loop.
+    envPending :: !(TVar Int),
     envPort :: !RaindropPort,
     envSystem :: !SystemPort,
     envNow :: !(IO Now)
   }
+
+newEnv :: RaindropPort -> SystemPort -> IO Now -> IO Env
+newEnv port system now = Env <$> newBChan 10 <*> newTVarIO 0 <*> pure port <*> pure system <*> pure now
+
+-- | Post, waiting while the channel is full (the workers).
+postMsg :: Env -> Msg -> IO ()
+postMsg env m = atomically (modifyTVar' (envPending env) (+ 1)) >> writeBChan (envEvents env) m
+
+-- | Post unless the channel is full (the agent socket); whether it was.
+injectMsg :: Env -> Msg -> IO Bool
+injectMsg env m = do
+  atomically (modifyTVar' (envPending env) (+ 1))
+  posted <- writeBChanNonBlocking (envEvents env) m
+  unless posted (atomically (modifyTVar' (envPending env) (subtract 1)))
+  pure posted
+
+-- | The event loop took a message off the channel.
+tookMsg :: Env -> STM ()
+tookMsg env = modifyTVar' (envPending env) (subtract 1)
 
 -- | One message as both event loops run it: update, then its effects in
 -- order, each effect's immediate answers through 'step' again, depth first.
@@ -83,7 +111,7 @@ interpret env = \case
       result <- trySync (retrieveItems (envPort env) (plan ^. spSearch) (plan ^. spCollection))
       let rendered = either (Left . Just . exceptionMessage) (first errorMessageFromException) result
       post (fetchResult (plan ^. spKind == IncrementalAll) rendered)
-    post = writeBChan (envEvents env)
+    post = postMsg env
     failed = either (\e -> [SystemFailed (T.pack (show e))]) (const [])
     program = \case
       Firefox -> "firefox"
