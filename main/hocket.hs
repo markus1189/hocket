@@ -36,6 +36,7 @@ import Data.Time (getCurrentTime)
 import Dhall (auto, input)
 import Hocket.Adapter.Fake (encodeFixtureDump, fakePort)
 import Hocket.Adapter.Raindrop (servantPort)
+import Hocket.Adapter.System (systemPort)
 import Hocket.Agent.Protocol
   ( AgentCmd (..),
     FlagAction (..),
@@ -56,6 +57,7 @@ import Hocket.Shell.Fixture
   ( FixtureOpts (..),
     fixtureParser,
     fixtureStore,
+    recordingSystemPort,
   )
 import Hocket.Shell.Signals (exitOnTerminated)
 import Hocket.Shell.Tui.App (runTui)
@@ -263,7 +265,7 @@ runTuiApp mAgentOpt Nothing = do
   ensureSchemaFile
   configPath <- getConfigPath
   cred <- input auto (T.pack configPath)
-  withTuiLog $ \runLog -> runTui mPath False (servantPort runLog cred) initialModel
+  withTuiLog $ \runLog -> runTui mPath False (servantPort runLog cred) systemPort initialModel
 -- Fixture mode never reads the config or credentials, so it cannot reach
 -- the real account.
 runTuiApp mAgentOpt (Just fo) = do
@@ -271,7 +273,7 @@ runTuiApp mAgentOpt (Just fo) = do
   seed <- LBS.readFile (foSeed fo)
   store <- either (\e -> hPutStrLn stderr ("hocket: bad fixture " <> foSeed fo <> ": " <> e) >> exitFailure) pure (fixtureStore fo seed)
   ref <- newIORef store
-  runTui mPath True (fakePort getCurrentTime ref) initialModel
+  runTui mPath True (fakePort getCurrentTime ref) (recordingSystemPort (foDesktopLog fo)) initialModel
     `finally` for_ (foDump fo) (\out -> readIORef ref >>= LBS.writeFile out . encodeFixtureDump)
 
 agentSocketPath :: Maybe AgentSocketOpt -> IO (Maybe FilePath)

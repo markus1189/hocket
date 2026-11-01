@@ -41,7 +41,7 @@ import Graphics.Vty
 import qualified Graphics.Vty as Vty (defaultConfig)
 import Graphics.Vty.Input.Events (Key (KEnter, KEsc))
 import Graphics.Vty.Platform.Unix (mkVty)
-import Hocket.Adapter.System (systemNow, systemPort)
+import Hocket.Adapter.System (systemNow)
 import Hocket.Agent.Snapshot (AgentSnapshot)
 import Hocket.App.Model
   ( Model,
@@ -55,7 +55,7 @@ import Hocket.App.Msg
     Msg (..),
   )
 import Hocket.App.Nav (Nav (..))
-import Hocket.Port (RaindropPort (..))
+import Hocket.Port (RaindropPort (..), SystemPort)
 import Hocket.Shell.Agent.Server (withAgentServer)
 import Hocket.Shell.Interpret
   ( Env (..),
@@ -131,9 +131,9 @@ myEventHandler env (AppEvent m) = applyMsg env m
 myEventHandler _ _ = pure ()
 
 -- | The TUI, serving the agent socket at this path if one is given.
-runTui :: Maybe FilePath -> Bool -> RaindropPort -> Model -> IO ()
-runTui mPath isFixture port s0 = do
-  env <- newEnv port systemPort systemNow
+runTui :: Maybe FilePath -> Bool -> RaindropPort -> SystemPort -> Model -> IO ()
+runTui mPath isFixture port system s0 = do
+  env <- newEnv port system systemNow
   tz <- getCurrentTimeZone
   unwindOnTermination
   -- The vty starts inside the server's bracket: a signal during mkVty must

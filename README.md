@@ -136,6 +136,10 @@ hocket tui --fixture test/raindrop-items1.json
 # set-reminders | remove-reminders, STATUS an HTTP code or conn), and write
 # the store to a file on exit
 hocket tui --fixture seed.json --fixture-fail archive=503 --fixture-dump out.json
+
+# Fixture mode never opens a browser or touches the clipboard; this logs
+# what Space, Enter, e and y would have done, as JSON lines
+hocket tui --fixture seed.json --fixture-desktop-log desktop.jsonl
 ```
 
 `test/e2e.sh` drives fixture-mode sessions through the agent socket and
