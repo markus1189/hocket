@@ -24,6 +24,7 @@ module Shell.AgentParallelTests (agentParallelTests) where
 
 import Control.Concurrent (threadDelay)
 import Control.Concurrent.Async (withAsync)
+import Control.Concurrent.MVar (newEmptyMVar, putMVar, takeMVar)
 import Control.Concurrent.STM (atomically, newTVarIO, readTVar, readTVarIO)
 import qualified Control.Concurrent.STM as STM
 import Control.Lens ((&), (.~))
@@ -31,7 +32,7 @@ import Control.Monad (void)
 import Control.Monad.IO.Class (liftIO)
 import Control.Monad.Trans.Control (control)
 import Data.Aeson (Value, withObject, (.:))
-import Data.Aeson.Types (parseMaybe)
+import Data.Aeson.Types (Parser, parseMaybe)
 import qualified Data.ByteString.Lazy as LBS
 import Data.Foldable (for_)
 import Data.IORef (IORef, atomicModifyIORef', newIORef, readIORef, writeIORef)
@@ -60,6 +61,7 @@ import System.FilePath ((</>))
 import System.IO.Temp (withSystemTempDirectory)
 import System.Timeout (timeout)
 import Test.Tasty (TestTree, testGroup)
+import Test.Tasty.HUnit (assertBool, testCase, (@?=))
 import Test.Tasty.Hedgehog (testPropertyNamed)
 
 agentParallelTests :: TestTree
@@ -67,8 +69,39 @@ agentParallelTests =
   testGroup
     "SM-agent"
     [ testPropertyNamed "concurrent agents on one socket (I10)" "smAgent" smAgent,
-      testPropertyNamed "agents writing while a batch runs" "smAgentExecute" smAgentExecute
+      testPropertyNamed "agents writing while a batch runs" "smAgentExecute" smAgentExecute,
+      fullChannel
     ]
+
+noDesktop :: SystemPort
+noDesktop = SystemPort (\_ _ -> pure ()) (\_ -> pure ())
+
+-- | The retry half of I10, which the properties never reach (the loop drains
+-- faster than agents write): the loop is held in a step, the browser of an
+-- open_item, while a burst of writes arrives. Some are answered "channel
+-- full"; retried, every write lands, after the ones before it.
+fullChannel :: TestTree
+fullChannel =
+  testCase "a full channel answers \"retry\", and every retried write lands in order" $ do
+    entered <- newEmptyMVar
+    release <- newEmptyMVar
+    let browser = SystemPort (\_ _ -> putMVar entered () >> takeMVar release) (\_ -> pure ())
+        -- 1001..1004 four times over; the last round decides each flag.
+        burst = [(i, a) | a <- ["reminder", "none", "reminder", "archive"], i <- ids]
+    withSut (frItems . traverse . biReminder .~ Nothing) 0 browser $ \sut -> do
+      opened <- callAgent (sutSocket sut) (AWrite (CmdOpenItem (BookmarkItemId "1001")))
+      (opened >>= maybe (Left "no ok") Right . okOf) @?= Right True
+      held <- timeout 5000000 (takeMVar entered)
+      held @?= Just ()
+      answers <- traverse (\(i, a) -> callAgent (sutSocket sut) (AWrite (CmdSetFlag (BookmarkItemId i) (flagOf a)))) burst
+      let full = [w | (w, Right v) <- zip burst answers, isChannelFullError v]
+      assertBool ("no write was answered \"channel full\" in a burst of " <> show (length burst)) (not (null full))
+      putMVar release ()
+      for_ full $ \(i, a) -> write sut (OpSetFlag i a) >>= (@?= Just True)
+      got <- callAgent (sutSocket sut) (ARead (CmdListItems False False))
+      (got >>= maybe (Left "unparsed") Right . parseMaybe flagsOf) @?= Right (Map.fromList [(i, "archive") | i <- ids])
+  where
+    flagOf = \case "archive" -> FlagArchive; "reminder" -> FlagReminder; _ -> FlagNone
 
 t0 :: UTCTime
 t0 = read "2026-11-01 12:00:00 UTC"
@@ -81,14 +114,14 @@ data Sut = Sut {sutSocket :: FilePath, sutEnv :: Env, sutLoop :: Loop}
 
 -- | seed-basic, prepared, behind a fake whose every request takes this many
 -- microseconds.
-withSut :: (FakeRaindrop -> FakeRaindrop) -> Int -> (Sut -> IO a) -> IO a
-withSut prepare delay act = withSystemTempDirectory "hocket-sm" $ \dir -> do
+withSut :: (FakeRaindrop -> FakeRaindrop) -> Int -> SystemPort -> (Sut -> IO a) -> IO a
+withSut prepare delay system act = withSystemTempDirectory "hocket-sm" $ \dir -> do
   body <- LBS.readFile "test/e2e/seed-basic.json"
   seed <- either fail pure (seedFake 999 body)
   store <- newIORef (prepare seed)
   ticks <- newIORef (0 :: Int)
   let clock = threadDelay delay >> atomicModifyIORef' ticks (\n -> (n + 1, addUTCTime (fromIntegral (n + 1)) t0))
-  env <- newEnv (fakePort clock store) (SystemPort (\_ _ -> pure ()) (\_ -> pure ())) (pure (Now t0 utc))
+  env <- newEnv (fakePort clock store) system (pure (Now t0 utc))
   createDirectory (dir </> "sock")
   let path = dir </> "sock" </> "s.sock"
   withAgentServer env path $ \snapVar -> do
@@ -134,12 +167,20 @@ instance TraversableB Query where
 sutOf :: IORef (Maybe Sut) -> IO Sut
 sutOf ref = readIORef ref >>= maybe (fail "SM-agent: no system under test") pure
 
+-- | Retry a call while the channel is full, for at most 5 s.
+retryingFull :: IO (Either Text Value) -> IO (Either Text Value)
+retryingFull call = go (2500 :: Int)
+  where
+    go n =
+      call >>= \case
+        Right v | isChannelFullError v -> if n > 0 then threadDelay 2000 >> go (n - 1) else fail "SM-agent: the channel stayed full for 5 s"
+        r -> pure r
+
 -- | A write until it is accepted, then until the loop has applied it.
 write :: Sut -> Op -> IO (Maybe Bool)
 write sut op = do
-  r <- callAgent (sutSocket sut) (AWrite (toCmd op))
+  r <- retryingFull (callAgent (sutSocket sut) (AWrite (toCmd op)))
   case r of
-    Right v | isChannelFullError v -> threadDelay 2000 >> write sut op
     Right v -> do
       drained <- timeout 5000000 . atomically $ do
         pending <- readTVar (envPending (sutEnv sut))
@@ -197,13 +238,15 @@ getFlags ref =
     ( \_ -> do
         r <- evalIO (sutOf ref >>= \sut -> callAgent (sutSocket sut) (ARead (CmdListItems False False)))
         v <- evalEither r
-        evalMaybe (parseMaybe flags v)
+        evalMaybe (parseMaybe flagsOf v)
     )
     [Ensure $ \before _ _ got -> got === amFlags before]
-  where
-    flags = withObject "response" $ \o -> do
-      items <- o .: "result"
-      Map.fromList <$> traverse (withObject "item" (\i -> (,) <$> i .: "id" <*> (i .: "pending" >>= withObject "pending" (.: "action")))) items
+
+-- | Every item's flag, from a list_items answer.
+flagsOf :: Value -> Parser (Map Text Text)
+flagsOf = withObject "response" $ \o -> do
+  items <- o .: "result"
+  Map.fromList <$> traverse (withObject "item" (\i -> (,) <$> i .: "id" <*> (i .: "pending" >>= withObject "pending" (.: "action")))) items
 
 getState :: IORef (Maybe Sut) -> Command Gen (TestT IO) AgentModel
 getState ref =
@@ -227,7 +270,7 @@ smAgent = withTests 100 . withShrinks 20 . property $ do
   let commands = [setFlags ref, setFlags ref, clearFlags ref, otherWrites ref, getFlags ref, getFlags ref, getState ref]
   actions <- forAll (Gen.parallel (Range.linear 1 20) (Range.linear 1 6) initialAgentModel commands)
   -- Without its one reminder, every flag is a valid write.
-  test (control (\run -> withSut (frItems . traverse . biReminder .~ Nothing) 0 (run . scenario ref actions)))
+  test (control (\run -> withSut (frItems . traverse . biReminder .~ Nothing) 0 noDesktop (run . scenario ref actions)))
   where
     scenario :: IORef (Maybe Sut) -> Parallel (TestT IO) AgentModel -> Sut -> TestT IO ()
     scenario ref actions sut = do
@@ -257,9 +300,11 @@ writeAnswer :: IORef Seen -> Sut -> WriteCmd -> IO Answer
 writeAnswer seen sut w = do
   inBatch <- (== Just OpExecuteBatch) . asAsyncOp <$> readTVarIO (loopSnapshot (sutLoop sut))
   note (\s -> s {seenWriteInBatch = seenWriteInBatch s || inBatch})
-  r <- callAgent (sutSocket sut) (AWrite w)
+  first <- callAgent (sutSocket sut) (AWrite w)
+  r <- case first of
+    Right v | isChannelFullError v -> note (\s -> s {seenRetry = True}) >> retryingFull (callAgent (sutSocket sut) (AWrite w))
+    _ -> pure first
   case r of
-    Right v | isChannelFullError v -> note (\s -> s {seenRetry = True}) >> threadDelay 1000 >> writeAnswer seen sut w
     Right v | okOf v == Just True -> Landed <$ startedBatch
     Right v -> maybe (pure (Unexpected (T.pack (show v)))) (\e -> Rejected e <$ note (\s -> s {seenRejection = True})) (errorOf v)
     Left e -> pure (Unexpected e)
@@ -319,7 +364,7 @@ smAgentExecute = withTests 50 . withShrinks 20 . property $ do
   actions <- forAll (Gen.parallel (Range.linear 1 10) (Range.linear 1 6) (ExecModel Nothing) commands)
   -- The original seed: 1003 has a reminder. Every request takes 10 ms, so a
   -- batch an agent starts runs on while the agents write.
-  test (control (\run -> withSut id 10000 (run . scenario ref seen actions)))
+  test (control (\run -> withSut id 10000 noDesktop (run . scenario ref seen actions)))
   where
     scenario :: IORef (Maybe Sut) -> IORef Seen -> Parallel (TestT IO) ExecModel -> Sut -> TestT IO ()
     scenario ref seen actions sut = do
