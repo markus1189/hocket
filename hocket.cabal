@@ -102,6 +102,7 @@ test-suite test
                      , CharacterizationTests
                      , ClassifyTests
                      , Events
+                     , FakeTests
                      , Gen
                      , ReminderTests
                      , Keys
