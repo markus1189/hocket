@@ -17,7 +17,7 @@ module Main
 where
 
 import AgentClient (runAgentCommand)
-import AgentServer (AgentEnv (..), resolveAgentSocketPath, runAgentServer)
+import AgentServer (AgentEnv (..), cleanupAgentSocket, resolveAgentSocketPath, runAgentServer, socketDirIsOurs)
 import Brick
   ( App (..),
     AttrMap,
@@ -251,10 +251,10 @@ import Options.Applicative
   )
 import qualified Options.Applicative as Opt
 import Servant.Client (ClientError (..))
-import System.Directory (XdgDirectory (..), createDirectoryIfMissing, doesFileExist, getXdgDirectory, removeFile, removePathForcibly)
+import System.Directory (XdgDirectory (..), createDirectoryIfMissing, doesFileExist, getXdgDirectory)
 import System.Environment (lookupEnv)
 import System.Exit (ExitCode (..), exitFailure)
-import System.FilePath (takeDirectory, (</>))
+import System.FilePath ((</>))
 import System.IO (BufferMode (LineBuffering), IOMode (AppendMode), hClose, hPutStr, hPutStrLn, hSetBuffering, stderr, withFile)
 import System.Process
   ( CreateProcess,
@@ -741,27 +741,17 @@ runTui mAgentOpt isFixture port s0 = do
         (app tz isFixture (Env events port) (snd <$> mAgent))
         s0
     )
-    `finally` cleanupAgentSocket mAgent
-
--- | On graceful exit, remove the socket file and then the (now-empty)
--- containing directory so we do not accumulate stale shells. Wrapped in
--- 'try' so a failed cleanup can never change the exit outcome. All removal
--- here is best-effort: unlike the collision path in 'runAgentServer', this
--- runs after our own socket is gone, so there is no live-socket danger.
-cleanupAgentSocket :: Maybe (FilePath, TVar AgentSnapshot) -> IO ()
-cleanupAgentSocket mAgent =
-  for_ mAgent $ \(path, _) ->
-    void . try @SomeException $ do
-      removeFile path
-      removePathForcibly (takeDirectory path)
+    `finally` for_ mAgent (\((path, ours), _) -> cleanupAgentSocket ours path)
 
 -- | Bind the agent control socket and keep serving it in the background.
 -- Server failures surface in the TUI status bar instead of killing the app.
-startAgentServer :: BChan HocketEvent -> AgentSocketOpt -> IO (FilePath, TVar AgentSnapshot)
+-- The path comes back with whether hocket owns its directory, for cleanup.
+startAgentServer :: BChan HocketEvent -> AgentSocketOpt -> IO ((FilePath, Bool), TVar AgentSnapshot)
 startAgentServer events opt = do
   path <- case opt of
     AgentSocketDefault -> resolveAgentSocketPath
     AgentSocketAt p -> pure p
+  ours <- socketDirIsOurs path
   snapVar <- newTVarIO emptySnapshot
   let env =
         AgentEnv
@@ -783,7 +773,7 @@ startAgentServer events opt = do
           )
         void (writeBChanNonBlocking events (setAgentErrorEvt (Just (T.pack (show e)))))
       Right () -> pure ()
-  pure (path, snapVar)
+  pure ((path, ours), snapVar)
 
 runAddCommand :: Text -> Maybe Text -> [Text] -> IO ()
 runAddCommand url mCollection tags = do

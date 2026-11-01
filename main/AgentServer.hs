@@ -10,6 +10,8 @@
 module AgentServer
   ( AgentEnv (..),
     runAgentServer,
+    socketDirIsOurs,
+    cleanupAgentSocket,
     resolveAgentSocketPath,
   )
 where
@@ -25,7 +27,7 @@ import Control.Concurrent.STM
     readTVarIO,
   )
 import Control.Exception (IOException, SomeException, bracket, finally, try)
-import Control.Monad (forever, unless, void)
+import Control.Monad (forever, unless, void, when)
 import Data.Aeson (Value, eitherDecodeStrict, encode, object, (.=))
 import qualified Data.ByteString.Char8 as BS
 import qualified Data.ByteString.Lazy.Char8 as BSL
@@ -76,7 +78,7 @@ import Network.Socket
     socket,
     socketToHandle,
   )
-import System.Directory (createDirectoryIfMissing, doesDirectoryExist, removeFile)
+import System.Directory (createDirectoryIfMissing, doesDirectoryExist, removeDirectory, removeFile)
 import System.Environment (lookupEnv)
 import System.FilePath (takeDirectory, (</>))
 import System.IO
@@ -128,6 +130,21 @@ resolveAgentSocketPath = do
     _ -> do
       uid <- getEffectiveUserID
       pure ("/tmp" </> ("hocket-" <> show uid) </> "control.sock")
+
+-- | Whether 'runAgentServer' will create the socket's directory, making it
+-- hocket's to remove on exit. Ask before starting the server.
+socketDirIsOurs :: FilePath -> IO Bool
+socketDirIsOurs = fmap not . doesDirectoryExist . takeDirectory
+
+-- | On graceful exit, remove the socket file, and its directory only if
+-- hocket created it ('socketDirIsOurs'). 'removeDirectory' refuses a
+-- non-empty directory, so even then nothing else can go. An explicit
+-- --agent-socket-path into /tmp or $HOME must leave that directory alone
+-- (B7). Best-effort: a failed cleanup never changes the exit outcome.
+cleanupAgentSocket :: Bool -> FilePath -> IO ()
+cleanupAgentSocket ours path = do
+  void (try @SomeException (removeFile path))
+  when ours (void (try @SomeException (removeDirectory (takeDirectory path))))
 
 -- | Bind the control socket and serve clients until killed. Never returns
 -- normally; exceptions propagate to the caller (which surfaces them in the

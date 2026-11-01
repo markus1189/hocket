@@ -3,7 +3,7 @@
 {-# LANGUAGE TypeApplications #-}
 
 import AgentClient (callAgent, isChannelFullError)
-import AgentServer (AgentEnv (..), runAgentServer)
+import AgentServer (AgentEnv (..), cleanupAgentSocket, runAgentServer, socketDirIsOurs)
 import BatchTests (batchTests)
 import Brick.BChan (BChan, newBChan, readBChan, writeBChan)
 import Brick.Widgets.Edit (applyEdit)
@@ -61,7 +61,7 @@ import Network.Socket
   )
 import Properties (propertyTests)
 import ReminderTests (reminderTests)
-import System.Directory (createDirectoryIfMissing, getTemporaryDirectory, removeDirectoryRecursive, removeFile)
+import System.Directory (createDirectory, createDirectoryIfMissing, doesDirectoryExist, doesFileExist, getTemporaryDirectory, removeDirectoryRecursive, removeFile)
 import System.FilePath ((</>))
 import System.IO
   ( BufferMode (LineBuffering),
@@ -885,6 +885,16 @@ withAgentServer action = withSystemTempDirectory "hk" $ \dir -> do
     waitUntilReachable 100 path
     action snapVar events path
 
+-- | The TUI's socket lifecycle: decide ownership, serve until reachable,
+-- stop, clean up. Only ever pointed at a fresh temp root.
+serveThenCleanup :: FilePath -> IO ()
+serveThenCleanup path = do
+  ours <- socketDirIsOurs path
+  snapVar <- newTVarIO emptySnapshot
+  let env = AgentEnv {aeSnapshot = snapVar, aeInject = const (pure True), aeReminderTime = pure (read "2020-01-01 07:00:00 UTC")}
+  withAsync (runAgentServer path env) $ \_ -> waitUntilReachable 100 path
+  cleanupAgentSocket ours path
+
 -- | Drain (up to n) injected events from the BChan, returning the UiCommands.
 drainUI :: BChan HocketEvent -> Int -> IO [UiCommand]
 drainUI ch n = go n []
@@ -1036,6 +1046,25 @@ agentServerIntegrationTests =
           res <- callAgent path (ARead CmdGetState)
           assertBool "expected a response from the server" (not (isLeft res))
         removeDirectoryRecursive dir,
+      testCase "cleanup keeps a pre-existing directory and its other files (B7)" $
+        withSystemTempDirectory "hk" $ \root -> do
+          let dir = root </> "shared"
+          createDirectory dir
+          writeFile (dir </> "keep") "x"
+          serveThenCleanup (dir </> "s.sock")
+          doesFileExist (dir </> "keep") >>= (@?= True)
+          doesDirectoryExist dir >>= (@?= True),
+      testCase "cleanup keeps a pre-existing empty directory (B7)" $
+        withSystemTempDirectory "hk" $ \root -> do
+          let dir = root </> "empty"
+          createDirectory dir
+          serveThenCleanup (dir </> "s.sock")
+          doesDirectoryExist dir >>= (@?= True),
+      testCase "cleanup removes a directory the server created" $
+        withSystemTempDirectory "hk" $ \root -> do
+          let dir = root </> "ours"
+          serveThenCleanup (dir </> "s.sock")
+          doesDirectoryExist dir >>= (@?= False),
       testCase "a second server on the same path fails instead of hijacking" $
         withAgentServer $ \snapVar events path -> do
           -- First server is live on `path`. Attempt to start a second one on
