@@ -12,15 +12,18 @@ module Network.Bookmark.App.Update (update) where
 
 import qualified Brick.Widgets.List as L
 import Control.Lens
+import Data.Text (Text)
 import Data.Time (UTCTime)
 import qualified Data.Vector as V
 import Network.Bookmark.Agent.Protocol (FlagAction (..))
 import Network.Bookmark.App.Effect
 import Network.Bookmark.App.Msg
+import Network.Bookmark.App.Plan (planBatch)
+import Network.Bookmark.Batch (soOk)
 import Network.Bookmark.Reminder (reminderPolicy)
 import Network.Bookmark.Types
 import Network.Bookmark.Ui.State
-import Network.Bookmark.Ui.Sync (applyFetchCompleted, formatPOSIXTime, planSync)
+import Network.Bookmark.Ui.Sync (applyArchived, applyFetchCompleted, applyRemindersRemoved, applyRemindersSet, formatPOSIXTime, planSync)
 
 update :: Msg -> HocketState -> Maybe (HocketState, [Effect])
 update msg s = case msg of
@@ -57,9 +60,15 @@ update msg s = case msg of
     Just fetching -> (fetching & hsStatus ?~ ("fetching" <> since), [StartFetch (planSync lastUpdated)])
   FetchCompleted wasAllCollectionsFetch batches -> Just (applyFetchCompleted wasAllCollectionsFetch batches (s & hsStatus .~ Nothing), [])
   FetchFailed err -> Just (completeAsyncOp s & hsStatus ?~ ("failed" <> maybe "<no err>" (": " <>) err), [])
+  -- Nothing to send, or an async op already running: dropped, as before.
+  Intent Execute -> Just $ case (planBatch s, tryAcquireAsyncOp OpExecuteBatch s) of
+    (Just plan, Just running) -> (running, [StartBatch plan])
+    _ -> (s, [])
+  BatchStepStarted step -> Just (s & hsStatus ?~ stepLabel step, [])
+  StepDone result -> Just (applyStep result s, [])
+  BatchFinished summary -> Just (completeAsyncOp s & hsStatus .~ summary, [])
   SystemFailed err -> Just (s & hsStatus ?~ err, [])
   Copied url -> Just (s & hsStatus ?~ ("Copied: " <> url), [])
-  _ -> Nothing
   where
     lastUpdated = s ^. hsLastUpdated
     since = maybe "" (\t -> " since: " <> formatPOSIXTime (t - 86400)) lastUpdated
@@ -73,6 +82,20 @@ update msg s = case msg of
         [] -> (s, [])
       Nothing -> (s, [])
     editUrl bit = "https://app.raindrop.io/my/-1/item/" <> bit ^. biId . _BookmarkItemId <> "/edit"
+
+stepLabel :: BatchStep -> Text
+stepLabel = \case
+  StepArchive -> "archiving"
+  StepSetReminders -> "setting reminders"
+  StepRemoveReminders -> "removing reminders"
+
+-- | Only what the server accepted changes locally; failed and skipped items
+-- keep their flags.
+applyStep :: StepResult -> HocketState -> HocketState
+applyStep = \case
+  Archived o -> applyArchived (o ^. soOk)
+  RemindersSetAt o -> applyRemindersSet (o ^. soOk)
+  RemindersRemoved o -> applyRemindersRemoved (o ^. soOk)
 
 -- | Agent @select_item@: only an item the list shows can be selected.
 selectById :: BookmarkItemId -> L.List Name BookmarkItem -> L.List Name BookmarkItem

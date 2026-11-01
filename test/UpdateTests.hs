@@ -6,9 +6,11 @@ import qualified Brick.Widgets.List as L
 import CharacterizationTests (emptyState, item)
 import Control.Lens (ix, (&), (.~), (?~), (^.), (^..), (^?), _1, _2)
 import Data.Foldable (for_)
+import Data.Functor.Identity (runIdentity)
 import qualified Data.Map as Map
-import Data.Maybe (isJust)
+import Data.Maybe (fromMaybe, isJust)
 import Data.Text (Text)
+import qualified Data.Text as T
 import Data.Time (UTCTime)
 import Data.Time.LocalTime (minutesToTimeZone)
 import qualified Graphics.Vty as Vty
@@ -17,7 +19,9 @@ import Network.Bookmark.Agent.Intent (toIntent)
 import Network.Bookmark.Agent.Protocol (FlagAction (..), WriteCmd (..))
 import Network.Bookmark.App.Effect
 import Network.Bookmark.App.Msg
+import Network.Bookmark.App.Plan (BatchPlan (..))
 import Network.Bookmark.App.Update
+import Network.Bookmark.Batch (ErrorScope (..), StepOutcome, runItems)
 import Network.Bookmark.Types
 import Network.Bookmark.Ui.State
 import Network.Bookmark.Ui.Sync (planSync)
@@ -117,6 +121,26 @@ updateTests =
             failed err = (\(s', fx) -> (fx, asyncOpRunning s', s' ^. hsStatus)) <$> update (FetchFailed err) fetching
         failed (Just "offline") @?= Just ([], False, Just "failed: offline")
         failed Nothing @?= Just ([], False, Just "failed<no err>"),
+      testCase "Execute takes the slot and starts the planned batch" $ do
+        let flagged = twoItems & setPendingAction (BookmarkItemId "a") ToBeArchived & setPendingAction (BookmarkItemId "b") (ToBeReminded t0)
+            Just (s', fx) = update (Intent Execute) flagged
+        (fx, s' ^. hsAsyncOp) @?= ([StartBatch (BatchPlan [BookmarkItemId "a"] [(BookmarkItemId "b", t0)] [])], Just OpExecuteBatch),
+      testCase "Execute with nothing flagged, or while an async op runs, does nothing" $ do
+        fmap (\(s', fx) -> (fx, s' ^. hsAsyncOp)) (update (Intent Execute) twoItems) @?= Just ([], Nothing)
+        let Just fetching = tryAcquireAsyncOp OpFetchItems (twoItems & setPendingAction (BookmarkItemId "a") ToBeArchived)
+        fmap (\(s', fx) -> (fx, s' ^. hsAsyncOp)) (update (Intent Execute) fetching) @?= Just ([], Just OpFetchItems),
+      testCase "BatchStepStarted names the step in the status line" $
+        for_ [(StepArchive, "archiving"), (StepSetReminders, "setting reminders"), (StepRemoveReminders, "removing reminders")] $ \(step, label) ->
+          (^. hsStatus) . fst <$> update (BatchStepStarted step) twoItems @?= Just (Just label),
+      testCase "StepDone applies only what the server accepted" $ do
+        let flagged = twoItems & setPendingAction (BookmarkItemId "a") ToBeArchived & setPendingAction (BookmarkItemId "b") ToBeArchived
+            Just (s', fx) = update (StepDone (Archived (outcome [("a", Right True), ("b", Left "404")]))) flagged
+        (fx, Map.keys (s' ^. hsContents), flagOf "b" s') @?= ([], [BookmarkItemId "b"], Just ToBeArchived),
+      testCase "BatchFinished frees the slot and shows the summary, or clears the status" $ do
+        let Just running = tryAcquireAsyncOp OpExecuteBatch (twoItems & hsStatus ?~ "archiving")
+            finished summary = (\(s', fx) -> (fx, s' ^. hsAsyncOp, s' ^. hsStatus)) <$> update (BatchFinished summary) running
+        finished (Just "archive 0/1 (1 failed: 404)") @?= Just ([], Nothing, Just "archive 0/1 (1 failed: 404)")
+        finished Nothing @?= Just ([], Nothing, Nothing),
       testCase "SystemFailed and Copied go to the status line" $ do
         (^. hsStatus) . fst <$> update (SystemFailed "no firefox") emptyState @?= Just (Just "no firefox")
         (^. hsStatus) . fst <$> update (Copied "https://example.com/a") emptyState @?= Just (Just "Copied: https://example.com/a")
@@ -148,12 +172,13 @@ migrated =
     ToggleFutureReminders,
     SetShowFutureReminders True,
     SetStatus "agent: hi",
-    Refresh
+    Refresh,
+    Execute
   ]
 
 -- | The keys hocket.hs sends through keyIntents and update so far.
 routedKeys :: [Char]
-routedKeys = "asu\n eyUQSvVr"
+routedKeys = "asu\n eyUQSvVrX"
 
 keyOf :: Char -> Vty.Key
 keyOf '\n' = Vty.KEnter
@@ -172,7 +197,8 @@ routedWrites =
     CmdSetShowFutureReminders True,
     CmdSelectItem (BookmarkItemId "b"),
     CmdSetStatus "hi",
-    CmdRefresh
+    CmdRefresh,
+    CmdExecute
   ]
 
 now0 :: Now
@@ -183,6 +209,12 @@ t0 = read "2026-11-02 06:00:00 UTC"
 
 visibleIds :: HocketState -> [BookmarkItemId]
 visibleIds s = s ^.. itemList . L.listElementsL . traverse . biId
+
+-- | A step outcome from a script; errors starting with "5" are global.
+outcome :: [(Text, Either Text Bool)] -> StepOutcome BookmarkItemId Text
+outcome script = runIdentity (runItems scope (\(BookmarkItemId i) -> pure (fromMaybe (Right True) (lookup i script))) [BookmarkItemId i | (i, _) <- script])
+  where
+    scope e = if "5" `T.isPrefixOf` e then Global else ItemScoped
 
 flagOf :: Text -> HocketState -> Maybe PendingAction
 flagOf i s = s ^? hsContents . ix (BookmarkItemId i) . _1

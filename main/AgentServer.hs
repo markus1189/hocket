@@ -39,7 +39,6 @@ import Data.IORef (IORef, newIORef, readIORef, writeIORef)
 import qualified Data.Text as T
 import Events
   ( HocketEvent (HocketMsg),
-    executeBatchEvt,
   )
 import Network.Bookmark.Agent.Intent (toIntent)
 import Network.Bookmark.Agent.Protocol
@@ -250,10 +249,7 @@ dispatch env rid = \case
                 (object ["injected" .= True, "version" .= asVersion snap])
             else errResponse rid "event channel full, retry"
 
--- | Translate a validated write into the event the keyboard would have sent.
--- The clock is sampled here, in the shell.
+-- | A validated write as the Intent the keyboard would produce. The clock is
+-- sampled here, in the shell, once per write.
 toEvent :: AgentEnv -> WriteCmd -> IO HocketEvent
-toEvent env cmd = case cmd of
-  CmdExecute -> pure executeBatchEvt
-  -- The groups Phase 3 has moved go through update, as the same Intent.
-  _ -> HocketMsg . Intent . (`toIntent` cmd) <$> aeNow env
+toEvent env cmd = HocketMsg . Intent . (`toIntent` cmd) <$> aeNow env

@@ -37,7 +37,7 @@ import Brick
     zoom,
     (<+>),
   )
-import Brick.BChan (BChan, newBChan, writeBChan, writeBChanNonBlocking)
+import Brick.BChan (BChan, newBChan, writeBChanNonBlocking)
 import qualified Brick.Focus as Focus
 import Brick.Widgets.Border (hBorder)
 import Brick.Widgets.Edit (applyEdit, editFocusedAttr, handleEditorEvent, renderEditor)
@@ -60,7 +60,6 @@ import Control.Monad (unless, void)
 import qualified Control.Monad.Catch as Catch
 import Control.Monad.IO.Class (liftIO)
 import Control.Monad.Logger (LoggingT, defaultOutput, logErrorN, logInfoN, runLoggingT, runStdoutLoggingT)
-import Data.Bifunctor (first)
 import qualified Data.ByteString.Lazy as LBS
 import Data.Foldable (for_, traverse_)
 import Data.IORef (newIORef, readIORef)
@@ -70,12 +69,11 @@ import Data.List (find, findIndex, isPrefixOf)
 #else
 import Data.List (find, findIndex, foldl', isPrefixOf)
 #endif
-import qualified Data.Map as Map
 import Data.Maybe (fromMaybe, isJust)
 import Data.Text (Text)
 import qualified Data.Text as T
 import Data.Text.Zipper.Generic.Words (deletePrevWord)
-import Data.Time (UTCTime, getCurrentTime)
+import Data.Time (getCurrentTime)
 import Data.Time.Clock.POSIX (posixSecondsToUTCTime)
 import Data.Time.Format (defaultTimeLocale, formatTime)
 import Data.Time.LocalTime
@@ -86,16 +84,7 @@ import Data.Time.LocalTime
 import Data.Traversable (for)
 import qualified Data.Vector as V
 import Dhall (auto, input)
-import Events
-  ( AsyncCommand (..),
-    HocketEvent (..),
-    UiCommand (..),
-    archivedItemsEvt,
-    executeBatchDoneEvt,
-    executeBatchEvt,
-    remindersRemovedEvt,
-    remindersSetEvt,
-  )
+import Events (HocketEvent (..))
 import Fixture (FixtureOpts (..), fixtureParser, fixtureStore)
 import Formatting (sformat, (%))
 import qualified Formatting as F
@@ -119,13 +108,12 @@ import Network.Bookmark.App.Effect (Effect (..))
 import Network.Bookmark.App.Msg (Msg (..))
 import qualified Network.Bookmark.App.Msg as I
 import Network.Bookmark.App.Update (update)
-import Network.Bookmark.Batch (StepOutcome, concatOutcome, soOk)
 import Network.Bookmark.Fake (encodeFixtureDump, fakePort)
 import Network.Bookmark.Port (RaindropPort (..))
 import Network.Bookmark.Types
   ( BookmarkItem,
     BookmarkItemId (..),
-    BookmarkRequest (AddBookmark, BatchArchiveBookmarks, RemoveReminder, SetReminder),
+    BookmarkRequest (AddBookmark),
     PendingAction (..),
     biCreated,
     biExcerpt,
@@ -138,14 +126,10 @@ import Network.Bookmark.Types
     _BookmarkItemId,
   )
 import Network.Bookmark.Ui.State
-  ( AsyncOp (..),
-    BatchStep (..),
-    HocketState,
+  ( HocketState,
     Name (..),
     VideoFilterMode (..),
-    batchStepsWithWork,
     cancelFilter,
-    completeAsyncOp,
     enterFilterMode,
     focusRing,
     focusedItem,
@@ -153,7 +137,6 @@ import Network.Bookmark.Ui.State
     getPendingActionForItem,
     hsAgentClients,
     hsAgentError,
-    hsContents,
     hsFilterActive,
     hsFilterEditor,
     hsFilterQuery,
@@ -171,12 +154,6 @@ import Network.Bookmark.Ui.State
     itemList,
     lockFilter,
     syncForRender,
-    tryAcquireAsyncOp,
-  )
-import Network.Bookmark.Ui.Sync
-  ( applyArchived,
-    applyRemindersRemoved,
-    applyRemindersSet,
   )
 import Network.Bookmark.Ui.Widgets (sanitizeForDisplay)
 import Network.Raindrop (servantPort)
@@ -220,7 +197,6 @@ import System.Directory (XdgDirectory (..), createDirectoryIfMissing, doesFileEx
 import System.Exit (exitFailure)
 import System.FilePath ((</>))
 import System.IO (BufferMode (LineBuffering), IOMode (AppendMode), hPutStrLn, hSetBuffering, stderr, withFile)
-import Worker (runBatch, runCalls, runStep)
 
 data HocketCommand
   = RunTUI !(Maybe AgentSocketOpt) !(Maybe FixtureOpts)
@@ -373,9 +349,6 @@ opts =
         <> header "hocket - Your command-line bookmark helper"
     )
 
-trigger :: BChan HocketEvent -> HocketEvent -> IO ()
-trigger = writeBChan
-
 vtyEventHandler ::
   Env ->
   Event ->
@@ -422,9 +395,6 @@ vtyEventHandlerNormal ::
   BChan HocketEvent ->
   Event ->
   EventM Name HocketState ()
-vtyEventHandlerNormal es (EvKey (KChar 'X') []) = do
-  liftIO $ es `trigger` executeBatchEvt
-  pure ()
 vtyEventHandlerNormal _ (EvKey (KChar 'J') []) = do
   s <- use id
   case findNextFlaggedItem s of
@@ -447,77 +417,7 @@ internalEventHandler ::
   Env ->
   HocketEvent ->
   EventM Name HocketState ()
-internalEventHandler env (HocketAsync e) = asyncCommandEventHandler env e
-internalEventHandler env (HocketUi e) = uiCommandEventHandler (envEvents env) e
 internalEventHandler env (HocketMsg m) = applyMsg env m
-
--- | Run an async-op body only when the single slot is free; otherwise drop the
--- op (matching the old 'unlessAsyncRunning' drop-on-busy semantics).
-withAsyncSlot :: AsyncOp -> EventM Name HocketState () -> EventM Name HocketState ()
-withAsyncSlot op run = do
-  s <- use id
-  case tryAcquireAsyncOp op s of
-    Nothing -> pure ()
-    Just s' -> do
-      id .= s'
-      run
-
--- The three 'X' sub-op bodies, run sequentially by 'runBatchOp'.
-runArchiveOp :: Env -> HocketState -> IO (StepOutcome () Text)
-runArchiveOp env s =
-  runStep (trigger (envEvents env)) "archiving" archivedItemsEvt $
-    performArchive (envPort env) (getItemsWithPendingAction ToBeArchived s)
-
-runSetRemindersOp :: Env -> HocketState -> IO (StepOutcome () Text)
-runSetRemindersOp env s =
-  runStep (trigger (envEvents env)) "setting reminders" remindersSetEvt $
-    first (first (view biId)) <$> performSetReminders (envPort env) (getItemsToBeReminded s)
-
-runRemoveRemindersOp :: Env -> HocketState -> IO (StepOutcome () Text)
-runRemoveRemindersOp env s =
-  runStep (trigger (envEvents env)) "removing reminders" remindersRemovedEvt $
-    first (view biId) <$> performRemoveReminders (envPort env) (getItemsWithPendingAction ReminderToBeRemoved s)
-
--- Run every bucket that has pending work, in order, in one async thread. The
--- slot is held for the whole batch and freed exactly once via
--- 'executeBatchDoneEvt', guarded by 'finally' so a sub-op failure can't leak it.
-runBatchOp :: Env -> HocketState -> IO ()
-runBatchOp env s =
-  runBatch
-    (trigger (envEvents env))
-    ( \case
-        StepArchive -> runArchiveOp env s
-        StepSetReminders -> runSetRemindersOp env s
-        StepRemoveReminders -> runRemoveRemindersOp env s
-    )
-    (batchStepsWithWork s)
-    `finally` (envEvents env `trigger` executeBatchDoneEvt)
-
-asyncCommandEventHandler ::
-  Env ->
-  AsyncCommand ->
-  EventM Name HocketState ()
-asyncCommandEventHandler env ExecuteBatch = do
-  s <- use id
-  case batchStepsWithWork s of
-    [] -> pure ()
-    _ -> withAsyncSlot OpExecuteBatch $ do
-      _ <- liftIO $ async $ runBatchOp env s
-      pure ()
-asyncCommandEventHandler _ ExecuteBatchDone = do
-  id %= completeAsyncOp
-asyncCommandEventHandler _ (ArchivedItems outcome) =
-  id %= applyArchived (outcome ^. soOk)
-asyncCommandEventHandler _ (RemindersSet outcome) =
-  id %= applyRemindersSet (outcome ^. soOk)
-asyncCommandEventHandler _ (RemindersRemoved outcome) =
-  id %= applyRemindersRemoved (outcome ^. soOk)
-
-uiCommandEventHandler ::
-  BChan HocketEvent ->
-  UiCommand ->
-  EventM Name HocketState ()
-uiCommandEventHandler _ (SetStatus t) = hsStatus .= t
 
 myEventHandler ::
   Env ->
@@ -893,17 +793,6 @@ hBarWithHints :: Text -> Text -> Widget Name
 hBarWithHints leftText rightText =
   withAttr (attrName "bar") (txt leftText <+> padLeft Max (txt rightText))
 
--- | One batch call, so its outcome applies to every id.
-performArchive :: RaindropPort -> [BookmarkItem] -> IO (StepOutcome BookmarkItemId Text)
-performArchive port items =
-  concatOutcome <$> runCalls (runRaindrop port . BatchArchiveBookmarks) [map (view biId) items]
-
-performSetReminders :: RaindropPort -> [(BookmarkItem, UTCTime)] -> IO (StepOutcome (BookmarkItem, UTCTime) Text)
-performSetReminders port = runCalls (\(item, reminderTime) -> runRaindrop port (SetReminder (view biId item) reminderTime))
-
-performRemoveReminders :: RaindropPort -> [BookmarkItem] -> IO (StepOutcome BookmarkItem Text)
-performRemoveReminders port = runCalls (runRaindrop port . RemoveReminder . view biId)
-
 -- | One log handle for the TUI's lifetime (vty owns the terminal, so the log
 -- goes to a file). An unwritable state dir fails here, before the TUI starts.
 withTuiLog :: ((forall x. LoggingT IO x -> IO x) -> IO a) -> IO a
@@ -953,17 +842,6 @@ trimURI uri =
       if prefix `isPrefixOf` s
         then drop (length prefix) s
         else s
-
-getItemsWithPendingAction :: PendingAction -> HocketState -> [BookmarkItem]
-getItemsWithPendingAction targetAction s =
-  [item | (action, item) <- Map.elems (s ^. hsContents), matchesAction action targetAction]
-  where
-    matchesAction (ToBeReminded _) (ToBeReminded _) = True
-    matchesAction a b = a == b
-
-getItemsToBeReminded :: HocketState -> [(BookmarkItem, UTCTime)]
-getItemsToBeReminded s =
-  [(item, time) | (ToBeReminded time, item) <- Map.elems (s ^. hsContents)]
 
 -- Find next flagged item
 findNextFlaggedItem :: HocketState -> Maybe Int

@@ -893,9 +893,9 @@ withAgentServer action = withSystemTempDirectory "hk" $ \dir -> do
             aeNow = pure testNow
           }
   -- The readiness probe is a real client: the server announces it with two
-  -- SetAgentClients events (+1, then -1 from its own thread, so possibly
-  -- after the test's first events). readAgentInjected skips them; drainUI and
-  -- any test asserting exact BChan contents must account for them.
+  -- AgentClients messages (+1, then -1 from its own thread, so possibly
+  -- after the test's first events). readAgentInjected skips them; any test asserting
+  -- exact BChan contents must account for them.
   bound <- newBoundSocket
   withAsync (runAgentServer bound path env) $ \_ -> do
     waitUntilReachable 100 path
@@ -920,17 +920,6 @@ startOnOccupied :: FilePath -> IO (Maybe (Either IOException ()))
 startOnOccupied path = do
   bound <- newBoundSocket
   timeout 2000000 (try @IOException (runAgentServer bound path quietEnv))
-
--- | Drain (up to n) injected events from the BChan, returning the UiCommands.
-drainUI :: BChan HocketEvent -> Int -> IO [UiCommand]
-drainUI ch n = go n []
-  where
-    go 0 acc = pure (reverse acc)
-    go k acc = do
-      ev <- readBChan ch
-      case ev of
-        HocketUi u -> go (k - 1) (u : acc)
-        _ -> go (k - 1) acc
 
 agentServerIntegrationTests :: TestTree
 agentServerIntegrationTests =

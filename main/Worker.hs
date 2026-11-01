@@ -33,8 +33,7 @@ import Data.Maybe (fromMaybe, isJust, isNothing, listToMaybe, mapMaybe)
 import Data.Text (Text)
 import qualified Data.Text as T
 import qualified Data.Text.Encoding as T
-import Events
-import Network.Bookmark.App.Msg (Msg (FetchCompleted, FetchFailed))
+import Network.Bookmark.App.Msg (Msg (..), StepResult)
 import Network.Bookmark.Batch
 import Network.Bookmark.Types (BookmarkItemBatch)
 import Network.Bookmark.Ui.State (BatchStep (..))
@@ -49,15 +48,15 @@ fetchResult _ (Left err) = FetchFailed err
 fetchResult isUpdateFetch (Right batches) = FetchCompleted isUpdateFetch batches
 
 -- | Post a finished step's outcome; what is left for the batch status.
-postOutcome :: (Monad m) => (HocketEvent -> m ()) -> (StepOutcome a Text -> HocketEvent) -> StepOutcome a Text -> m (StepOutcome () Text)
-postOutcome post done outcome = first (const ()) outcome <$ post (done outcome)
+postOutcome :: (Monad m) => (Msg -> m ()) -> (StepOutcome a Text -> StepResult) -> StepOutcome a Text -> m (StepOutcome () Text)
+postOutcome post done outcome = first (const ()) outcome <$ post (StepDone (done outcome))
 
 -- | One batch step: announce it, run its calls, post their outcome. Nothing
--- runs after the calls, so a computed outcome always reaches the handlers;
+-- runs after the calls, so a computed outcome always reaches update;
 -- 'runCalls' already turns any synchronous exception into one.
-runStep :: (Monad m) => (HocketEvent -> m ()) -> Text -> (StepOutcome a Text -> HocketEvent) -> m (StepOutcome a Text) -> m (StepOutcome () Text)
-runStep post label done perform = do
-  post (setStatusEvt (Just label))
+runStep :: (Monad m) => (Msg -> m ()) -> BatchStep -> (StepOutcome a Text -> StepResult) -> m (StepOutcome a Text) -> m (StepOutcome () Text)
+runStep post step done perform = do
+  post (BatchStepStarted step)
   perform >>= postOutcome post done
 
 -- | Run the planned steps in order and stop after one that aborted; the
@@ -70,11 +69,11 @@ runSteps run (step : rest) = do
     then pure [(step, outcome)]
     else ((step, outcome) :) <$> runSteps run rest
 
--- | The batch worker without its IO: the steps post their outcomes, then one
--- status sums up the batch. The caller posts ExecuteBatchDone afterwards,
--- the only event that frees the batch slot.
-runBatch :: (Monad m) => (HocketEvent -> m ()) -> (BatchStep -> m (StepOutcome () Text)) -> [BatchStep] -> m ()
-runBatch post run steps = runSteps run steps >>= post . setStatusEvt . batchStatus steps
+-- | The batch worker without its IO: run the steps, which post their
+-- outcomes, and answer the summary for the one 'BatchFinished' the caller
+-- posts, the only message that frees the batch slot.
+runBatch :: (Monad m) => (BatchStep -> m (StepOutcome () Text)) -> [BatchStep] -> m (Maybe Text)
+runBatch run steps = batchStatus steps <$> runSteps run steps
 
 -- | The D6 status line, e.g.
 -- @archive ok · reminders 3/5 (2 failed: 404) · remove-reminders skipped: offline@;

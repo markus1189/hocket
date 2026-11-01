@@ -20,8 +20,7 @@ import qualified Data.Map as Map
 import Data.Maybe (fromMaybe)
 import qualified Data.Text as T
 import Data.Time (UTCTime)
-import Events
-import Network.Bookmark.App.Msg (Intent (Refresh), Msg (..))
+import Network.Bookmark.App.Msg (Intent (Execute, Refresh), Msg (..), StepResult (..))
 import Network.Bookmark.App.Update (update)
 import Network.Bookmark.Batch
 import Network.Bookmark.Types (BookmarkItemBatch (..), BookmarkItemId (..), PendingAction (..))
@@ -125,29 +124,24 @@ batchState =
 batchTime :: UTCTime
 batchTime = read "2026-11-02 06:00:00 UTC"
 
--- | Deliver a batch's events the way the handlers apply them, from an
--- acquired batch slot; the slot and the status after each event.
-batchTrace :: [HocketEvent] -> [(Bool, Maybe T.Text)]
-batchTrace = map (\s -> (asyncOpRunning s, s ^. hsStatus)) . drop 1 . scanl deliver acquired
+-- | Execute, then the worker's messages, all through update: the slot and
+-- the status after each message.
+batchTrace :: [Msg] -> [(Bool, Maybe T.Text)]
+batchTrace = map (\s -> (asyncOpRunning s, s ^. hsStatus)) . drop 1 . scanl deliver started
   where
-    Just acquired = tryAcquireAsyncOp OpExecuteBatch batchState
-    deliver s = \case
-      HocketAsync (ArchivedItems o) -> applyArchived (o ^. soOk) s
-      HocketAsync (RemindersSet o) -> applyRemindersSet (o ^. soOk) s
-      HocketAsync (RemindersRemoved o) -> applyRemindersRemoved (o ^. soOk) s
-      HocketAsync ExecuteBatchDone -> completeAsyncOp s
-      HocketUi (SetStatus t) -> s & hsStatus .~ t
-      other -> error ("unexpected event from a batch: " <> show other)
+    Just (started, _) = update (Intent Execute) batchState
+    deliver s m = maybe s fst (update m s)
 
--- | What the batch worker posts for these step results, ending with the
--- 'finally'-guarded ExecuteBatchDone.
-batchEvents :: StepOutcome BookmarkItemId T.Text -> StepOutcome (BookmarkItemId, UTCTime) T.Text -> [HocketEvent]
-batchEvents archive reminders = execState (runBatch post run [StepArchive, StepSetReminders]) [] <> [executeBatchDoneEvt]
+-- | What the batch worker posts for these step results, ending with its
+-- one BatchFinished.
+batchMsgs :: StepOutcome BookmarkItemId T.Text -> StepOutcome (BookmarkItemId, UTCTime) T.Text -> [Msg]
+batchMsgs archive reminders = posted <> [BatchFinished summary]
   where
-    post e = modify (<> [e])
+    (summary, posted) = runState (runBatch run [StepArchive, StepSetReminders]) []
+    post m = modify (<> [m])
     run = \case
-      StepArchive -> postOutcome post archivedItemsEvt archive
-      StepSetReminders -> postOutcome post remindersSetEvt reminders
+      StepArchive -> runStep post StepArchive Archived (pure archive)
+      StepSetReminders -> runStep post StepSetReminders RemindersSetAt (pure reminders)
       StepRemoveReminders -> error "not planned"
 
 batchSlotTests :: TestTree
@@ -155,15 +149,15 @@ batchSlotTests =
   testGroup
     "batch slot and status (B2)"
     [ testCase "an item-scoped archive failure: slot held until done, status names both steps" $ do
-        let trace = batchTrace (batchEvents (outcomeOf [("a", Left "400")]) remindersOk)
+        let trace = batchTrace (batchMsgs (outcomeOf [("a", Left "400")]) remindersOk)
         map fst trace @?= freedByLastOnly (map fst trace)
         snd (last trace) @?= Just "archive 0/1 (1 failed: 400) · reminders ok",
       testCase "a global archive failure: slot held until done, reminders reported skipped" $ do
-        let trace = batchTrace (batchEvents (outcomeOf [("a", Left "503")]) remindersOk)
+        let trace = batchTrace (batchMsgs (outcomeOf [("a", Left "503")]) remindersOk)
         map fst trace @?= freedByLastOnly (map fst trace)
         snd (last trace) @?= Just "archive 0/1 (aborted: 503) · reminders skipped: 503",
       testCase "a fully successful batch clears the status" $
-        snd (last (batchTrace (batchEvents (outcomeOf [("a", Right True)]) remindersOk))) @?= Nothing
+        snd (last (batchTrace (batchMsgs (outcomeOf [("a", Right True)]) remindersOk))) @?= Nothing
     ]
   where
     remindersOk = scriptedOutcome [((BookmarkItemId "r", batchTime), Right True)]
@@ -185,9 +179,9 @@ stepExceptionTests =
       testCase "a step posts its computed outcome, even when a later call threw" $ do
         posted <- newIORef []
         let call bid = if bid == BookmarkItemId "b" then throwIO (userError "disk full") else pure True
-        _ <- runStep (\e -> modifyIORef' posted (<> [e])) "archiving" archivedItemsEvt (runCalls call (map BookmarkItemId ["a", "b", "c"]))
+        _ <- runStep (\e -> modifyIORef' posted (<> [e])) StepArchive Archived (runCalls call (map BookmarkItemId ["a", "b", "c"]))
         readIORef posted >>= \case
-          [HocketUi (SetStatus (Just "archiving")), HocketAsync (ArchivedItems o)] ->
+          [BatchStepStarted StepArchive, StepDone (Archived o)] ->
             (o ^. soOk, o ^. soSkipped, o ^. soAborted) @?= ([BookmarkItemId "a"], map BookmarkItemId ["b", "c"], Just "user error (disk full)")
           other -> assertFailure ("posted: " <> show other)
     ]

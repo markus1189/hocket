@@ -7,6 +7,7 @@ module Network.Bookmark.App.Effect
 where
 
 import Data.Text (Text)
+import Network.Bookmark.App.Plan (BatchPlan)
 import Network.Bookmark.Ui.Sync (SyncPlan)
 
 -- | Bookmarks open in firefox; Raindrop's edit page with the desktop default.
@@ -21,4 +22,6 @@ data Effect
   | -- | Fetch in the background; answered by exactly one 'FetchCompleted' or
     -- 'FetchFailed'.
     StartFetch !SyncPlan
+  | -- | Run the batch in the background; answered by one 'BatchFinished'.
+    StartBatch !BatchPlan
   deriving (Show, Eq)

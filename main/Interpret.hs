@@ -12,22 +12,26 @@ where
 
 import Brick.BChan (BChan, writeBChan)
 import Control.Concurrent.Async (async)
-import Control.Exception (SomeException, try)
+import Control.Exception (SomeException, onException, try)
 import Control.Lens (view, (^.))
 import Control.Monad.Loops (unfoldrM)
 import Data.Bifunctor (first)
 import Data.Text (Text)
 import qualified Data.Text as T
+import Data.Time (UTCTime)
 import Data.Time.Clock.POSIX (utcTimeToPOSIXSeconds)
 import Events (HocketEvent (HocketMsg))
 import Network.Bookmark.App.Effect
 import Network.Bookmark.App.Msg
+import Network.Bookmark.App.Plan (BatchPlan (..), planSteps)
+import Network.Bookmark.Batch (StepOutcome, concatOutcome)
 import Network.Bookmark.Port (RaindropPort (..))
-import Network.Bookmark.Types (BookmarkItemBatch (..), BookmarkRequest (RetrieveBookmarks), RaindropCollectionId, URL (..), biLastUpdate)
+import Network.Bookmark.Types (BookmarkItemBatch (..), BookmarkItemId, BookmarkRequest (..), RaindropCollectionId, URL (..), biLastUpdate)
+import Network.Bookmark.Ui.State (BatchStep (..))
 import Network.Bookmark.Ui.Sync (SyncKind (IncrementalAll), spCollection, spKind, spSearch)
 import Servant.Client.Core (ClientError)
 import System (browseItem, cleanUrl, copyToClipboard)
-import Worker (errorMessageFromException, exceptionMessage, fetchResult, trySync)
+import Worker (errorMessageFromException, exceptionMessage, fetchResult, runBatch, runCalls, runStep, trySync)
 
 -- | Where to post events, and Raindrop.
 data Env = Env {envEvents :: !(BChan HocketEvent), envPort :: !RaindropPort}
@@ -41,6 +45,7 @@ interpret env = \case
   Halt -> pure []
   OpenUrl opener url -> failed <$> try @SomeException (browseItem (program opener) (URL (T.unpack url)))
   StartFetch plan -> [] <$ async (fetch plan)
+  StartBatch plan -> [] <$ async (batch plan)
   CopyText link -> copyCleaned copyToClipboard link
   where
     -- The fetch worker: exactly one terminal message, whatever happens short
@@ -48,7 +53,18 @@ interpret env = \case
     fetch plan = do
       result <- trySync (retrieveItems (envPort env) (plan ^. spSearch) (plan ^. spCollection))
       let rendered = either (Left . Just . exceptionMessage) (first errorMessageFromException) result
-      writeBChan (envEvents env) (HocketMsg (fetchResult (plan ^. spKind == IncrementalAll) rendered))
+      post (fetchResult (plan ^. spKind == IncrementalAll) rendered)
+    post = writeBChan (envEvents env) . HocketMsg
+    port = envPort env
+    -- The batch worker: one BatchFinished at the end, also if the steps
+    -- throw (runCalls already catches per call) or the thread is cancelled.
+    batch plan = do
+      let run = \case
+            StepArchive -> runStep post StepArchive Archived (performArchive port (bpArchive plan))
+            StepSetReminders -> runStep post StepSetReminders RemindersSetAt (performSetReminders port (bpSetReminders plan))
+            StepRemoveReminders -> runStep post StepRemoveReminders RemindersRemoved (performRemoveReminders port (bpRemoveReminders plan))
+      r <- trySync (runBatch run (planSteps plan)) `onException` post (BatchFinished (Just "batch interrupted"))
+      post (BatchFinished (either (Just . exceptionMessage) id r))
     failed = either (\e -> [SystemFailed (T.pack (show e))]) (const [])
     program = \case
       Firefox -> "firefox"
@@ -80,6 +96,16 @@ copyCleaned copy link = do
   let url = cleanUrl (T.unpack link)
   r <- try @SomeException (copy url)
   pure [either (SystemFailed . ("Copy failed: " <>) . T.pack . show) (const (Copied (T.pack url))) r]
+
+-- | One batch call, so its outcome applies to every id.
+performArchive :: RaindropPort -> [BookmarkItemId] -> IO (StepOutcome BookmarkItemId Text)
+performArchive port ids = concatOutcome <$> runCalls (runRaindrop port . BatchArchiveBookmarks) [ids]
+
+performSetReminders :: RaindropPort -> [(BookmarkItemId, UTCTime)] -> IO (StepOutcome (BookmarkItemId, UTCTime) Text)
+performSetReminders port = runCalls (\(bid, reminderTime) -> runRaindrop port (SetReminder bid reminderTime))
+
+performRemoveReminders :: RaindropPort -> [BookmarkItemId] -> IO (StepOutcome BookmarkItemId Text)
+performRemoveReminders port = runCalls (runRaindrop port . RemoveReminder)
 
 tryClientError :: IO a -> IO (Either ClientError a)
 tryClientError = try @ClientError

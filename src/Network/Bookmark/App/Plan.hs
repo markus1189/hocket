@@ -1,11 +1,11 @@
 -- | What @X@ will send, decided purely from the state (plan §11 #19).
-module Network.Bookmark.App.Plan (BatchPlan (..), planBatch) where
+module Network.Bookmark.App.Plan (BatchPlan (..), planBatch, planSteps) where
 
 import Control.Lens ((^.))
 import Data.Map (elems)
 import Data.Time (UTCTime)
 import Network.Bookmark.Types
-import Network.Bookmark.Ui.State (HocketState, hsContents)
+import Network.Bookmark.Ui.State (BatchStep (..), HocketState, hsContents)
 
 data BatchPlan = BatchPlan
   { bpArchive :: [BookmarkItemId],
@@ -25,3 +25,8 @@ planBatch s
     archive = [item ^. biId | (ToBeArchived, item) <- flagged]
     setRem = [(item ^. biId, t) | (ToBeReminded t, item) <- flagged]
     removeRem = [item ^. biId | (ReminderToBeRemoved, item) <- flagged]
+
+-- | The steps with work, in the order the batch runs them.
+planSteps :: BatchPlan -> [BatchStep]
+planSteps (BatchPlan archive setRem removeRem) =
+  [StepArchive | not (null archive)] <> [StepSetReminders | not (null setRem)] <> [StepRemoveReminders | not (null removeRem)]

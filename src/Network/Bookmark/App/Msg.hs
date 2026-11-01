@@ -7,14 +7,16 @@ module Network.Bookmark.App.Msg
     Target (..),
     Intent (..),
     Msg (..),
+    StepResult (..),
   )
 where
 
 import Data.Text (Text)
 import Data.Time (TimeZone, UTCTime)
 import Network.Bookmark.Agent.Protocol (FlagAction)
+import Network.Bookmark.Batch (StepOutcome)
 import Network.Bookmark.Types (BookmarkItemBatch, BookmarkItemId)
-import Network.Bookmark.Ui.State (VideoFilterMode)
+import Network.Bookmark.Ui.State (BatchStep, VideoFilterMode)
 
 -- | Sampled by the shell only, once per key press or agent request.
 data Now = Now {nowUtc :: !UTCTime, nowZone :: !TimeZone}
@@ -69,4 +71,18 @@ data Msg
     -- every page. Only this or 'FetchFailed' frees the fetch slot.
     FetchCompleted !Bool ![BookmarkItemBatch]
   | FetchFailed !(Maybe Text)
+  | -- | A batch step begins; its name goes to the status line.
+    BatchStepStarted !BatchStep
+  | StepDone !StepResult
+  | -- | The batch's one terminal message, with its summary ('Nothing' when
+    -- every step was clean). The only thing that frees the batch slot.
+    BatchFinished !(Maybe Text)
+  deriving (Show, Eq)
+
+-- | What a batch step got done, per step: set-reminders carries the times
+-- that were sent (B3).
+data StepResult
+  = Archived !(StepOutcome BookmarkItemId Text)
+  | RemindersSetAt !(StepOutcome (BookmarkItemId, UTCTime) Text)
+  | RemindersRemoved !(StepOutcome BookmarkItemId Text)
   deriving (Show, Eq)
