@@ -883,23 +883,13 @@ withAgentServer action = withSystemTempDirectory "hk" $ \dir -> do
               pure True,
             aeReminderTime = pure (read "2020-01-01 07:00:00 UTC" :: UTCTime)
           }
+  -- The readiness probe is a real client: the server announces it with two
+  -- SetAgentClients events (+1, then -1 from its own thread, so possibly
+  -- after the test's first events). readAgentInjected skips them; drainUI and
+  -- any test asserting exact BChan contents must account for them.
   withAsync (runAgentServer path env) $ \_ -> do
-    awaitListener path
+    waitUntilReachable 100 path
     action snapVar events path
-
--- | The server binds asynchronously; connecting before that races it.
-awaitListener :: FilePath -> IO ()
-awaitListener path = go (200 :: Int)
-  where
-    go n = do
-      sock <- socket AF_UNIX Stream defaultProtocol
-      r <- try @IOException (connect sock (SockAddrUnix path))
-      close sock
-      case r of
-        Right () -> pure ()
-        Left e
-          | n <= 0 -> assertFailure ("agent server never listened: " ++ show e)
-          | otherwise -> threadDelay 10000 >> go (n - 1)
 
 -- | Drain (up to n) injected events from the BChan, returning the UiCommands.
 drainUI :: BChan HocketEvent -> Int -> IO [UiCommand]
