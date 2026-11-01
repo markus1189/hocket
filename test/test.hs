@@ -13,7 +13,7 @@ import ClassifyTests (classifyTests)
 import Control.Concurrent (forkIO, threadDelay)
 import Control.Concurrent.Async (withAsync)
 import Control.Concurrent.STM (TVar, atomically, modifyTVar', newTVarIO)
-import Control.Exception (AsyncException (UserInterrupt), IOException, finally, try)
+import Control.Exception (IOException, finally, throwIO, try)
 import Control.Lens (ix, view, _1, _2)
 import Control.Lens.Operators
 import Control.Monad (void)
@@ -62,8 +62,9 @@ import Network.Socket
   )
 import Properties (propertyTests)
 import ReminderTests (reminderTests)
-import Signals (unwindOnTermination)
+import Signals (Terminated (..), exitOnTerminated, unwindOnTermination)
 import System.Directory (createDirectory, createDirectoryIfMissing, doesDirectoryExist, doesFileExist, getTemporaryDirectory, pathIsSymbolicLink, removeDirectoryRecursive, removeFile)
+import System.Exit (ExitCode (..))
 import System.FilePath ((</>))
 import System.IO
   ( BufferMode (LineBuffering),
@@ -1129,10 +1130,14 @@ agentServerIntegrationTests =
         for_ [sigTERM, sigHUP] $ \sig -> do
           ran <- newIORef False
           unwindOnTermination
-          r <- try @AsyncException ((raiseSignal sig >> threadDelay 5000000) `finally` writeIORef ran True)
+          r <- try @Terminated ((raiseSignal sig >> threadDelay 5000000) `finally` writeIORef ran True)
           for_ [sigTERM, sigHUP] $ \s -> installHandler s Default Nothing
-          r @?= Left UserInterrupt
+          r @?= Left (Terminated sig)
           readIORef ran >>= (@?= True),
+      testCase "a termination signal exits with 128 + the signal number" $
+        for_ [(sigTERM, 143), (sigHUP, 129)] $ \(sig, code) -> do
+          r <- try @ExitCode (exitOnTerminated (throwIO (Terminated sig) :: IO ()))
+          r @?= Left (ExitFailure code),
       testCase "a second server on the same path fails instead of hijacking" $
         withAgentServer $ \snapVar events path -> do
           -- First server is live on `path`. Attempt to start a second one on

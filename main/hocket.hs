@@ -64,7 +64,7 @@ import Data.Bifunctor (first)
 import qualified Data.ByteString.Lazy as LBS
 import Data.Foldable (for_)
 import Data.IORef (newIORef, readIORef)
-import Signals (unwindOnTermination)
+import Signals (exitOnTerminated, unwindOnTermination)
 #if MIN_VERSION_base(4,20,0)
 import Data.List (find, findIndex, isPrefixOf)
 #else
@@ -804,7 +804,7 @@ runAddCommand url mCollection tags = do
   unless result exitFailure
 
 main :: IO ()
-main = do
+main = exitOnTerminated $ do
   cmd <- execParser opts
   case cmd of
     RunTUI mAgentOpt mFixture -> runTuiApp mAgentOpt mFixture
