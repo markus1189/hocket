@@ -16,7 +16,7 @@ import Control.Monad.IO.Class (liftIO)
 import Data.IORef (IORef, newIORef, readIORef, writeIORef)
 import Data.Kind (Type)
 import qualified Data.Map as Map
-import Data.Maybe (isJust, isNothing)
+import Data.Maybe (isJust, isNothing, listToMaybe)
 import qualified Data.Set as Set
 import Data.Time (UTCTime, addUTCTime, utc)
 import qualified Data.Vector as V
@@ -54,8 +54,15 @@ data World = World
     wFake :: !FakeRaindrop,
     wCount :: !Int,
     -- | Server events so far, for cover only.
-    wMoved :: !Bool
+    wMoved :: !Bool,
+    -- | The effect whose messages are being delivered one by one.
+    wInFlight :: !(Maybe InFlight)
   }
+
+-- | The worker ran in full when delivery began (the fake is at its end
+-- state, as when the real worker runs ahead of the UI); its messages
+-- arrive one per DeliverOne.
+data InFlight = InFlight {ifEffect :: !Effect, ifAll :: ![Msg], ifLeft :: ![Msg], ifBefore :: World}
 
 newtype State (v :: Type -> Type) = State World
 
@@ -63,7 +70,9 @@ data Cmd
   = CIntent Intent
   | ServerMove BookmarkItemId
   | ServerEdit BookmarkItemId
-  | FailNext F.FakeStep ErrorScope
+  | -- | Fail that step's call this many calls after its next one.
+    FailNext F.FakeStep ErrorScope Int
+  | DeliverOne
   | Quiesce
   deriving (Show)
 
@@ -73,24 +82,44 @@ instance FunctorB Input where bmap _ (Input c) = Input c
 
 instance TraversableB Input where btraverse _ (Input c) = pure (Input c)
 
--- | The world before and after, and the messages a Quiesce delivered with
--- the effect each answered.
-data Step = Step {sBefore :: World, sAfter :: World, sDelivered :: [(Effect, [Msg])]}
+-- | An effect whose last message arrived: its messages, and the world
+-- before delivery began.
+type Delivered = (Effect, [Msg], World)
+
+-- | The world before and after, and the effects that finished delivering.
+data Step = Step {sBefore :: World, sAfter :: World, sDelivered :: [Delivered]}
 
 instance Show Step where show _ = "<step>"
 
 apply :: Msg -> World -> World
 apply m w = let (m', effs) = update m (wModel w) in w {wModel = settle m', wQueue = wQueue w <> effs}
 
--- | Deliver queued effects, and what their messages queue, until none is left.
-quiesce :: World -> (World, [(Effect, [Msg])])
-quiesce w = case wQueue w of
-  [] -> (w, [])
-  e : rest ->
-    let (msgs, (fr', n')) = stepEffect clock e (wFake w, wCount w)
-        w' = foldl (flip apply) (w {wQueue = rest, wFake = fr', wCount = n'}) msgs
-        (w'', delivered) = quiesce w'
-     in (w'', (e, msgs) : delivered)
+-- | One message: of the effect in flight, or of the next queued one, whose
+-- worker then runs.
+deliverOne :: World -> (World, [Delivered])
+deliverOne w = case wInFlight w of
+  Just f -> case ifLeft f of
+    m : rest ->
+      let w' = apply m (w {wInFlight = Just f {ifLeft = rest}})
+       in if null rest then finish w' f else (w', [])
+    [] -> finish w f
+  Nothing -> case wQueue w of
+    [] -> (w, [])
+    e : rest ->
+      let (msgs, (fr', n')) = stepEffect clock e (wFake w, wCount w)
+       in deliverOne (w {wQueue = rest, wFake = fr', wCount = n', wInFlight = Just (InFlight e msgs msgs w)})
+  where
+    finish w' f = (w' {wInFlight = Nothing}, [(ifEffect f, ifAll f, ifBefore f)])
+
+-- | Deliver until nothing is in flight or queued.
+quiesce :: World -> (World, [Delivered])
+quiesce w
+  | isNothing (wInFlight w) && null (wQueue w) = (w, [])
+  | otherwise = let (w1, d1) = deliverOne w; (w2, d2) = quiesce w1 in (w2, d1 <> d2)
+
+-- | Messages of an effect are still to come.
+pending :: World -> Bool
+pending = maybe False (not . null . ifLeft) . wInFlight
 
 -- | A server-side change: the time is between two requests, after the last.
 bump :: World -> BookmarkItemId -> (BookmarkItem -> BookmarkItem) -> World
@@ -101,10 +130,11 @@ run cmd w = case cmd of
   CIntent i -> Step w (apply (Intent i) w) []
   ServerMove bid -> Step w ((bump w bid (biCollectionId .~ 99)) {wMoved = True}) []
   ServerEdit bid -> Step w (bump w bid (biTitle %~ (<> " (edited)"))) []
-  FailNext step scope ->
-    let nth = 1 + Map.findWithDefault 0 step (wFake w ^. frCalls)
+  FailNext step scope offset ->
+    let nth = 1 + offset + Map.findWithDefault 0 step (wFake w ^. frCalls)
         rule = FailRule step (Just nth) (FailHttp (if scope == ItemScoped then 404 else 503))
      in Step w (w {wFake = wFake w & frRules %~ (<> [rule])}) []
+  DeliverOne -> let (w', d) = deliverOne w in Step w w' d
   Quiesce -> let (w', d) = quiesce w in Step w w' d
 
 -- | Seed lastUpdate before t0: one item "from the future" would make every
@@ -112,39 +142,79 @@ run cmd w = case cmd of
 genWorld :: Gen World
 genWorld = do
   fr <- genFake
-  let past i = i & biLastUpdate %~ min cutoff & biCreated %~ min cutoff
+  -- All in Unsorted: the app then holds enough items for batches of
+  -- several reminders; items leave Unsorted through ServerMove and archive.
+  let past i = i & biLastUpdate %~ min cutoff & biCreated %~ min cutoff & biCollectionId .~ (-1)
       cutoff = addUTCTime (-(2 * 86400)) t0
-  pure (World (settle initialModel) [] (fr & frItems %~ fmap past) 0 False)
+  pure (World (settle initialModel) [] (fr & frItems %~ fmap past) 0 False Nothing)
 
 genCmd :: World -> Gen Cmd
-genCmd w =
+genCmd w
+  | pending w =
+      Gen.frequency $
+        [ (10, pure DeliverOne),
+          (4, pure Quiesce),
+          (2, pure (CIntent Refresh)),
+          (2, pure (CIntent Execute)),
+          (2, CIntent . Navigate 5 <$> Gen.element [Up, Down, Top, Bottom, NextFlagged]),
+          (2, CIntent . SetFilter <$> Gen.element ["", "git"])
+        ]
+          <> [(1, CIntent . Select <$> Gen.element visible) | not (null visible)]
+  | otherwise = genIdle w
+  where
+    visible = map (^. biId) (V.toList (wModel w ^. mVisible))
+
+genIdle :: World -> Gen Cmd
+genIdle w =
   Gen.frequency $
     -- Weights follow the world, so sequences reach fetch, flag, Execute,
     -- deliver instead of mostly dropping commands on a busy slot.
     [ (if null local && idle then 10 else 2, pure (CIntent Refresh)),
-      (if flagged && idle then 10 else 2, pure (CIntent Execute)),
-      (if null (wQueue w) then 2 else 10, pure Quiesce),
+      (if nFlagged >= 3 && idle then 10 else 2, pure (CIntent Execute)),
+      (if null (wQueue w) || unarmed then 2 else 10, pure Quiesce),
+      (if null (wQueue w) || unarmed then 1 else 6, pure DeliverOne),
       (2, pure (CIntent ClearAllFlags)),
       (1, pure (CIntent FlagAllArchive)),
       (2, CIntent . Navigate 5 <$> Gen.element [Up, Down, Top, Bottom, Page 1, HalfPage (-1), NextFlagged, PrevFlagged]),
       (2, CIntent . SetFilter <$> Gen.element ["", "git", "you", "video"]),
-      (2, FailNext <$> Gen.element [F.StepFetch, F.StepArchive, F.StepSetReminders, F.StepRemoveReminders] <*> Gen.element [ItemScoped, Global])
+      (2, FailNext <$> Gen.element [F.StepFetch, F.StepArchive, F.StepSetReminders, F.StepRemoveReminders] <*> Gen.element [ItemScoped, Global] <*> genOffset)
     ]
-      <> [(if flagged then 3 else 8, CIntent <$> keyIntent) | not (null local)]
-      <> [(if flagged then 3 else 8, CIntent <$> (SetFlag <$> Gen.element local <*> Gen.element [FlagArchive, FlagReminder, FlagRemoveReminder, FlagNone] <*> pure now)) | not (null local)]
+      <> [(if nFlagged >= 3 then 3 else 8, CIntent <$> keyIntent) | not (null local)]
+      <> [(if nFlagged >= 3 then 3 else 8, CIntent <$> (SetFlag <$> Gen.element local <*> Gen.frequency [(1, pure FlagArchive), (3, pure FlagReminder), (2, pure FlagRemoveReminder), (1, pure FlagNone)] <*> pure now)) | not (null local)]
       <> [(2, CIntent . Select <$> Gen.element visible) | not (null visible)]
       <> [(2, ServerMove <$> Gen.element unsorted) | not (null unsorted)]
       <> [(2, ServerEdit <$> Gen.element unsorted) | not (null unsorted)]
       -- A batch is waiting: fail one of its steps' next calls before Quiesce.
-      <> [(6, FailNext <$> Gen.element steps <*> Gen.element [ItemScoped, Global]) | StartBatch plan <- wQueue w, let steps = planSteps plan, not (null steps)]
+      -- A batch is waiting: fail a call its steps will make, often a later
+      -- item's, so an abort can follow earlier successes.
+      <> [ (8, Gen.element steps >>= \(st, n) -> FailNext st <$> Gen.frequency [(2, pure Global), (1, pure ItemScoped)] <*> Gen.int (Range.constant 0 (n - 1)))
+         | StartBatch plan <- wQueue w,
+           let steps = stepSizes plan,
+           not (null steps)
+         ]
+      -- "Item 2 of 5 -> 503": a global error after earlier successes.
+      <> [ (12, Gen.element multi >>= \(st, n) -> FailNext st Global <$> Gen.int (Range.constant 1 (n - 1)))
+         | StartBatch plan <- wQueue w,
+           let multi = [(st, n) | (st, n) <- stepSizes plan, st /= F.StepArchive, n >= 2],
+           not (null multi)
+         ]
   where
-    planSteps plan =
-      [F.StepArchive | not (null (bpArchive plan))]
-        <> [F.StepSetReminders | not (null (bpSetReminders plan))]
-        <> [F.StepRemoveReminders | not (null (bpRemoveReminders plan))]
+    genOffset = Gen.int (Range.constant 0 3)
+    -- A batch is queued and no rule waits for any of its calls yet: give
+    -- FailNext a chance before delivery.
+    unarmed =
+      or
+        [ null [() | FailRule st (Just k) _ <- wFake w ^. frRules, (st', _) <- stepSizes plan, st == st', k > Map.findWithDefault 0 st (wFake w ^. frCalls)]
+        | StartBatch plan <- wQueue w
+        ]
+    -- Each planned step and how many calls it makes (archive: one).
+    stepSizes plan =
+      [(F.StepArchive, 1) | not (null (bpArchive plan))]
+        <> [(F.StepSetReminders, length (bpSetReminders plan)) | not (null (bpSetReminders plan))]
+        <> [(F.StepRemoveReminders, length (bpRemoveReminders plan)) | not (null (bpRemoveReminders plan))]
     local = Map.keys (wModel w ^. mContents)
     idle = isNothing (wModel w ^. mAsyncOp)
-    flagged = any ((/= None) . fst) (wModel w ^. mContents)
+    nFlagged = length (filter ((/= None) . fst) (Map.elems (wModel w ^. mContents)))
     visible = map (^. biId) (V.toList (wModel w ^. mVisible))
     unsorted = [k | (k, i) <- Map.toList (wFake w ^. frItems), i ^. biCollectionId == -1]
     target = Gen.frequency [(2, pure Selected), (1, ById <$> Gen.element local)]
@@ -160,23 +230,28 @@ localIds :: World -> Set.Set BookmarkItemId
 localIds = Map.keysSet . (^. mContents) . wModel
 
 checkStep :: Cmd -> Step -> Test ()
-checkStep cmd (Step before after delivered) = do
+checkStep cmd (Step _ after delivered) = do
   let m = wModel after
   -- P6: I4 after every command.
   case m ^. mSelected of
     Nothing -> V.null (m ^. mVisible) === True
     Just bid -> assert (V.any ((== bid) . (^. biId)) (m ^. mVisible))
   -- P1: one outstanding async op at most; after Quiesce the slot is free.
-  assert (starts (wQueue after) <= 1)
+  assert (starts (wQueue after) + maybe 0 (starts . pure . ifEffect) (wInFlight after) <= 1)
   when (isQuiesce cmd) $ do
     wQueue after === []
+    isNothing (wInFlight after) === True
     isNothing (m ^. mAsyncOp) === True
+  -- I2/B2: only the terminal message frees the slot, not one before it.
+  case wInFlight after of
+    Just f | pending after, isBatch (ifEffect f) -> isJust (m ^. mAsyncOp) === True
+    _ -> pure ()
   -- P5: SetFlag twice is SetFlag once.
   case cmd of
     CIntent i@(SetFlag {}) -> (wModel (apply (Intent i) after) ^. mContents) === (m ^. mContents)
     _ -> pure ()
   cover 35 "Navigate" (case cmd of CIntent (Navigate _ _) -> True; _ -> False)
-  forM_ delivered $ \(eff, msgs) -> case eff of
+  forM_ delivered $ \(eff, msgs, before) -> case eff of
     StartFetch _ -> do
       let ok = any (\case FetchCompleted {} -> True; _ -> False) msgs
       cover 10 "Refresh after a ServerMove" (ok && wMoved before)
@@ -187,6 +262,8 @@ checkStep cmd (Step before after delivered) = do
   where
     isQuiesce Quiesce = True
     isQuiesce _ = False
+    isBatch (StartBatch _) = True
+    isBatch _ = False
 
 checkBatch :: World -> World -> BatchPlan -> [Msg] -> Test ()
 checkBatch before after plan msgs = do
@@ -223,6 +300,28 @@ checkBatch before after plan msgs = do
         (wFake after ^? frItems . ix bid . biReminder) === Just Nothing
       forM_ (o ^. soFailed) $ \(bid, _) -> reminderOf after bid === reminderOf before bid
     Archived _ -> pure ()
+  -- P3, server side (B5): a planned reminder item changed on the server
+  -- (accepted writes bump lastUpdate) exactly when the step reports it ok.
+  let changed bid = (wFake before ^? frItems . ix bid . biLastUpdate) /= (wFake after ^? frItems . ix bid . biLastUpdate)
+      okSet = Set.fromList (concat [map fst (o ^. soOk) | RemindersSetAt o <- results] <> concat [o ^. soOk | RemindersRemoved o <- results])
+  forM_ (map fst (bpSetReminders plan) <> bpRemoveReminders plan) $ \bid ->
+    (bid, changed bid) === (bid, Set.member bid okSet)
+  -- P7 from the fake (D6): the first global rule a step reached aborts it,
+  -- at that call, and no later step calls.
+  let callsBefore st = Map.findWithDefault 0 st (wFake before ^. frCalls)
+      -- The fake applies the first rule that matches a call.
+      ruleFor st k = listToMaybe [status | FailRule st' nth status <- wFake before ^. frRules, st' == st, maybe True (== k) nth]
+      globalAt st = [k | k <- [callsBefore st + 1 .. callsBefore st + callsOf st], maybe False isGlobal (ruleFor st k)]
+      isGlobal = \case FailConn -> True; FailHttp c -> c >= 500 || c `elem` [401, 403, 408, 429]
+  forM_ planned $ \st -> case globalAt st of
+    [] -> pure ()
+    ks -> do
+      let k = minimum ks
+      (st, [aborted r | r <- results, stepOf r == st]) === (st, [True])
+      (st, callsOf st) === (st, k - callsBefore st)
+      forM_ (drop 1 (dropWhile (/= st) planned)) $ \later -> (later, callsOf later) === (later, 0)
+  cover 5 "a global error aborted a step" (any aborted results)
+  cover 0.5 "an abort after at least one success" (any (\r -> aborted r && let (n, _, _, _) = parts r in n >= 1) [r | r <- results, stepOf r /= F.StepArchive])
   -- P7: after an abort no later step calls; the aborted step stops at the
   -- failing call; failed and skipped items keep their flags.
   let abortedAt = [stepOf r | r <- results, aborted r]
@@ -260,7 +359,29 @@ command ref =
 
 -- | Shrinking can drop the commands that made an id local or visible.
 valid :: World -> Cmd -> Bool
-valid w = \case
+valid w cmd | pending w && changesFlagsOrServer cmd = False
+valid w cmd = validIdle w cmd
+
+-- | Not generated while messages are pending: "before delivery" would
+-- stop being one moment.
+changesFlagsOrServer :: Cmd -> Bool
+changesFlagsOrServer = \case
+  CIntent i -> case i of
+    SetArchive _ -> True
+    ToggleArchive _ -> True
+    ToggleReminder _ _ -> True
+    Unflag _ -> True
+    SetFlag {} -> True
+    ClearAllFlags -> True
+    FlagAllArchive -> True
+    _ -> False
+  ServerMove _ -> True
+  ServerEdit _ -> True
+  FailNext {} -> True
+  _ -> False
+
+validIdle :: World -> Cmd -> Bool
+validIdle w = \case
   CIntent (Select bid) -> V.any ((== bid) . (^. biId)) (wModel w ^. mVisible)
   CIntent (SetFlag bid _ _) -> Map.member bid (wModel w ^. mContents)
   CIntent (SetArchive (ById bid)) -> Map.member bid (wModel w ^. mContents)
@@ -274,7 +395,7 @@ valid w = \case
     unsortedOnServer bid = (wFake w ^? frItems . ix bid . biCollectionId) == Just (-1)
 
 smCore :: Property
-smCore = withTests 200 . property $ do
+smCore = withTests 500 . property $ do
   start <- forAllWith (show . wFake) genWorld
   ref <- liftIO (newIORef start)
   actions <- forAll (Gen.sequential (Range.linear 1 60) (State start) [command ref])
