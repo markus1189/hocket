@@ -266,13 +266,16 @@ can observe and drive the running TUI. See
   responses echo the `id` and carry `"ok"` plus `"result"` or `"error"`.
 - **Reads** (answered from a state mirror, never blocking the UI):
   `get_state`, `list_items` (`visible_only`, `flagged_only`), `get_item`,
-  and `wait_version` (long-polls until the state version passes `after`).
+  `wait_version` (long-polls until the state version passes `after`), and
+  `wait_applied` (long-polls until the write with this `seq` is applied).
 - **Writes** (injected as regular UI events, so they behave exactly like
   keystrokes): `set_flag` (`action`: `archive` | `reminder` |
   `remove_reminder` | `none`), `clear_all_flags`, `flag_all_archive`,
   `execute`, `refresh`, `set_filter`, `set_video_filter`,
   `set_show_future_reminders`, `select_item`, `open_item`, `open_and_flag`, and
-  `set_status` (shows `agent: <text>` in the status bar).
+  `set_status` (shows `agent: <text>` in the status bar). Every accepted
+  write answers with its `seq`; `wait_applied` with it confirms the write
+  landed.
 - **Visibility**: the header shows `[agent]` while at least one client is
   connected; flags staged by an agent are ordinary flags you can review
   with `J`/`K`, drop with `u`, and execute with `X`.
@@ -289,7 +292,8 @@ the socket is unreachable.
 ```bash
 hocket agent get_state | jq .result.counts
 hocket agent list_items --flagged-only
-hocket agent set_flag 123 --action archive
+hocket agent set_flag 123 --action archive      # → "seq": 7
+hocket agent wait_applied --seq 7
 hocket agent wait_version --after 42 --timeout-ms 30000
 ```
 

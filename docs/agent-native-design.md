@@ -96,10 +96,11 @@ maintains a mirror:
 - The agent server thread answers all read requests from the `TVar`
   directly; the Brick loop is never blocked by reads.
 
-`stateVersion` (bumped on every handled event) tells agents that
-something changed. It does not say that *their* write landed: a wait can
-wake for an earlier event or another agent's connection, so an agent
-re-reads until the state shows the effect, until a deadline (RPC.md §7.1).
+`stateVersion` (bumped on every handled event but a client count) tells
+agents that something changed. It does not say that *their* write landed:
+a wait can wake for an earlier event. For that every write answers with
+its `seq`, the model records the seq of the last agent write it applied
+(`applied_seq`), and `wait_applied` waits for it (RPC.md §5.5, §7.1).
 
 ### Acting: inject events through the existing `BChan`
 
@@ -172,12 +173,13 @@ Read (served from the snapshot, never touching the event loop):
 
 | method        | params                          | returns |
 |---------------|---------------------------------|---------|
-| `get_state`   | —                               | header info: counts, filters, status, selection, `stateVersion`, `asyncOp` |
+| `get_state`   | —                               | header info: counts, filters, status, selection, `stateVersion`, `asyncOp`, `applied_seq` |
 | `list_items`  | `visible_only?`, `flagged_only?`| full item records incl. pending actions, in display order |
 | `get_item`    | `id`                            | one full item record |
 | `wait_version`| `after`, `timeout_ms`           | blocks until `stateVersion > after` (long-poll; the cheap substitute for subscriptions in phase 1) |
+| `wait_applied`| `seq`, `timeout_ms`             | blocks until the write with this `seq` is applied (`applied_seq ≥ seq`) |
 
-Write (injected as events):
+Write (injected as events; each reply carries the write's `seq`):
 
 | method            | params                         | maps to |
 |-------------------|--------------------------------|---------|
@@ -234,9 +236,9 @@ and needs nothing from the core that the core does not export today:
   (`Hocket.Shell.Agent.Client`) on `resolveAgentSocketPath`
   (`Hocket.Shell.Agent.Server`), and the reply's `result` or `error` as the
   tool's content or error.
-- Optionally the write tools confirm their effect the way RPC.md §7.1
-  says, re-reading until a deadline, so that agents get "landed" instead
-  of "queued"; that is client code too.
+- Optionally the write tools confirm their effect with `wait_applied` on
+  the reply's `seq` (RPC.md §5.5), so that agents get "landed" instead of
+  "queued"; that is client code too.
 - One test keeps the table honest: every command `genAgentCmd` makes, put
   through `encodeCmd`, names a method the table has. That `decodeCmd`
   reads those params back is tested already (`Core.Properties`).

@@ -19,7 +19,7 @@ Three facts that shape everything below:
   keyboard could not, and you cannot touch the Raindrop token, the shell, or
   the filesystem through this socket.
 - **One response per request, no push.** There is no subscription. Long-poll
-  with `wait_version`.
+  with `wait_version` for any change, with `wait_applied` for one write.
 
 ## Preflight
 
@@ -57,12 +57,13 @@ Reads — served from the mirror, never block the UI:
 
 | Command | Wire method | Notes |
 |---|---|---|
-| `get_state` | `get_state` | Counts, selection, filter, status, `version` |
+| `get_state` | `get_state` | Counts, selection, filter, status, `version`, `applied_seq` |
 | `list_items [--all] [--flagged-only]` | `list_items` | Visible items only unless `--all`; `--flagged-only` narrows to staged items |
 | `get_item ID` | `get_item` | Works for hidden items too (`"visible": false`) |
-| `wait_version --after N [--timeout-ms MS]` | `wait_version` | Blocks until `version > N`; default 10000ms, clamped to `[0, 60000]` |
+| `wait_version --after N [--timeout-ms MS]` | `wait_version` | Blocks until `version > N`; default 10000ms, clamped to `[0, 60000]`; `0` polls |
+| `wait_applied --seq N [--timeout-ms MS]` | `wait_applied` | Blocks until write `N` is applied, then answers with that state; same timeout rules |
 
-Writes — injected as UI events:
+Writes — injected as UI events; each `ok` reply carries the write's `seq`:
 
 | Command | Wire method | Equivalent key |
 |---|---|---|
@@ -107,31 +108,21 @@ hocket agent execute
 ```
 
 **Confirm a write actually landed.** `"ok": true` means *queued*, not done.
-Wait for the effect itself, not for "something changed": `wait_version`
-returns after the next applied event, and that can be one queued before
-yours (another agent's write, a running fetch or batch). Every agent call
-is such an event too (the client count), so the wait often returns at
-once; pause a moment each round, or the loop polls about 90 times a second.
-Check, wait, check again, until a deadline:
+Write, wait for its `seq`, read:
 
 ```bash
-V=$(hocket agent set_flag 123 --action archive | jq .result.version)
-deadline=$((SECONDS + 30))
-until [ "$(hocket agent get_item 123 | jq -r .result.pending.action)" = archive ]; do
-  if [ "$SECONDS" -ge "$deadline" ]; then echo "set_flag 123 has not landed" >&2; break; fi
-  sleep 0.2
-  V=$(hocket agent wait_version --after "$V" --timeout-ms 1000 | jq -e .result.version) ||
-    V=$(hocket agent get_state | jq .result.version)
-done
+SEQ=$(hocket agent set_flag 123 --action archive | jq -e .result.seq)
+hocket agent wait_applied --seq "$SEQ" --timeout-ms 30000 >/dev/null
+hocket agent get_item 123 | jq .result.pending   # "archive"
 ```
 
 **Open and stage archive in one call.** Browse the browser and set the
-pending action to archive deterministically (set, not toggle) — the agenthalf of the GUI Enter key:
+pending action to archive deterministically (set, not toggle) — the agent
+half of the GUI Enter key:
 
 ```bash
-hocket agent open_and_flag 123
-V=$(hocket agent get_state | jq .result.version)
-hocket agent wait_version --after "$V"
+SEQ=$(hocket agent open_and_flag 123 | jq -e .result.seq)
+hocket agent wait_applied --seq "$SEQ" >/dev/null
 hocket agent get_item 123 | jq .result.pending   # "archive"
 ```
 
@@ -145,15 +136,25 @@ hocket agent set_status "reviewing 40 unread bookmarks"
 ## Gotchas
 
 - **Acknowledged is not applied.** Injection success means the event was
-  queued on a channel of capacity 10. Confirm by waiting for the effect
-  itself, until a deadline (recipe above): one `wait_version` may wake for an
-  earlier event or for any agent's connection, and the protocol cannot yet
-  name your write's own event (spec §7.1).
+  queued on a channel of capacity 10. Confirm with `wait_applied --seq`
+  (recipe above), never with `wait_version`: that one may wake for an
+  earlier event, another agent's write or a fetch result.
+- **Applied is not done.** Once `wait_applied` answers, your write and every
+  agent write before it have been run; read the state to see what that did
+  (a write validated against a stale state may have changed nothing). For
+  `execute` and `refresh` it means the job started; wait for
+  `async_op == null` for its end.
+- **`unknown seq N: last issued M`** means no write got that seq from this
+  hocket (wrong number, or hocket restarted: seqs start at 1 again). A seq
+  your write answered with is never unknown.
+- **The reply's `version` is not your write's.** It is the state your write
+  was validated against; wait with `seq`.
 - **`version` is a pulse, not a digest.** It increments on any render,
-  including ones that changed nothing you care about. Never treat it as a
-  content hash; re-read state after it moves.
+  including ones that changed nothing you care about (but not on agent
+  connections). Never treat it as a content hash; re-read state after it
+  moves.
 - **`event channel full, retry`** is ordinary back-pressure, not an error in
-  your request. Retry it.
+  your request. Retry it; a refused write took no seq.
 - **`reminder` on an item that already has one is rejected** — use
   `remove_reminder`. The reverse (`remove_reminder` on an item with no
   reminder) is rejected too. Reminders are always scheduled for the next day

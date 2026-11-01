@@ -29,6 +29,7 @@ For the operations guide, see the *Agent Control Socket* section of the
   - [5.2 `list_items`](#52-list_items)
   - [5.3 `get_item`](#53-get_item)
   - [5.4 `wait_version`](#54-wait_version)
+  - [5.5 `wait_applied`](#55-wait_applied)
 - [6. Write methods](#6-write-methods)
   - [6.1 The write path](#61-the-write-path)
   - [6.2 `set_flag`](#62-set_flag)
@@ -44,7 +45,7 @@ For the operations guide, see the *Agent Control Socket* section of the
   - [6.12 `open_and_flag`](#612-open_and_flag)
   - [6.13 `set_status`](#613-set_status)
 - [7. Concurrency model](#7-concurrency-model)
-  - [7.1 Known limitation: waiting for one write](#71-known-limitation-waiting-for-one-write)
+  - [7.1 Waiting for one write](#71-waiting-for-one-write)
 - [8. Security](#8-security)
 - [9. Design constraints](#9-design-constraints)
 - [10. Example session](#10-example-session)
@@ -63,8 +64,9 @@ Two properties make this safe and simple:
 
 - **Reads never block the UI.** They are answered from a handful of
   transactional variables (a state mirror, the event channel). The Brick
-  event loop is never touched on a read path. `wait_version` is a blocking
-  STM `check` that parks the agent's own thread, not the TUI.
+  event loop is never touched on a read path. `wait_version` and
+  `wait_applied` are blocking STM `check`s that park the agent's own
+  thread, not the TUI.
 - **Writes are just keystrokes.** A validated write is transcribed into the
   `Intent` the corresponding keybinding produces, and both go through the
   same pure `update`: keys as they arrive, agent writes queued on the TUI's
@@ -188,6 +190,8 @@ presence of `result`.
 | method-specific | e.g. `item is not visible under the current filters: <id>` |
 | `event channel full, retry` | Injected write could not be queued (see §6.1) |
 | `timeout waiting for state change` | `wait_version` timed out |
+| `unknown seq N: last issued M` | `wait_applied` for a seq no write was given (§5.5) |
+| `timeout waiting for write N` | `wait_applied` timed out |
 
 Unknown methods and malformed bodies still get a normal `{"ok": false}`
 response with the request `id`; they do **not** close the connection.
@@ -199,8 +203,8 @@ response with the request `id`; they do **not** close the connection.
 ### 4.1 The snapshot mirror
 
 The server holds a typed mirror of the TUI state (`AgentSnapshot`), stored
-in a `TVar`, rebuilt after **every** render (`syncForRender` + snapshot
-projection). It contains:
+in a `TVar`, rebuilt after **every** event the loop handles except a
+client-count update (§4.2). It contains:
 
 - The plain bookmark data currently in memory: id, title, link, tags, note,
   excerpt, created time, reminder, favorite flag, pending action.
@@ -210,6 +214,8 @@ projection). It contains:
   `show_future_reminders`, status text, last-update time, and the in-flight
   async operation (`fetch` / `execute_batch`).
 - A monotonic **version** (§4.2).
+- `applied_seq`: the seq of the last agent write the loop has applied
+  (§5.5), `0` before the first.
 
 Rebuilding after every render means the mirror is at worst one render behind
 the actual screen. It is cheap to do because the snapshot shares the
@@ -223,9 +229,10 @@ version is the agent-side equivalent of a TUI screen repaint.
 
 - It counts successful renders, so it increases even when nothing that
   matters to the agent changed (e.g. a keypress that only moves the cursor
-  past the same item still bumps it). A key press is one render; every
-  agent connection adds two of its own (connect and disconnect update the
-  client count), so how far it moves per action is not a fixed number.
+  past the same item still bumps it). A key press is one render. Agent
+  connections do not move it: a connect or disconnect updates only the
+  header's client count, which is not part of the snapshot, so the loop
+  does not publish for it.
 - It is **not** an absolute state hash and never resets within a session
   (starts at `0` from `emptySnapshot`).
 - `wait_version` and the `version` field are the only places the version is
@@ -238,6 +245,9 @@ The correct client pattern for "watch for changes":
 2. `wait_version` with `after` = that version (long-poll).
 3. On success, `get_state` again (or use the `stateView` already returned)
    to pull the new state.
+
+To wait for one write of your own, use its `seq` and `wait_applied`
+(§5.5), not the version.
 
 ### 4.3 What crosses the socket (and what never does)
 
@@ -280,6 +290,7 @@ items etc. Method-specific result fields:
 | `status` | string \| null | Current status line |
 | `last_updated` | number \| null | POSIX time of last sync |
 | `async_op` | `fetch` \| `execute_batch` \| null | In-flight async op |
+| `applied_seq` | int | Seq of the last agent write applied, `0` before the first (§5.5) |
 
 Item fields are as specified in §4.3 with `pending` as flat action objects
 (§6.2).
@@ -329,12 +340,43 @@ Long-polls for a state change. Blocks the *agent's own server thread* on
 `STM.check (version > after)` and returns the fresh `stateView` when it
 passes. `timeout_ms` defaults to `10000`, is clamped to `[0, 60000]`, and is
 a hint: on timeout the response is `{"ok": false, "error":
-"timeout waiting for state change"}`.
+"timeout waiting for state change"}`. The version is checked once before
+waiting, so `timeout_ms: 0` is a poll.
 
 Because the snapshot only advances on render, `wait_version` can in
-principle wait until the next repaint. It is the building block for an
-agent that waits until its injected change lands, but not enough on its
-own: it returns after the *next* applied event, whichever that is (§6.1).
+principle wait until the next repaint. It returns after the *next* applied
+event, whichever that is, so it does not tell an agent that its own write
+landed: `wait_applied` does (§5.5).
+
+### 5.5 `wait_applied`
+
+```
+params: { "seq": 7, "timeout_ms": 10000 }   # seq required, timeout optional
+```
+
+Long-polls until the write that answered with `"seq": 7` (§6.1) is
+applied, and returns the `stateView` of the first snapshot with
+`applied_seq ≥ 7`; at once if that snapshot is already the current one.
+*Applied* means `update` has run the write, the immediate answers of its
+effects (browser, clipboard) included, and the result is published. Agent
+writes are applied in seq order, so that snapshot also holds the effect of
+every agent write with a smaller seq, whichever client sent it.
+
+- `timeout_ms` defaults to `10000` and is clamped to `[0, 60000]`; the
+  snapshot is checked once before waiting, so `0` is a poll. On timeout:
+  `timeout waiting for write 7`.
+- A seq larger than the last one issued is answered at once with `unknown
+  seq 7: last issued 5`: no write has it, so waiting would not help. A
+  write learns its seq only after it is issued, so a seq from a reply is
+  never unknown to the instance that sent it; seqs start at `1` with each
+  hocket instance.
+- `seq ≤ 0` is answered at once (`applied_seq` is never below `0`).
+- Applied is not done. A write that `update` ignores (validated against a
+  snapshot that was stale by the time it ran) still counts as applied; read
+  the state to see what it did. For `execute` and `refresh` applied means
+  the job has started (`async_op` set), unless `update` dropped it (nothing
+  flagged, or another job running); the end is `async_op == null` (§6.5,
+  §6.6).
 
 ---
 
@@ -358,33 +400,35 @@ decode → validate → transcribe → inject
    `Intent` the keyboard produces. The clock (`Now`, time and zone) is
    sampled *here*, in the server thread, once per write; `set_flag`
    `reminder` then gets 07:00 on the next local day, exactly as the `s` key.
-4. **inject** — the event is written non-blocking into the TUI `BChan`
-   (capacity **10**). Injection returns a boolean:
-   - `true` → the event is queued; response is
-     `{"ok": true, "result": {"injected": true, "version": <v>}}` where
-     `<v>` is the mirror version *at injection time*.
-   - `false` → the channel is full; response is `event channel full, retry`.
+4. **inject** — the write takes the next **seq**, one counter for all
+   clients, and is written non-blocking into the TUI `BChan` (capacity
+   **10**) as `AgentWrite seq intent`. Taking the seq, injecting and
+   committing the seq happen under one lock, so the channel holds agent
+   writes in seq order. Injection returns a boolean:
+   - `true` → the event is queued and the seq committed; response is
+     `{"ok": true, "result": {"injected": true, "version": <v>, "seq": <n>}}`
+     where `<v>` is the mirror version the write was *validated against*
+     and `<n>` its seq.
+   - `false` → the channel is full; the seq is not used (the next write
+     gets it), and the response is `event channel full, retry`.
 
 **Acknowledging injection is not acking effect.** `ok: true` means *the
 event was queued*, not that the UI has processed or rendered it. To confirm
-the effect landed, wait for the condition: re-read, and while it does not
-hold yet, `wait_version` after the last version seen, until a deadline (the
-skill has the loop). Bound it by time, not by a count of waits, and pause
-briefly each round: every agent connection is itself an event (the client
-count, `AgentClients`), so a wait usually returns at once.
+the effect landed, `wait_applied` with the reply's `seq` (§5.5): it returns
+the first snapshot that holds this write's effect and every earlier one's.
 
 Writes are **idempotent by construction** — they are the same events the
 keyboard fires, so replaying a write is no different from the user pressing
 the same key twice.
 
-The returned `version` is the snapshot version at injection time. A
-`wait_version` with `after` = that version returns once the *next* event is
-applied, and that need not be this write: events queued before it (another
-agent's write, a running fetch's or batch's results) are applied first. One
-wait and one read can therefore still show the state before the write.
-(SM-agent reproduces it: with a refresh running in a second agent,
-`set_flag 1001 archive`, `wait_version --after V`, `list_items` showed 1001
-unflagged.)
+The returned `version` is the snapshot the write was validated against;
+use `seq` to wait. A `wait_version` with `after` = that version returns
+once the *next* event is applied, and that need not be this write: events
+queued before it (another agent's write, a running fetch's or batch's
+results) are applied first. One wait and one read can therefore still show
+the state before the write. (SM-agent reproduced it: with a refresh running
+in a second agent, `set_flag 1001 archive`, `wait_version --after V`,
+`list_items` showed 1001 unflagged.)
 
 ### 6.2 `set_flag`
 
@@ -444,8 +488,9 @@ params: {}
 ```
 
 Triggers a resync — the `r` key. `async_op` becomes `fetch` until
-completion. To learn when the updated data has landed, wait until `async_op`
-is null again (`wait_version` in a loop, as for any write, §6.1).
+completion. `wait_applied` with the reply's seq returns once the fetch has
+started; to learn when the updated data has landed, wait until `async_op`
+is null again (`wait_version` in a loop until it is).
 
 ### 6.7 `set_filter`
 
@@ -510,7 +555,7 @@ branch and cursor-move).
 - `open_item` remains browse-only; use this command when the intent is
   explicitly "browse and stage".
 - Single write, single render, single `version` bump — the browser side
-effect and the flag land in one atomic unit, so `wait_version` observes a
+effect and the flag land in one atomic unit, so `wait_applied` observes a
 consistent post-state with no intermediate partial snapshot.
 
 ### 6.13 `set_status`
@@ -531,13 +576,16 @@ shown (and vice-versa); there is no separate agent lane.
                 ┌─────────────────────────────── TUI (Brick) ──┐
   keyboard ──► BChan(10) ──► event loop ──► render ──► TVar snapshot
                 ▲  ▲                                             │
-                │  └── non-blocking inject (aeInject)            │
+                │  └── seq lock: next seq, inject                │
+                │      (aeInject, AgentWrite seq), commit        │
                 │                       read                     ▼
        agent server thread ───────────────────────► TVar snapshot
         │         accept loop                          (STM/readTVarIO)
-        │         └─ fork per client ── wait_version (check) / reads / writes
+        │         └─ fork per client ── wait_version / wait_applied (check)
+        │                               / reads / writes
         ▼
  publish client count ──► BChan ──► AgentClients ──► header [agent]
+                                     (no snapshot published)
 ```
 
 - The **agent server thread** owns a `runAgentServer` accept loop; it never
@@ -547,28 +595,31 @@ shown (and vice-versa); there is no separate agent lane.
 - **One thread per client**, spawned with `forkFinally`. The client count is
   mirrored into the TUI header as `[agent]` while `≥ 1` client is connected
   (`AgentClients`).
-- **`wait_version` blocks only the client's thread** via `STM.check`; the
-  event loop and other clients are unaffected.
+- **`wait_version` and `wait_applied` block only the client's thread** via
+  `STM.check`; the event loop and other clients are unaffected.
 - **Single shared event channel.** Keyboard and agent writes feed the same
   `BChan` of capacity 10. If the loop is busy, a write can be dropped
   (`aeInject == False` → `event channel full, retry`). This is the one place
   the protocol can race the user; the write path accounts for it.
-- The snapshot `TVar` is written under `atomically` after every render and
-  read `readTVarIO` / within `STM` by server threads. The only sequential
-  point is the version bump, which happens inside the render thread, so
-  versions are never duplicated.
+- The snapshot `TVar` is written under `atomically` after every event but a
+  client count and read `readTVarIO` / within `STM` by server threads. There are two
+  sequential points. The version bump happens inside the render thread, so
+  versions are never duplicated. The seq lock in the server makes taking a
+  seq, injecting the write and committing the seq one step for all clients
+  (masked against asynchronous exceptions), so seqs are unique, dense and in
+  channel order, and `applied_seq ≥ N` covers every agent write up to `N`.
+  Keys and worker results take no seq.
 
-### 7.1 Known limitation: waiting for one write
+### 7.1 Waiting for one write
 
-An agent cannot wait for exactly its own write. A write answers with the
-snapshot version at injection (§6.1), not with a mark for its own event, and
-`wait_version` wakes on any render: one for an event queued before the
-write, or one for a connection (§4.2), which every agent call is. Until the
-protocol can say which event a write became (a sequence number per write
-with a `wait_applied` method, say, or connections that do not render), the
-reliable pattern is the skill's: re-read until the state shows the effect,
-waiting with `wait_version` and a short pause in between, bounded by a
-deadline rather than by a number of waits. Both fixes change the wire and are left for later.
+Until the write seq, an agent could not wait for exactly its own write: a
+write answered with a snapshot version, not with a mark for its own event,
+and `wait_version` woke on any render, one for an event queued before the
+write or one for a connection, which every agent call was. The workaround
+was a loop that re-read until the state showed the effect. Both causes are
+gone: every write answers with its `seq`, `wait_applied` waits for exactly
+that write (§5.5), and connections no longer render (§4.2). The pattern is
+write, `wait_applied` with the reply's `seq`, read.
 
 ---
 
@@ -600,12 +651,12 @@ designed for same-user, same-host tools.
 These are intentional, not bugs:
 
 - **One response per request, no push.** Clients must poll or long-poll;
-  there is no subscription/notification channel. `wait_version` is the
-  polling primitive.
+  there is no subscription/notification channel. `wait_version` and
+  `wait_applied` are the polling primitives.
 - **`version` is a pulse, not a digest.** It beats on any render and cannot
-  be used to detect "the specific change I wanted".
+  be used to detect "the specific change I wanted"; a write's `seq` can.
 - **Acknowledged ≠ done.** Inject success means queued. Confirm via
-  `wait_version`.
+  `wait_applied` with the write's `seq`.
 - **Status is single-lane.** `set_status` overwrites the shared status
   line.
 - **No `add_bookmark` (yet).** It is an MCP-side/open item on the roadmap;
@@ -630,12 +681,13 @@ echo '{"id":1,"method":"get_state"}' | socat - UNIX-CONNECT:$SOCK
 echo '{"id":2,"method":"wait_version","params":{"after":42,"timeout_ms":30000}}' \
   | socat - UNIX-CONNECT:$SOCK
 
-# 3. flag every visible news-site item for archive (id "101")
+# 3. flag the news-site item "101" for archive; the reply carries its seq
 echo '{"id":3,"method":"set_flag","params":{"id":"101","action":"archive"}}' \
   | socat - UNIX-CONNECT:$SOCK
+# {"id":3,"ok":true,"result":{"injected":true,"seq":7,"version":43}}
 
-# 4. wait for it to render (any version past the injected one)
-echo '{"id":4,"method":"wait_version","params":{"after":43}}' \
+# 4. wait until write 7 is applied; the answer is the state that shows it
+echo '{"id":4,"method":"wait_applied","params":{"seq":7}}' \
   | socat - UNIX-CONNECT:$SOCK
 
 # 5. execute the staged batch
@@ -657,7 +709,8 @@ misspelled enum:
 
 ```bash
 hocket agent get_state
-hocket agent set_flag 101 --action archive
+hocket agent set_flag 101 --action archive        # → "seq": 7
+hocket agent wait_applied --seq 7
 hocket agent wait_version --after 43 --timeout-ms 30000
 hocket agent execute
 ```
@@ -682,6 +735,7 @@ document remains the normative spec.
 | Client (CLI + IO shell) | `src/Hocket/Shell/Agent/Client.hs` | `callAgent`, `runAgentCommand`; requests built via `encodeCmd` |
 | Socket server (IO shell) | `src/Hocket/Shell/Agent/Server.hs` | `runAgentServer`, `resolveAgentSocketPath`, `reclaimStaleSocket`, `handleLine` / `dispatch` / `writeIntent` / `injectWrite` |
 | Writes as Intents | `src/core/Hocket/Agent/Intent.hs` | `toIntent :: Now -> WriteCmd -> Intent`; total & pure |
-| TUI core | `src/core/Hocket/App/{Msg,Effect,Update}.hs` | `Intent`, `Msg`, `Effect`; the one pure `update` keys and agent writes go through |
-| Wiring, rendering mirror, cleanup | `main/hocket.hs` | `startAgentServer`, `app` snapshot rebuild, `cleanupAgentSocket` |
+| TUI core | `src/core/Hocket/App/{Msg,Effect,Update}.hs` | `Intent`, `Msg` (`AgentWrite seq intent`, `publishes`), `Effect`; the one pure `update` keys and agent writes go through, which records `mAppliedSeq` |
+| Event loops, snapshot publish | `src/Hocket/Shell/Tui/App.hs`, `src/Hocket/Shell/Headless.hs` | `publish` after every event `publishes` allows (all but `AgentClients`), and after the startup refresh |
+| Wiring | `main/hocket.hs` | CLI parsing (`agentMethods`), config loading, `runTui` |
 | Tests | `test/test.hs` | protocol round-trips and IO-shell behaviour |

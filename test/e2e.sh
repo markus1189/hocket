@@ -62,23 +62,23 @@ wait_for() {
 state_is() { agent get_state | jq -e ".result | $1"; }
 action_is() { agent get_item "$1" | jq -e ".result.pending.action == \"$2\""; }
 
-# Writes from one client are injected in order, so once a later write shows
-# in get_state, every earlier one has been handled. The marker must not touch
-# what the expected files compare: a status marker could overwrite a batch's
-# final status, or be overwritten by FetchCompleted before it is seen. So
-# show_future_reminders goes false -> true -> false, each step awaited: the
-# setting ends unchanged, and showing more items never moves the selection.
-# A scenario that turns it on asserts with wait_for until it is off again.
+# Agent writes are applied in seq order, so once the marker's seq is
+# applied, every earlier agent write is. Keys go through vty, not the event
+# channel: a scenario waits for a key's effect itself. The marker must not
+# touch what the expected files compare, so it sets show_future_reminders to
+# what it is: one write, no change.
 settle() {
-  state_is '.show_future_reminders == false' >/dev/null || {
-    fail "settle needs show_future_reminders off; the scenario left it on"
+  local show seq
+  show=$(agent get_state | jq -r '.result.show_future_reminders | if . then "show" else "hide" end') || return 1
+  seq=$(agent set_show_future_reminders "--$show" | jq -e '.result.seq') || {
+    fail "the marker write was not accepted"
     return 1
   }
-  agent set_show_future_reminders --show >/dev/null &&
-    wait_for 10 "the marker" state_is '.show_future_reminders == true' &&
-    agent set_show_future_reminders --hide >/dev/null &&
-    wait_for 10 "the marker's reset" state_is '.show_future_reminders == false' &&
-    wait_for 20 "the async slot to be free" state_is '.async_op == null'
+  agent wait_applied --seq "$seq" >/dev/null || {
+    fail "the marker, write $seq, was not applied within 10 s"
+    return 1
+  }
+  wait_for 20 "the async slot to be free" state_is '.async_op == null'
 }
 
 start() { # NAME SEED [--desktop] [ARGS...]
@@ -273,7 +273,6 @@ scenario_agent_view() {
   agent set_video_filter only_videos >/dev/null && wait_for 5 "only the two videos" state_is '.counts.visible == 2' || return 1
   agent set_video_filter hide_videos >/dev/null && wait_for 5 "the videos hidden" state_is '.counts.visible == 3' || return 1
   agent set_video_filter none >/dev/null && wait_for 5 "no video filter" state_is '.counts.visible == 5' || return 1
-  # From here on settle would refuse: show_future_reminders stays on.
   agent set_show_future_reminders --show >/dev/null && wait_for 5 "the reminder shown" state_is '.counts.visible == 6' || return 1
   agent select_item 1003 >/dev/null && wait_for 5 "1003 selected" state_is '.selected == "1003"' || return 1
   agent set_status hello >/dev/null && wait_for 5 "the status" state_is '.status == "agent: hello"' || return 1
@@ -288,14 +287,32 @@ rejected() {
   fi
 }
 
-# view: what a rejected write must leave alone (the version counts every
-# event, agent connections included, so it is not compared).
-view() { jq -n -S --argjson s "$(agent get_state | jq '.result | del(.version)')" --argjson i "$(agent list_items --all | jq .result)" '{s: $s, i: $i}'; }
+# view: what a rejected write must leave alone, the version included:
+# connecting to ask moves it no more.
+view() { jq -n -S --argjson s "$(agent get_state | jq .result)" --argjson i "$(agent list_items --all | jq .result)" '{s: $s, i: $i}'; }
 
-# Rejected writes change nothing; wait_version wakes on a later write.
+# answers ERROR CMD...: the agent call fails with exactly ERROR.
+answers() {
+  local want=$1 got
+  shift
+  got=$(agent "$@" | jq -r .error)
+  [ "$got" = "$want" ] || {
+    fail "agent $* answered '$got', want '$want'"
+    return 1
+  }
+}
+
+# An idle hocket keeps its version; rejected writes change nothing;
+# wait_version and wait_applied wake on a later write, and their errors.
 scenario_agent_errors() {
   start agent-errors seed-basic.json || return 1
-  local before after v
+  local before after v seq
+  v=$(agent get_state | jq '.result.version')
+  state_is ".version == $v" >/dev/null || {
+    fail "the version moved on an idle hocket: $v, then $(agent get_state | jq '.result.version')"
+    return 1
+  }
+  answers "timeout waiting for state change" wait_version --after "$v" --timeout-ms 0 || return 1
   before=$(view)
   rejected set_flag 9999 --action archive || return 1
   rejected select_item 1003 || return 1 # hidden: a future reminder
@@ -308,12 +325,20 @@ scenario_agent_errors() {
     return 1
   }
   v=$(agent get_state | jq '.result.version')
-  agent set_status checked >/dev/null || return 1
+  seq=$(agent set_status checked | jq -e '.result.seq') || return 1
   agent wait_version --after "$v" --timeout-ms 5000 >/dev/null || {
     fail "wait_version --after $v did not return after a write"
     return 1
   }
-  wait_for 5 "the status" state_is '.status == "agent: checked"' || return 1
+  agent wait_applied --seq "$seq" | jq -e '.result.status == "agent: checked"' >/dev/null || {
+    fail "wait_applied --seq $seq did not answer with the write applied"
+    return 1
+  }
+  agent wait_applied --seq "$seq" --timeout-ms 0 >/dev/null || {
+    fail "wait_applied --timeout-ms 0 on an applied write did not answer at once"
+    return 1
+  }
+  answers "unknown seq $((seq + 1)): last issued $seq" wait_applied --seq $((seq + 1)) || return 1
   finish
 }
 
@@ -331,13 +356,14 @@ scenario_keys_flags() {
   flag 1002 archive && flag 1004 reminder || return 1
   nav g 1001 && nav J 1002 && nav J 1004 && nav K 1002 || return 1
   key U && wait_for 5 "U to clear every flag" state_is '.counts.archive_flagged == 0 and .counts.reminder_flagged == 0' || return 1
-  key X && settle || return 1
+  # g after X: keys are handled in order, so once g shows, X was handled.
+  key X && nav g 1001 && settle || return 1
   state_is '.async_op == null and .status == null' >/dev/null || {
     fail "X with nothing flagged started something"
     return 1
   }
   on 1004 a && wait_for 5 "a to flag 1004" action_is 1004 archive || return 1
-  key X && settle || return 1
+  key X && wait_for 10 "X to archive 1004" state_is '.counts.total == 3 and .async_op == null' || return 1
   local before
   before=$(agent get_state | jq '.result.last_updated')
   key r && settle || return 1
