@@ -123,25 +123,31 @@ test-suite test
   type:                exitcode-stdio-1.0
   hs-source-dirs:      test
   main-is:             test.hs
-  other-modules:       BatchTests
-                     , CharacterizationTests
-                     , ClassifyTests
-                     , FakeTests
-                     , FixtureTests
+  other-modules:       Core.AgentTests
+                     , Core.BatchTests
+                     , Core.CharacterizationTests
+                     , Core.ClassifyTests
+                     , Core.FilterTests
+                     , Core.IntentTests
+                     , Core.JsonTests
+                     , Core.KeyIntentTests
+                     , Core.NavTests
+                     , Core.PlanTests
+                     , Core.Properties
+                     , Core.ReminderTests
+                     , Core.StateTests
+                     , Core.UpdateTests
+                     , Core.VisibleTests
                      , Gen
-                     , HeadlessTests
-                     , IntentTests
-                     , KeyIntentTests
-                     , NavTests
-                     , PlanTests
-                     , Properties
-                     , ReminderTests
-                     , SMFixtureTests
-                     , SnapshotGoldenTests
-                     , SystemTests
-                     , UpdateTests
-                     , VisibleTests
-                     , WorkerTests
+                     , Shell.AgentServerTests
+                     , Shell.FakeTests
+                     , Shell.FixtureTests
+                     , Shell.HeadlessTests
+                     , Shell.SMFixtureTests
+                     , Shell.SnapshotGoldenTests
+                     , Shell.SystemTests
+                     , Shell.WorkerTests
+                     , TestUtil
   build-depends:       base
                      , aeson
                      , async

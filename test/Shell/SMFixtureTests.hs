@@ -7,7 +7,7 @@
 -- the pure 'serveFake' it wraps. The model is the pure store plus the clock
 -- ticks; no symbolic Vars, because the model reproduces every id the SUT
 -- returns (AddBookmark included), so later commands draw ids from it.
-module SMFixtureTests (smFixtureTests) where
+module Shell.SMFixtureTests (smFixtureTests) where
 
 import Control.Exception (try)
 import Control.Lens ((&), (.~), (^.))

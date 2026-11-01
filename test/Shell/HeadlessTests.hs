@@ -1,6 +1,6 @@
 {-# LANGUAGE OverloadedStrings #-}
 
-module HeadlessTests (headlessTests) where
+module Shell.HeadlessTests (headlessTests) where
 
 import Brick.BChan (readBChan)
 import Control.Concurrent.Async (wait, withAsync)

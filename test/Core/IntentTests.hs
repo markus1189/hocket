@@ -1,6 +1,6 @@
 {-# LANGUAGE OverloadedStrings #-}
 
-module IntentTests (intentTests) where
+module Core.IntentTests (intentTests) where
 
 import Data.List (nub)
 import Data.Time (utc)

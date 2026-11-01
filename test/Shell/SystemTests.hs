@@ -1,14 +1,14 @@
 {-# LANGUAGE OverloadedStrings #-}
 
-module SystemTests (systemTests) where
+module Shell.SystemTests (systemTests) where
 
-import CharacterizationTests (emptyState, item)
 import Control.Concurrent (threadDelay)
 import Control.Concurrent.Async (AsyncCancelled (..), cancel, waitCatch, withAsync)
 import Control.Concurrent.MVar (newEmptyMVar, putMVar, takeMVar)
 import Control.Exception (fromException, throwIO)
 import Control.Lens ((&), (.~), (^.))
 import Control.Monad (forever)
+import Core.CharacterizationTests (emptyState, item)
 import Data.Foldable (for_)
 import Data.IORef (IORef, modifyIORef', newIORef, readIORef, writeIORef)
 import Data.Time (utc)

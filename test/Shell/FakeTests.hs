@@ -2,7 +2,7 @@
 {-# LANGUAGE OverloadedStrings #-}
 {-# LANGUAGE TypeApplications #-}
 
-module FakeTests (fakeTests) where
+module Shell.FakeTests (fakeTests) where
 
 import Control.Exception (try)
 import Control.Lens

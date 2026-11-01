@@ -1,6 +1,6 @@
 {-# LANGUAGE OverloadedStrings #-}
 
-module VisibleTests (visibleTests) where
+module Core.VisibleTests (visibleTests) where
 
 import Control.Lens ((^.))
 import qualified Data.Map as Map

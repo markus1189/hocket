@@ -1,4 +1,4 @@
-module ReminderTests (reminderTests) where
+module Core.ReminderTests (reminderTests) where
 
 import Data.Time (UTCTime, addDays)
 import Data.Time.LocalTime (LocalTime (..), TimeOfDay (..), TimeZone, hoursToTimeZone, localTimeToUTC, utcToLocalTime)

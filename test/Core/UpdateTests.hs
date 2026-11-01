@@ -1,10 +1,10 @@
 {-# LANGUAGE OverloadedStrings #-}
 
-module UpdateTests (updateTests) where
+module Core.UpdateTests (updateTests) where
 
 import qualified Brick.Widgets.List as L
-import CharacterizationTests (emptyState, item)
 import Control.Lens (ix, (&), (.~), (?~), (^.), (^..), (^?), _1, _2)
+import Core.CharacterizationTests (emptyState, item)
 import Data.Foldable (for_)
 import Data.Functor.Identity (runIdentity)
 import qualified Data.Map as Map

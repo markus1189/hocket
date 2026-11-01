@@ -1,7 +1,7 @@
 {-# LANGUAGE OverloadedStrings #-}
 {-# LANGUAGE TypeApplications #-}
 
-module Properties (propertyTests) where
+module Core.Properties (propertyTests) where
 
 import Control.Lens ((%~), (&), (.~), (^.))
 import Data.Aeson (FromJSON (parseJSON), withObject, (.:))

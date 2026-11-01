@@ -1,6 +1,6 @@
 {-# LANGUAGE OverloadedStrings #-}
 
-module ClassifyTests (classifyTests, failure, failureWithXError, response) where
+module Core.ClassifyTests (classifyTests, failure, failureWithXError, response) where
 
 import Control.Exception (toException)
 import Data.Bifunctor (bimap)

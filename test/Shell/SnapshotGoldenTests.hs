@@ -3,7 +3,7 @@
 -- | The agent wire pinned byte for byte (I7). The golden was recorded from
 -- master's list-based takeSnapshot (before Phase 4 commit 6), so a match
 -- shows the move to mSelected/mVisible left the wire unchanged.
-module SnapshotGoldenTests (snapshotGoldenTests) where
+module Shell.SnapshotGoldenTests (snapshotGoldenTests) where
 
 import Control.Lens ((&), (.~), (?~), (^.))
 import qualified Data.Aeson as A

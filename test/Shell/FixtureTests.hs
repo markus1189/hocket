@@ -1,6 +1,6 @@
 {-# LANGUAGE OverloadedStrings #-}
 
-module FixtureTests (fixtureTests) where
+module Shell.FixtureTests (fixtureTests) where
 
 import Control.Lens ((^.))
 import qualified Data.ByteString.Lazy as LBS

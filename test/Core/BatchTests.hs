@@ -3,11 +3,11 @@
 {-# LANGUAGE ScopedTypeVariables #-}
 {-# LANGUAGE TupleSections #-}
 
-module BatchTests (batchTests) where
+module Core.BatchTests (batchTests) where
 
-import CharacterizationTests (emptyState, item)
 import Control.Lens
 import Control.Monad.State.Strict (State, modify, runState)
+import Core.CharacterizationTests (emptyState, item)
 import Data.Either (isLeft)
 import Data.List (findIndex, sort)
 import qualified Data.Map as Map

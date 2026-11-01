@@ -1,6 +1,6 @@
 {-# LANGUAGE OverloadedStrings #-}
 
-module PlanTests (planTests) where
+module Core.PlanTests (planTests) where
 
 import Control.Lens ((&), (.~), (^.))
 import qualified Data.Map as Map

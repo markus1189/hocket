@@ -3,10 +3,8 @@
 {-# LANGUAGE OverloadedStrings #-}
 {-# LANGUAGE TypeApplications #-}
 
-module WorkerTests (workerTests) where
+module Shell.WorkerTests (workerTests) where
 
-import CharacterizationTests (emptyState, item)
-import ClassifyTests (failure, failureWithXError, response)
 import Control.Concurrent (threadDelay)
 import Control.Concurrent.Async (cancel, withAsync)
 import Control.Concurrent.MVar (newEmptyMVar, putMVar, takeMVar)
@@ -14,6 +12,8 @@ import Control.Exception (AsyncException (ThreadKilled), SomeException, displayE
 import Control.Lens ((&), (.~), (^.))
 import Control.Monad (forever)
 import Control.Monad.State.Strict (execState, modify, runState)
+import Core.CharacterizationTests (emptyState, item)
+import Core.ClassifyTests (failure, failureWithXError, response)
 import Data.Bifunctor (first)
 import qualified Data.ByteString as BS
 import qualified Data.ByteString.Char8 as BSC

@@ -1,6 +1,6 @@
 {-# LANGUAGE OverloadedStrings #-}
 
-module NavTests (navTests) where
+module Core.NavTests (navTests) where
 
 import qualified Brick.Widgets.List as L
 import Control.Lens ((&), (.~), (^.))

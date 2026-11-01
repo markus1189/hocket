@@ -1,4 +1,4 @@
-module KeyIntentTests (keyIntentTests) where
+module Core.KeyIntentTests (keyIntentTests) where
 
 import Control.Lens ((&), (.~))
 import Data.Foldable (for_)
