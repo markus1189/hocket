@@ -59,7 +59,9 @@ library
                      , Hocket.Shell.Headless
                      , Hocket.Shell.Interpret
                      , Hocket.Shell.Signals
+                     , Hocket.Shell.Tui.App
                      , Hocket.Shell.Tui.Keymap
+                     , Hocket.Shell.Tui.View
                      , Hocket.Shell.Tui.Reconcile
                      , Hocket.Shell.Worker
   build-depends:       aeson
@@ -93,31 +95,27 @@ library
                      , unix
                      , vector
                      , vty
+                     , formatting
+                     , network-uri
+                     , vty-unix
 
 executable hocket
   ghc-options:         -Wall -Wunused-packages -threaded -Werror
   main-is:             hocket.hs
   hs-source-dirs:      main
   build-depends:       base
-                     , brick
                      , bytestring
                      , dhall
                      , directory
                      , filepath
-                     , formatting
                      , hocket
                      , hocket:core
                      , lens
                      , monad-logger
                      , exceptions
-                     , network-uri
                      , optparse-applicative
-                     , stm
                      , text
-                     , text-zipper
                      , time
-                     , vty-unix
-                     , vty
 
 
 test-suite test

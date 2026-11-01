@@ -397,7 +397,7 @@ cabal build --ghc-options="-Wall -Werror"
 
 ```
 hocket/
-├── main/hocket.hs         # Entry point: CLI, wiring and the TUI's brick App
+├── main/hocket.hs         # Entry point: CLI, config and wiring
 ├── src/core/Hocket/       # library core: pure, no brick/servant/network/async
 │   ├── Domain/            # Bookmark types, filtering, the reminder policy
 │   ├── App/               # Model, Msg, Effect and the one pure update
@@ -405,7 +405,7 @@ hocket/
 ├── src/Hocket/            # library: everything that does IO
 │   ├── Port.hs            # RaindropPort and SystemPort
 │   ├── Adapter/           # Raindrop over servant, the fixture fake, desktop
-│   └── Shell/             # Interpreter, workers, headless loop, agent socket, TUI keys
+│   └── Shell/             # Interpreter, workers, headless loop, agent socket, the TUI
 └── test/                  # Test suite
 ```
 

@@ -31,7 +31,8 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 Hocket is a terminal-based bookmark manager for Raindrop.io built with Haskell and the Brick TUI library.
 
 ### Key Components
-- **main/hocket.hs** - Main application entry point, UI event handling, and TUI rendering using Brick
+- **main/hocket.hs** - Entry point: CLI parsing, config loading and wiring
+- **src/Hocket/Shell/Tui/{App,View}.hs** - The brick TUI: event handling and the shell's `AppState`, and rendering
 - **src/core/Hocket/App/{Msg,Effect,Update}.hs** - The TUI core: keys, agent writes and worker results arrive as `Msg`; the pure `update` answers the new state and `Effect`s
 - **src/Hocket/Shell/Interpret.hs** - Runs `Effect`s: fetch and batch workers, browser, clipboard
 - **src/Hocket/Shell/Tui/Keymap.hs** - Normal-mode keys as `Intent`s (`keyIntents`)
