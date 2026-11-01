@@ -1,0 +1,6 @@
+{"open":{"program":"firefox","url":"https://example.com/1001"}}
+{"open":{"program":"firefox","url":"https://example.com/1002"}}
+{"open":{"program":"xdg-open","url":"https://app.raindrop.io/my/-1/item/1002/edit"}}
+{"copy":"https://example.com/1002"}
+{"open":{"program":"firefox","url":"https://example.com/1004"}}
+{"open":{"program":"firefox","url":"https://example.com/1004"}}

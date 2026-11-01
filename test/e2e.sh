@@ -378,13 +378,41 @@ scenario_filter_editor() {
   finish
 }
 
+# A failed startup fetch frees the slot and says so; r then fetches.
+scenario_fetch_fail() {
+  start fetch-fail seed-basic.json --fixture-fail fetch:1=503 || return 1
+  state_is '.counts.total == 0 and .async_op == null and (.status | startswith("failed"))' >/dev/null || {
+    fail "the failed startup fetch left $(agent get_state | jq -c '.result | {total: .counts.total, async_op, status}')"
+    return 1
+  }
+  key r && settle || return 1
+  wait_for 5 "r to fetch the four items" state_is '.counts.total == 4 and .status == null' || return 1
+  finish
+}
+
+# logged N: the desktop record has N calls.
+logged() { wait_for 5 "$1 desktop calls" test "$(wc -l <"$desktop" 2>/dev/null || echo 0)" -eq "$1"; }
+
+# What the browser and clipboard would have done, in order: Enter, Space,
+# e, y, and the agent's open_item and open_and_flag.
+scenario_desktop() {
+  start desktop seed-basic.json --desktop || return 1
+  on 1001 Enter && logged 1 && wait_for 5 "Enter to flag 1001" action_is 1001 archive || return 1
+  on 1002 Space && logged 2 || return 1
+  on 1002 e && logged 3 || return 1
+  on 1002 y && logged 4 && wait_for 5 "the copy in the status" state_is '.status == "Copied: https://example.com/1002"' || return 1
+  agent open_item 1004 >/dev/null && logged 5 || return 1
+  agent open_and_flag 1004 >/dev/null && logged 6 && wait_for 5 "1004 flagged" action_is 1004 archive || return 1
+  finish
+}
+
 # nav KEY ID: press KEY, then ID must be selected.
 nav() {
   key "$1"
   wait_for 5 "$1 to select $2" state_is ".selected == \"$2\""
 }
 
-scenarios=(all-three archive-503 reminder-404 empty-fetch key-a filter-typing navigation agent-flags agent-view agent-errors keys-flags keys-view filter-editor)
+scenarios=(all-three archive-503 reminder-404 empty-fetch key-a filter-typing navigation agent-flags agent-view agent-errors keys-flags keys-view filter-editor fetch-fail desktop)
 (($# == 0)) || scenarios=("$@")
 for s in "${scenarios[@]}"; do
   if "scenario_${s//-/_}"; then
