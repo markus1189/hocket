@@ -184,7 +184,24 @@ scenario_key_a() {
   finish
 }
 
-scenarios=(all-three archive-503 reminder-404 empty-fetch key-a)
+# D3 through the keys: the editor reports what it holds, and keeps its
+# cursor while the query agrees; Q in the editor is text, not quit.
+scenario_filter_typing() {
+  start filter-typing seed-basic.json || return 1
+  key / && tm send-keys -t "$name" -l abc && key Left && key Left && key X || return 1
+  wait_for 5 'the filter "aXbc"' state_is '.filter_query == "aXbc"' || return 1
+  tm send-keys -t "$name" -l Q
+  wait_for 5 'the Q after the X' state_is '.filter_query == "aXQbc"' || return 1
+  ! pane_dead || {
+    fail "Q in the filter editor quit hocket"
+    return 1
+  }
+  key Escape
+  wait_for 5 "Esc to clear the filter" state_is '.filter_query == ""' || return 1
+  finish
+}
+
+scenarios=(all-three archive-503 reminder-404 empty-fetch key-a filter-typing)
 (($# == 0)) || scenarios=("$@")
 for s in "${scenarios[@]}"; do
   if "scenario_${s//-/_}"; then

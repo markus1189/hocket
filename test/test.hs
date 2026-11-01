@@ -492,12 +492,14 @@ filterStateTests =
       testCase "ctrl-w deletes the previous word" $
         editorQuery (reconcile (testState & hsFilterQuery .~ "foo bar") initialUi & uiEditor %~ applyEdit deletePrevWord) @?= "foo ",
       testCase "the editor is written only when it differs from the query" $ do
-        -- Mid-typing the two agree, so the cursor is left where it is.
-        let typing = typeInFilter "a" (reconcile testState initialUi)
-            typed = testState & hsFilterQuery .~ "a"
+        -- Mid-typing the two agree, so the cursor stays off the end, where
+        -- the keys put it.
+        let typing = typeInFilter "abc" (reconcile testState initialUi) & uiEditor %~ applyEdit (Z.moveLeft . Z.moveLeft)
+            typed = testState & hsFilterQuery .~ "abc"
             cursor = view (uiEditor . editContentsL . to Z.cursorPosition)
-        cursor (reconcile typed typing) @?= cursor typing
-        editorQuery (reconcile (typed & hsFilterQuery .~ "agent") typing) @?= "agent",
+        (editorQuery (reconcile typed typing), cursor (reconcile typed typing)) @?= ("abc", (0, 1))
+        let written = reconcile (typed & hsFilterQuery .~ "agent") typing
+        (editorQuery written, cursor written) @?= ("agent", (0, 5)),
       testCase "reconcile shows what is visible, with the selection on hsSelected" $ do
         let model = settle (insertItems [filterTestBookmark, filterOtherBookmark] testState) & hsSelected ?~ BookmarkItemId "filter-other"
             shown = reconcile model initialUi
