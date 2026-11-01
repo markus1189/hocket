@@ -264,7 +264,7 @@ agentMethods =
       meth "get_item" "Fetch one item by id (hidden items included)" (ARead . CmdGetItem <$> itemIdArg),
       meth "wait_version" "Long-poll until the state version passes --after" waitP,
       meth "set_flag" "Stage a pending action on one item" setFlagP,
-      meth "clear_all_flags" "Drop every staged action (the 'u' key)" (pure (AWrite CmdClearFlags)),
+      meth "clear_all_flags" "Drop every staged action (the 'U' key)" (pure (AWrite CmdClearFlags)),
       meth "flag_all_archive" "Stage archive on every item" (pure (AWrite CmdFlagAllArchive)),
       meth "execute" "Execute the staged batch (the 'X' key)" (pure (AWrite CmdExecute)),
       meth "refresh" "Resync from Raindrop (the 'r' key)" (pure (AWrite CmdRefresh)),
