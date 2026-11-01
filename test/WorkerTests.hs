@@ -7,10 +7,11 @@ module WorkerTests (workerTests) where
 
 import CharacterizationTests (emptyState, item)
 import ClassifyTests (failure, failureWithXError, response)
-import Control.Exception (AsyncException (ThreadKilled), throwIO, toException, try)
+import Control.Exception (AsyncException (ThreadKilled), SomeException, displayException, evaluate, throwIO, toException, try)
 import Control.Lens ((&), (.~), (^.))
 import Control.Monad.State.Strict (execState, modify, runState)
 import Data.Bifunctor (first)
+import qualified Data.ByteString as BS
 import qualified Data.ByteString.Char8 as BSC
 import Data.Functor.Identity (runIdentity)
 import qualified Data.Map as Map
@@ -209,6 +210,9 @@ errorRenderingTests =
         shortClientError (DecodeFailure "Error in $: key \"items\" not found" (response 200)) @?= "bad response"
         shortClientError (UnsupportedContentType "text/html" (response 200)) @?= "bad response"
         shortClientError (InvalidContentTypeHeader (response 200)) @?= "bad response",
+      testCase "an x-error header with invalid UTF-8 renders without throwing (B6)" $ do
+        r <- try @SomeException (evaluate (maybe 0 T.length (errorMessageFromException (failureWithXError 404 (BS.pack [0xff, 0xfe, 0x41])))))
+        either (assertFailure . ("threw: " <>) . takeWhile (/= '\n') . displayException) (@?= 3) r,
       testCase "the batch summary uses the short form" $ do
         o <- runCalls (throwingOn [(2, throwIO (failure 404))]) [1, 2, 3]
         map snd (o ^. soFailed) @?= [CallFailed "404"]

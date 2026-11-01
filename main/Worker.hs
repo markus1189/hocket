@@ -140,7 +140,7 @@ shortClientError = \case
 errorMessageFromException :: ClientError -> Maybe Text
 errorMessageFromException (FailureResponse _ resp) = xError <|> code
   where
-    xError = T.decodeUtf8 . snd <$> find (\(k, _) -> k == CI.mk "x-error") (responseHeaders resp)
+    xError = T.decodeUtf8Lenient . snd <$> find (\(k, _) -> k == CI.mk "x-error") (responseHeaders resp)
     code = Just . T.pack $ "Got status: " <> show (responseStatusCode resp)
 errorMessageFromException (DecodeFailure msg _) = Just ("Unexpected response from Raindrop: " <> msg)
 errorMessageFromException e = Just . T.pack $ show e
