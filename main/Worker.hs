@@ -27,6 +27,7 @@ import Control.Monad (mfilter)
 import Control.Monad.Catch (MonadCatch, throwM, try)
 import Data.Bifunctor (first, second)
 import qualified Data.CaseInsensitive as CI
+import Data.Char (isControl)
 import Data.List (find, nub)
 import Data.Maybe (fromMaybe, isJust, isNothing, listToMaybe, mapMaybe)
 import Data.Text (Text)
@@ -133,14 +134,18 @@ shortClientError = \case
   UnsupportedContentType _ _ -> "bad response"
   InvalidContentTypeHeader _ -> "bad response"
   where
-    shortXError resp =
-      mfilter (\t -> T.length t <= 40 && not (T.any (== '\n') t)) $
-        T.strip . T.decodeUtf8Lenient . snd <$> find ((== CI.mk "x-error") . fst) (responseHeaders resp)
+    shortXError = mfilter ((<= 40) . T.length) . xErrorText
+
+-- | Raindrop's @x-error@ text, unless it carries control characters, which
+-- would garble the status line.
+xErrorText :: ResponseF a -> Maybe Text
+xErrorText resp =
+  mfilter (not . T.any isControl) $
+    T.strip . T.decodeUtf8Lenient . snd <$> find ((== CI.mk "x-error") . fst) (responseHeaders resp)
 
 errorMessageFromException :: ClientError -> Maybe Text
-errorMessageFromException (FailureResponse _ resp) = xError <|> code
+errorMessageFromException (FailureResponse _ resp) = xErrorText resp <|> code
   where
-    xError = T.decodeUtf8Lenient . snd <$> find (\(k, _) -> k == CI.mk "x-error") (responseHeaders resp)
     code = Just . T.pack $ "Got status: " <> show (responseStatusCode resp)
 errorMessageFromException (DecodeFailure msg _) = Just ("Unexpected response from Raindrop: " <> msg)
 errorMessageFromException e = Just . T.pack $ show e

@@ -13,6 +13,7 @@ import Control.Monad.State.Strict (execState, modify, runState)
 import Data.Bifunctor (first)
 import qualified Data.ByteString as BS
 import qualified Data.ByteString.Char8 as BSC
+import Data.Foldable (for_)
 import Data.Functor.Identity (runIdentity)
 import qualified Data.Map as Map
 import Data.Maybe (fromMaybe)
@@ -213,6 +214,10 @@ errorRenderingTests =
       testCase "an x-error header with invalid UTF-8 renders without throwing (B6)" $ do
         r <- try @SomeException (evaluate (maybe 0 T.length (errorMessageFromException (failureWithXError 404 (BS.pack [0xff, 0xfe, 0x41])))))
         either (assertFailure . ("threw: " <>) . takeWhile (/= '\n') . displayException) (@?= 3) r,
+      testCase "an x-error with control characters is left out" $
+        for_ ["a\rb", "a\tb", "a\ESCb"] $ \x -> do
+          shortClientError (failureWithXError 404 x) @?= "404"
+          fmap (T.isPrefixOf "Got status: ") (errorMessageFromException (failureWithXError 404 x)) @?= Just True,
       testCase "the batch summary uses the short form" $ do
         o <- runCalls (throwingOn [(2, throwIO (failure 404))]) [1, 2, 3]
         map snd (o ^. soFailed) @?= [CallFailed "404"]
