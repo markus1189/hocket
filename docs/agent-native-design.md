@@ -2,8 +2,15 @@
 
 Status: **phases 1–2 implemented** (state mirror, control socket, read
 methods, validated writes; `add_bookmark` and the MCP bridge are still
-open). The protocol as built is documented in the README's
-"Agent Control Socket" section.
+open). The protocol as built is specified in [RPC.md](RPC.md).
+
+Written before the functional-core refactor. The design held; names and
+places below are today's where they describe code. Since the refactor the
+pure `library core` (domain, the one `update :: Msg -> Model -> (Model,
+[Effect])`, the agent protocol and snapshot) knows no brick, socket or
+thread, and the main library around it holds the ports, adapters and the
+shell: the TUI, the headless loop, the agent server and client
+([AGENTS.md, Architecture](../AGENTS.md#architecture-overview)).
 
 ## Goal
 
@@ -69,40 +76,45 @@ Two mechanisms, matching the two halves of "agent-native":
 
 ### Seeing: a snapshot mirror (`TVar AgentSnapshot`)
 
-`HocketState` lives inside Brick's `EventM` and is invisible from other
-threads. Rather than routing reads through the event loop (request/response
+The model (`Model`, `Hocket.App.Model`) lives in the TUI's event loop and
+is invisible from other threads. Rather than routing reads through the event loop (request/response
 events are awkward in Brick — events don't return values), the TUI
 maintains a mirror:
 
 - A new serializable type `AgentSnapshot` containing: all items (id,
   title, link, tags, note, excerpt, created, last update, reminder,
   favorite, **pending action**), the *visible* item order and selection
-  (i.e. after `syncForRender`'s filter pipeline), filter states
-  (`hsFilterQuery`, `hsVideoFilter`, `hsShowFutureReminders`), `hsStatus`,
-  `hsLastUpdated`, the async-op slot (`hsAsyncOp`), and a monotonically
+  (i.e. after `settle`'s filter pipeline), filter states
+  (`mFilterQuery`, `mVideoFilter`, `mShowFutureReminders`), `mStatus`,
+  `mLastUpdated`, the async-op slot (`mAsyncOp`), and a monotonically
   increasing `stateVersion`.
-- `appHandleEvent` already ends every event with `id %= syncForRender`
-  (main/hocket.hs). One more line writes the snapshot to a `TVar` there.
+- Every handled event ends with `settle` and `publish`
+  (`Hocket.Shell.Tui.App`; the headless loop does the same), which writes
+  the snapshot to a `TVar`.
   Because Haskell data is immutable and shared, this is a pointer swap —
   serialization cost is only paid when an agent actually asks.
 - The agent server thread answers all read requests from the `TVar`
   directly; the Brick loop is never blocked by reads.
 
-`stateVersion` (bumped on every handled event) gives agents a cheap way to
-confirm a mutation landed: send command → wait until version advances →
-re-read.
+`stateVersion` (bumped on every handled event) tells agents that
+something changed. It does not say that *their* write landed: a wait can
+wake for an earlier event or another agent's connection, so an agent
+re-reads until the state shows the effect, until a deadline (RPC.md §7.1).
 
 ### Acting: inject events through the existing `BChan`
 
-Agent commands become `HocketEvent`s written to the same `BChan` that
-keystrokes and async completions already use (`trigger` in main/hocket.hs).
+Agent writes become the `Intent` their key produces (`toIntent`), injected
+as a `Msg` into the same `BChan` that keystrokes and async completions
+already use (`injectMsg`, `Hocket.Shell.Interpret`).
 This is the crucial design property: **the agent goes through the same
 funnel as the keyboard**, so every existing invariant holds for free —
 the single-slot async lock (`withAsyncSlot` / `tryAcquireAsyncOp`), flag
 toggle semantics, filter re-rendering, drop-on-busy for concurrent
 fetch/execute.
 
-Much of the surface already exists as id-addressed events (Events.hs):
+Much of the surface already existed as id-addressed events, at the time of
+this design (main/Events.hs, since replaced by `Msg` and `Intent`; today's
+mapping is `toIntent` in `Hocket.Agent.Intent`):
 
 | Agent command            | Existing event                                  |
 |--------------------------|-------------------------------------------------|
@@ -135,7 +147,8 @@ event exists yet:
   refresh.
 
 Mutations are fire-and-forget at the protocol level (ack = "event
-injected"); agents confirm effects via `stateVersion` + re-read. One
+injected"); agents confirm effects by re-reading until they show (see
+above). One
 caveat to handle: `writeBChan` blocks when the channel (size 10) is full —
 the agent server must write with a timeout and report back-pressure as an
 error instead of hanging a request.
@@ -205,6 +218,29 @@ forwards to the socket; it holds no state of its own.
   saying "hocket tui isn't running (or agent socket is disabled)" — the
   agent can relay that to the user verbatim.
 
+### Where it goes: one more adapter, no core change
+
+Checked against the code after the refactor: the bridge is one module in
+the shell, `Hocket.Shell.Mcp`, plus a `mcp` subcommand in main/hocket.hs.
+It speaks `AgentCmd` through the client that `hocket agent` already uses,
+and needs nothing from the core that the core does not export today:
+
+- `tools/list` answers a table in the module, one row per socket method:
+  the tool name (`hocket_` + method), a description and the JSON Schema of
+  its params, as RPC.md §5–6 specifies them.
+- `tools/call hocket_<m> args` is `decodeCmd m (Just args)`
+  (`Hocket.Agent.Protocol`: the same decoder the server runs, so a bad
+  argument fails as it would on the socket), then `callAgent path cmd`
+  (`Hocket.Shell.Agent.Client`) on `resolveAgentSocketPath`
+  (`Hocket.Shell.Agent.Server`), and the reply's `result` or `error` as the
+  tool's content or error.
+- Optionally the write tools confirm their effect the way RPC.md §7.1
+  says, re-reading until a deadline, so that agents get "landed" instead
+  of "queued"; that is client code too.
+- One test keeps the table honest: every command `genAgentCmd` makes, put
+  through `encodeCmd`, names a method the table has. That `decodeCmd`
+  reads those params back is tested already (`Core.Properties`).
+
 ## What the user sees in the TUI
 
 Agent-native should be visible and non-spooky:
@@ -239,8 +275,8 @@ Agent-native should be visible and non-spooky:
 
 - The socket grants **full control of the user's Raindrop account minus
   credentials**: the Raindrop token never crosses the socket, and no
-  method exposes it (the snapshot type simply doesn't include
-  `hsCredentials`).
+  method exposes it (the model does not hold the credentials at all;
+  only the Raindrop adapter and the config loader see them).
 - Socket permissions (`0600`, dir `0700`) limit access to the same user —
   the standard local-IPC trust model (same as tmux, gpg-agent, ssh-agent).
 - Off by default; enabling it is an explicit config/flag choice.
@@ -253,10 +289,9 @@ Agent-native should be visible and non-spooky:
 ## Implementation plan (incremental, each phase shippable)
 
 Phase 1 — mirror + read-only socket
-- New lib modules: `Network.Bookmark.Agent.Snapshot` (types + aeson
-  instances, built from `HocketState`), `Network.Bookmark.Agent.Server`
-  (socket accept loop, JSON-lines framing, read methods incl.
-  `wait_version`).
+- New lib modules: `Hocket.Agent.Snapshot` (types + aeson instances,
+  built from `Model`), `Hocket.Shell.Agent.Server` (socket accept loop,
+  JSON-lines framing, read methods incl. `wait_version`).
 - Wire-up in `main/hocket.hs`: create `TVar`, write it in `appHandleEvent`,
   start server thread when enabled, `[agent]` header indicator.
 - New deps: `network`, `unix`, `stm` (all boring, all in nixpkgs/stackage).
