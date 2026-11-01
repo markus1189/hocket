@@ -170,7 +170,7 @@ genIdle w =
     -- Weights follow the world, so sequences reach fetch, flag, Execute,
     -- deliver instead of mostly dropping commands on a busy slot.
     [ (if null local && idle then 10 else 2, pure (CIntent Refresh)),
-      (if nFlagged >= 3 && idle then 10 else 2, pure (CIntent Execute)),
+      (if ready && idle then 10 else 2, pure (CIntent Execute)),
       (if null (wQueue w) || unarmed then 2 else 10, pure Quiesce),
       (if null (wQueue w) || unarmed then 1 else 6, pure DeliverOne),
       (2, pure (CIntent ClearAllFlags)),
@@ -179,8 +179,8 @@ genIdle w =
       (2, CIntent . SetFilter <$> Gen.element ["", "git", "you", "video"]),
       (2, FailNext <$> Gen.element [F.StepFetch, F.StepArchive, F.StepSetReminders, F.StepRemoveReminders] <*> Gen.element [ItemScoped, Global] <*> genOffset)
     ]
-      <> [(if nFlagged >= 3 then 3 else 8, CIntent <$> keyIntent) | not (null local)]
-      <> [(if nFlagged >= 3 then 3 else 8, CIntent <$> (SetFlag <$> Gen.element local <*> Gen.frequency [(1, pure FlagArchive), (3, pure FlagReminder), (2, pure FlagRemoveReminder), (1, pure FlagNone)] <*> pure now)) | not (null local)]
+      <> [(if ready then 3 else 8, CIntent <$> keyIntent) | not (null local)]
+      <> [(if ready then 3 else 8, CIntent <$> (SetFlag <$> Gen.element local <*> Gen.frequency [(1, pure FlagArchive), (4, pure FlagReminder), (3, pure FlagRemoveReminder), (1, pure FlagNone)] <*> pure now)) | not (null local)]
       <> [(2, CIntent . Select <$> Gen.element visible) | not (null visible)]
       <> [(2, ServerMove <$> Gen.element unsorted) | not (null unsorted)]
       <> [(2, ServerEdit <$> Gen.element unsorted) | not (null unsorted)]
@@ -193,7 +193,7 @@ genIdle w =
            not (null steps)
          ]
       -- "Item 2 of 5 -> 503": a global error after earlier successes.
-      <> [ (12, Gen.element multi >>= \(st, n) -> FailNext st Global <$> Gen.int (Range.constant 1 (n - 1)))
+      <> [ (40, Gen.element multi >>= \(st, n) -> FailNext st Global <$> Gen.int (Range.constant 1 (n - 1)))
          | StartBatch plan <- wQueue w,
            let multi = [(st, n) | (st, n) <- stepSizes plan, st /= F.StepArchive, n >= 2],
            not (null multi)
@@ -215,6 +215,10 @@ genIdle w =
     local = Map.keys (wModel w ^. mContents)
     idle = isNothing (wModel w ^. mAsyncOp)
     nFlagged = length (filter ((/= None) . fst) (Map.elems (wModel w ^. mContents)))
+    -- Execute once a reminder step would have two items, so an abort can
+    -- follow a success; or once enough is flagged anyway.
+    flags = map fst (Map.elems (wModel w ^. mContents))
+    ready = length [() | ToBeReminded _ <- flags] >= 2 || length (filter (== ReminderToBeRemoved) flags) >= 2 || nFlagged >= 5
     visible = map (^. biId) (V.toList (wModel w ^. mVisible))
     unsorted = [k | (k, i) <- Map.toList (wFake w ^. frItems), i ^. biCollectionId == -1]
     target = Gen.frequency [(2, pure Selected), (1, ById <$> Gen.element local)]
