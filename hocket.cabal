@@ -90,6 +90,7 @@ test-suite test
   main-is:             test.hs
   other-modules:       AgentClient
                      , AgentServer
+                     , CharacterizationTests
                      , ClassifyTests
                      , Events
                      , Keys
