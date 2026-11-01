@@ -114,6 +114,7 @@ test-suite test
                      , FixtureTests
                      , Gen
                      , IntentTests
+                     , VisibleTests
                      , KeyIntentTests
                      , PlanTests
                      , ReminderTests

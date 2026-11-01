@@ -70,6 +70,8 @@ module Network.Bookmark.Ui.State
     removeReminderFromItems,
     SortByUpdated,
     syncForRender,
+    visibleItems,
+    getSortDate,
     isVideoBookmark,
   )
 where
@@ -424,28 +426,34 @@ syncForRender s =
     & itemList . L.listSelectedL .~ (view (itemList . L.listSelectedL) s <|> (allSortedItems ^? _head $> 0))
     & itemList %~ adjustFocus
   where
-    allSortedItems =
-      V.fromList $
-        map (\(Down (SBU x)) -> x) $
-          SL.fromSortedList $
-            SL.toSortedList $
-              map
-                (Down . SBU . snd)
-                filteredContents
+    allSortedItems = visibleItems (s ^. hsShowFutureReminders) (s ^. hsVideoFilter) (s ^. hsFilterQuery) (s ^. hsContents)
+
+-- | The items the list shows, newest sort date ('getSortDate') first: the
+-- future-reminder, video and text filters, in that order.
+visibleItems :: Bool -> VideoFilterMode -> Text -> Map BookmarkItemId (PendingAction, BookmarkItem) -> V.Vector BookmarkItem
+visibleItems showFutureReminders videoFilter query contents =
+  V.fromList $
+    map (\(Down (SBU x)) -> x) $
+      SL.fromSortedList $
+        SL.toSortedList $
+          map
+            (Down . SBU . snd)
+            filteredContents
+  where
     filteredContents =
       let reminderFiltered =
-            if s ^. hsShowFutureReminders
-              then Map.elems (s ^. hsContents)
-              else filter (not . hasFutureReminder . snd) (Map.elems (s ^. hsContents))
+            if showFutureReminders
+              then Map.elems contents
+              else filter (not . hasFutureReminder . snd) (Map.elems contents)
           videoFiltered =
-            case s ^. hsVideoFilter of
+            case videoFilter of
               NoVideoFilter -> reminderFiltered
               ShowOnlyVideos -> filter (isVideoBookmark . snd) reminderFiltered
               HideVideos -> filter (not . isVideoBookmark . snd) reminderFiltered
           textFiltered =
-            if T.null (s ^. hsFilterQuery)
+            if T.null query
               then videoFiltered
-              else filter (fuzzyFilterMatch (s ^. hsFilterQuery) . bookmarkSearchText . snd) videoFiltered
+              else filter (fuzzyFilterMatch query . bookmarkSearchText . snd) videoFiltered
        in textFiltered
 
     hasFutureReminder :: BookmarkItem -> Bool
