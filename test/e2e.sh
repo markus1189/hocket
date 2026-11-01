@@ -317,13 +317,74 @@ scenario_agent_errors() {
   finish
 }
 
+# on ID KEY: select ID, then press KEY on it.
+on() {
+  agent select_item "$1" >/dev/null && wait_for 5 "$1 to be selected" state_is ".selected == \"$1\"" && key "$2"
+}
+
+# The flag keys: s and u, J/K between flagged items, U, X with nothing
+# flagged, a + X, and r as an incremental refresh over a full store.
+scenario_keys_flags() {
+  start keys-flags seed-basic.json || return 1
+  on 1001 s && wait_for 5 "s to flag 1001" action_is 1001 reminder || return 1
+  on 1001 u && wait_for 5 "u to unflag 1001" action_is 1001 none || return 1
+  flag 1002 archive && flag 1004 reminder || return 1
+  nav g 1001 && nav J 1002 && nav J 1004 && nav K 1002 || return 1
+  key U && wait_for 5 "U to clear every flag" state_is '.counts.archive_flagged == 0 and .counts.reminder_flagged == 0' || return 1
+  key X && settle || return 1
+  state_is '.async_op == null and .status == null' >/dev/null || {
+    fail "X with nothing flagged started something"
+    return 1
+  }
+  on 1004 a && wait_for 5 "a to flag 1004" action_is 1004 archive || return 1
+  key X && settle || return 1
+  local before
+  before=$(agent get_state | jq '.result.last_updated')
+  key r && settle || return 1
+  wait_for 5 "the refresh to see the archived 1004" state_is ".last_updated > $before and .counts.total == 3" || return 1
+  finish
+}
+
+# The view keys, then navigation against what the list shows: with five
+# items in a 50-row pane every page move reaches an end.
+scenario_keys_view() {
+  start keys-view seed-mixed.json || return 1
+  key v && wait_for 5 "v: only videos" state_is '.counts.visible == 2' || return 1
+  key V && wait_for 5 "V: videos hidden" state_is '.counts.visible == 3' || return 1
+  key V && wait_for 5 "V: no video filter" state_is '.counts.visible == 5' || return 1
+  key S && wait_for 5 "S: the reminder shown" state_is '.counts.visible == 6' || return 1
+  key S && wait_for 5 "S: the reminder hidden" state_is '.counts.visible == 5' || return 1
+  local ids
+  mapfile -t ids < <(agent list_items | jq -r '.result[].id')
+  [ "${ids[*]}" = "1001 1002 1004 1005 1006" ] || {
+    fail "unexpected list: ${ids[*]}"
+    return 1
+  }
+  nav g 1001 && nav End 1006 && nav k 1005 && nav Up 1004 && nav Home 1001 &&
+    nav C-f 1006 && nav C-b 1001 && nav C-d 1006 && nav C-u 1001 && nav End 1006 && nav PPage 1001 || return 1
+  finish
+}
+
+# The filter editor: C-w deletes a word, Esc leaves and clears, and a
+# locked query filters; finish then quits with Q.
+scenario_filter_editor() {
+  start filter-editor seed-basic.json || return 1
+  key / && tm send-keys -t "$name" -l "e2e item" || return 1
+  wait_for 5 'the query "e2e item"' state_is '.filter_query == "e2e item"' || return 1
+  key C-w && wait_for 5 'C-w to leave "e2e "' state_is '.filter_query == "e2e "' || return 1
+  key C-w && wait_for 5 "C-w to clear the query" state_is '.filter_query == ""' || return 1
+  key Escape && filter_lock 1002 || return 1
+  wait_for 5 "only 1002 visible" state_is '.counts.visible == 1' || return 1
+  finish
+}
+
 # nav KEY ID: press KEY, then ID must be selected.
 nav() {
   key "$1"
   wait_for 5 "$1 to select $2" state_is ".selected == \"$2\""
 }
 
-scenarios=(all-three archive-503 reminder-404 empty-fetch key-a filter-typing navigation agent-flags agent-view agent-errors)
+scenarios=(all-three archive-503 reminder-404 empty-fetch key-a filter-typing navigation agent-flags agent-view agent-errors keys-flags keys-view filter-editor)
 (($# == 0)) || scenarios=("$@")
 for s in "${scenarios[@]}"; do
   if "scenario_${s//-/_}"; then
