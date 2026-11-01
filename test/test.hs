@@ -3,7 +3,7 @@
 {-# LANGUAGE TypeApplications #-}
 
 import AgentClient (callAgent, isChannelFullError)
-import AgentServer (AgentEnv (..), cleanupAgentSocket, runAgentServer, socketDirIsOurs)
+import AgentServer (AgentEnv (..), cleanupAgentSocket, newBoundSocket, runAgentServer, socketDirIsOurs)
 import BatchTests (batchTests)
 import Brick.BChan (BChan, newBChan, readBChan, writeBChan)
 import Brick.Widgets.Edit (applyEdit)
@@ -61,7 +61,7 @@ import Network.Socket
   )
 import Properties (propertyTests)
 import ReminderTests (reminderTests)
-import System.Directory (createDirectory, createDirectoryIfMissing, doesDirectoryExist, doesFileExist, getTemporaryDirectory, removeDirectoryRecursive, removeFile)
+import System.Directory (createDirectory, createDirectoryIfMissing, doesDirectoryExist, doesFileExist, getTemporaryDirectory, pathIsSymbolicLink, removeDirectoryRecursive, removeFile)
 import System.FilePath ((</>))
 import System.IO
   ( BufferMode (LineBuffering),
@@ -71,9 +71,10 @@ import System.IO
     hSetBuffering,
   )
 import System.IO.Temp (withSystemTempDirectory)
-import System.Posix.Files (fileMode, getFileStatus, setFileMode)
+import System.Posix.Files (createSymbolicLink, fileMode, getFileStatus, setFileMode)
 import System.Posix.Process (getProcessID)
 import System.Posix.Time (epochTime)
+import System.Timeout (timeout)
 import Test.Tasty
 import Test.Tasty.Golden (goldenVsString)
 import Test.Tasty.HUnit
@@ -881,19 +882,30 @@ withAgentServer action = withSystemTempDirectory "hk" $ \dir -> do
   -- SetAgentClients events (+1, then -1 from its own thread, so possibly
   -- after the test's first events). readAgentInjected skips them; drainUI and
   -- any test asserting exact BChan contents must account for them.
-  withAsync (runAgentServer path env) $ \_ -> do
+  bound <- newBoundSocket
+  withAsync (runAgentServer bound path env) $ \_ -> do
     waitUntilReachable 100 path
     action snapVar events path
 
 -- | The TUI's socket lifecycle: decide ownership, serve until reachable,
 -- stop, clean up. Only ever pointed at a fresh temp root.
-serveThenCleanup :: FilePath -> IO ()
-serveThenCleanup path = do
+-- The extra action runs while the server is up.
+serveThenCleanup :: FilePath -> IO () -> IO ()
+serveThenCleanup path whileUp = do
   ours <- socketDirIsOurs path
-  snapVar <- newTVarIO emptySnapshot
-  let env = AgentEnv {aeSnapshot = snapVar, aeInject = const (pure True), aeReminderTime = pure (read "2020-01-01 07:00:00 UTC")}
-  withAsync (runAgentServer path env) $ \_ -> waitUntilReachable 100 path
-  cleanupAgentSocket ours path
+  bound <- newBoundSocket
+  withAsync (runAgentServer bound path quietEnv) $ \_ -> waitUntilReachable 100 path >> whileUp
+  cleanupAgentSocket bound ours path
+
+quietEnv :: AgentEnv
+quietEnv = AgentEnv {aeSnapshot = undefined, aeInject = const (pure True), aeReminderTime = pure (read "2020-01-01 07:00:00 UTC")}
+
+-- | Start a server on a path that holds something else; under the old
+-- reclaim it unlinked that and served forever, hence the timeout.
+startOnOccupied :: FilePath -> IO (Maybe (Either IOException ()))
+startOnOccupied path = do
+  bound <- newBoundSocket
+  timeout 2000000 (try @IOException (runAgentServer bound path quietEnv))
 
 -- | Drain (up to n) injected events from the BChan, returning the UiCommands.
 drainUI :: BChan HocketEvent -> Int -> IO [UiCommand]
@@ -1038,7 +1050,8 @@ agentServerIntegrationTests =
                     pure True,
                   aeReminderTime = pure (read "2020-01-01 07:00:00 UTC" :: UTCTime)
                 }
-        withAsync (runAgentServer path env) $ \_ -> do
+        bound <- newBoundSocket
+        withAsync (runAgentServer bound path env) $ \_ -> do
           waitUntilReachable 50 path
           st <- getFileStatus dir
           (fileMode st `mod` 0o1000) @?= 0o755
@@ -1051,20 +1064,50 @@ agentServerIntegrationTests =
           let dir = root </> "shared"
           createDirectory dir
           writeFile (dir </> "keep") "x"
-          serveThenCleanup (dir </> "s.sock")
+          serveThenCleanup (dir </> "s.sock") (pure ())
           doesFileExist (dir </> "keep") >>= (@?= True)
           doesDirectoryExist dir >>= (@?= True),
       testCase "cleanup keeps a pre-existing empty directory (B7)" $
         withSystemTempDirectory "hk" $ \root -> do
           let dir = root </> "empty"
           createDirectory dir
-          serveThenCleanup (dir </> "s.sock")
+          serveThenCleanup (dir </> "s.sock") (pure ())
           doesDirectoryExist dir >>= (@?= True),
       testCase "cleanup removes a directory the server created" $
         withSystemTempDirectory "hk" $ \root -> do
           let dir = root </> "ours"
-          serveThenCleanup (dir </> "s.sock")
+          serveThenCleanup (dir </> "s.sock") (pure ())
           doesDirectoryExist dir >>= (@?= False),
+      testCase "cleanup keeps a created directory that gained other files (B7b)" $
+        withSystemTempDirectory "hk" $ \root -> do
+          let dir = root </> "ours"
+          serveThenCleanup (dir </> "s.sock") (writeFile (dir </> "other") "x")
+          doesFileExist (dir </> "other") >>= (@?= True)
+          doesDirectoryExist dir >>= (@?= True),
+      testCase "a regular file at the socket path is refused and survives (B7b)" $
+        withSystemTempDirectory "hk" $ \root -> do
+          let path = root </> "notes.txt"
+          writeFile path "precious"
+          r <- startOnOccupied path
+          fmap (either (const "failed") (const "ran")) r @?= Just "failed"
+          readFile path >>= (@?= "precious"),
+      testCase "a symlink at the socket path is not followed or removed (B7b)" $
+        withSystemTempDirectory "hk" $ \root -> do
+          let target = root </> "target"
+              path = root </> "link"
+          writeFile target "precious"
+          createSymbolicLink target path
+          r <- startOnOccupied path
+          fmap (either (const "failed") (const "ran")) r @?= Just "failed"
+          pathIsSymbolicLink path >>= (@?= True)
+          readFile target >>= (@?= "precious"),
+      testCase "a losing second instance does not unlink the live socket (B7b)" $
+        withAgentServer $ \_ _ path -> do
+          bound2 <- newBoundSocket
+          r <- try @IOException (runAgentServer bound2 path quietEnv)
+          assertBool "second bind should fail" (isLeft r)
+          cleanupAgentSocket bound2 False path
+          waitUntilReachable 1 path,
       testCase "a second server on the same path fails instead of hijacking" $
         withAgentServer $ \snapVar events path -> do
           -- First server is live on `path`. Attempt to start a second one on
@@ -1085,7 +1128,8 @@ agentServerIntegrationTests =
           -- server 2's bind can genuinely be rejected rather than racing
           -- ahead and winning the path (which would hang us in accept).
           waitUntilReachable 50 path
-          result <- try @IOException (runAgentServer path env2)
+          bound2 <- newBoundSocket
+          result <- try @IOException (runAgentServer bound2 path env2)
           assertBool
             "expected the second server's bind to fail (address already in use)"
             (isLeft result)

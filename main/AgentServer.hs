@@ -10,6 +10,8 @@
 module AgentServer
   ( AgentEnv (..),
     runAgentServer,
+    BoundSocket,
+    newBoundSocket,
     socketDirIsOurs,
     cleanupAgentSocket,
     resolveAgentSocketPath,
@@ -32,6 +34,8 @@ import Data.Aeson (Value, eitherDecodeStrict, encode, object, (.=))
 import qualified Data.ByteString.Char8 as BS
 import qualified Data.ByteString.Lazy.Char8 as BSL
 import Data.Char (isSpace)
+import Data.Foldable (traverse_)
+import Data.IORef (IORef, newIORef, readIORef, writeIORef)
 import qualified Data.Text as T
 import Data.Time (UTCTime)
 import Events
@@ -88,7 +92,8 @@ import System.IO
     hClose,
     hSetBuffering,
   )
-import System.Posix.Files (setFileMode)
+import System.Posix.Files (deviceID, fileID, getSymbolicLinkStatus, isSocket, setFileMode)
+import System.Posix.Types (DeviceID, FileID)
 import System.Posix.User (getEffectiveUserID)
 import System.Timeout (timeout)
 
@@ -105,20 +110,26 @@ data AgentEnv = AgentEnv
 -- connect: a live Unix-domain listener accepts it; a stale one (whose owning
 -- process is gone) refuses it with ECONNREFUSED. A live competitor is left
 -- intact so the subsequent 'bind' raises the kernel's canonical
--- "address already in use" instead of us silently hijacking it.
+-- "address already in use" instead of us silently hijacking it. Anything
+-- but a socket (checked with lstat, so a symlink counts as "anything") is
+-- refused: connect reports ECONNREFUSED for a regular file too, and an
+-- explicit --agent-socket-path may name the user's own file (B7b).
 reclaimStaleSocket :: FilePath -> IO ()
 reclaimStaleSocket path = do
-  live <-
-    try @IOException $ do
-      probe <- socket AF_UNIX Stream defaultProtocol
-      connect probe (SockAddrUnix path)
-      close probe
-  case live of
-    Right () -> pure () -- a live listener owns the path; leave it for 'bind'
-    Left _ ->
-      -- Not reachable via a listener. Only unlink if a (dead) socket file
-      -- actually exists; a wholly absent path is not ours to remove.
-      void (try @IOException (removeFile path))
+  existing <- try @IOException (getSymbolicLinkStatus path)
+  case existing of
+    Left _ -> pure () -- nothing there; 'bind' creates it
+    Right st
+      | not (isSocket st) -> ioError (userError (path <> " exists and is not a socket"))
+      | otherwise -> do
+          live <-
+            try @IOException $ do
+              probe <- socket AF_UNIX Stream defaultProtocol
+              connect probe (SockAddrUnix path)
+              close probe
+          case live of
+            Right () -> pure () -- a live listener owns the path; leave it for 'bind'
+            Left _ -> void (try @IOException (removeFile path))
 
 -- | Default socket location: @$XDG_RUNTIME_DIR/hocket/control.sock@, falling
 -- back to a per-uid directory under /tmp.
@@ -131,26 +142,41 @@ resolveAgentSocketPath = do
       uid <- getEffectiveUserID
       pure ("/tmp" </> ("hocket-" <> show uid) </> "control.sock")
 
+-- | The socket this instance bound, by device and inode, so cleanup never
+-- unlinks a file some other process put at the path.
+newtype BoundSocket = BoundSocket (IORef (Maybe (DeviceID, FileID)))
+
+newBoundSocket :: IO BoundSocket
+newBoundSocket = BoundSocket <$> newIORef Nothing
+
 -- | Whether 'runAgentServer' will create the socket's directory, making it
 -- hocket's to remove on exit. Ask before starting the server.
 socketDirIsOurs :: FilePath -> IO Bool
 socketDirIsOurs = fmap not . doesDirectoryExist . takeDirectory
 
--- | On graceful exit, remove the socket file, and its directory only if
--- hocket created it ('socketDirIsOurs'). 'removeDirectory' refuses a
--- non-empty directory, so even then nothing else can go. An explicit
--- --agent-socket-path into /tmp or $HOME must leave that directory alone
--- (B7). Best-effort: a failed cleanup never changes the exit outcome.
-cleanupAgentSocket :: Bool -> FilePath -> IO ()
-cleanupAgentSocket ours path = do
-  void (try @SomeException (removeFile path))
-  when ours (void (try @SomeException (removeDirectory (takeDirectory path))))
+-- | On graceful exit, and only if this instance bound: remove the socket
+-- if the path still holds that same socket (an instance that lost the bind
+-- must not unlink the winner's, B7b), and the directory if hocket created
+-- it ('socketDirIsOurs'). 'removeDirectory' refuses a non-empty directory,
+-- and an explicit --agent-socket-path into /tmp or $HOME leaves that
+-- directory alone (B7). Best-effort: a failed cleanup never changes the
+-- exit outcome.
+cleanupAgentSocket :: BoundSocket -> Bool -> FilePath -> IO ()
+cleanupAgentSocket (BoundSocket ref) ours path =
+  readIORef ref
+    >>= traverse_
+      ( \boundId -> do
+          void . try @SomeException $ do
+            st <- getSymbolicLinkStatus path
+            when (isSocket st && (deviceID st, fileID st) == boundId) (removeFile path)
+          when ours (void (try @SomeException (removeDirectory (takeDirectory path))))
+      )
 
 -- | Bind the control socket and serve clients until killed. Never returns
 -- normally; exceptions propagate to the caller (which surfaces them in the
 -- TUI status bar).
-runAgentServer :: FilePath -> AgentEnv -> IO ()
-runAgentServer path env = do
+runAgentServer :: BoundSocket -> FilePath -> AgentEnv -> IO ()
+runAgentServer (BoundSocket ref) path env = do
   let dir = takeDirectory path
   dirExisted <- doesDirectoryExist dir
   createDirectoryIfMissing True dir
@@ -165,6 +191,8 @@ runAgentServer path env = do
   clients <- newTVarIO (0 :: Int)
   bracket (socket AF_UNIX Stream defaultProtocol) close $ \sock -> do
     bind sock (SockAddrUnix path)
+    st <- getSymbolicLinkStatus path
+    writeIORef ref (Just (deviceID st, fileID st))
     setFileMode path 0o600
     listen sock 5
     forever $ do

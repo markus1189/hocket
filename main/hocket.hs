@@ -17,7 +17,7 @@ module Main
 where
 
 import AgentClient (runAgentCommand)
-import AgentServer (AgentEnv (..), cleanupAgentSocket, resolveAgentSocketPath, runAgentServer, socketDirIsOurs)
+import AgentServer (AgentEnv (..), BoundSocket, cleanupAgentSocket, newBoundSocket, resolveAgentSocketPath, runAgentServer, socketDirIsOurs)
 import Brick
   ( App (..),
     AttrMap,
@@ -741,17 +741,19 @@ runTui mAgentOpt isFixture port s0 = do
         (app tz isFixture (Env events port) (snd <$> mAgent))
         s0
     )
-    `finally` for_ mAgent (\((path, ours), _) -> cleanupAgentSocket ours path)
+    `finally` for_ mAgent (\((path, ours, bound), _) -> cleanupAgentSocket bound ours path)
 
 -- | Bind the agent control socket and keep serving it in the background.
 -- Server failures surface in the TUI status bar instead of killing the app.
--- The path comes back with whether hocket owns its directory, for cleanup.
-startAgentServer :: BChan HocketEvent -> AgentSocketOpt -> IO ((FilePath, Bool), TVar AgentSnapshot)
+-- The path comes back with what cleanup needs: whether hocket owns its
+-- directory, and the socket it bound.
+startAgentServer :: BChan HocketEvent -> AgentSocketOpt -> IO ((FilePath, Bool, BoundSocket), TVar AgentSnapshot)
 startAgentServer events opt = do
   path <- case opt of
     AgentSocketDefault -> resolveAgentSocketPath
     AgentSocketAt p -> pure p
   ours <- socketDirIsOurs path
+  bound <- newBoundSocket
   snapVar <- newTVarIO emptySnapshot
   let env =
         AgentEnv
@@ -760,7 +762,7 @@ startAgentServer events opt = do
             aeReminderTime = nextDayAt7AM
           }
   _ <- async $ do
-    r <- try @SomeException (runAgentServer path env)
+    r <- try @SomeException (runAgentServer bound path env)
     case r of
       Left e -> do
         -- The status line is single-lane and gets overwritten by the very
@@ -773,7 +775,7 @@ startAgentServer events opt = do
           )
         void (writeBChanNonBlocking events (setAgentErrorEvt (Just (T.pack (show e)))))
       Right () -> pure ()
-  pure ((path, ours), snapVar)
+  pure ((path, ours, bound), snapVar)
 
 runAddCommand :: Text -> Maybe Text -> [Text] -> IO ()
 runAddCommand url mCollection tags = do
