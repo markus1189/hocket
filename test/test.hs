@@ -1248,6 +1248,45 @@ agentServerIntegrationTests =
             healed <- waitFor 100 ((== Just 1) <$> latestCount posted)
             hClose h
             healed @?= True,
+      testCase "a permanently full channel is retried with a backoff, not a spin" $
+        withSystemTempDirectory "hk" $ \root -> do
+          let path = root </> "s.sock"
+          attempts <- newIORef (0 :: Int)
+          snapVar <- newTVarIO (buildTestSnapshot 1)
+          let inject m = case m of
+                I.AgentClients _ -> atomicModifyIORef' attempts (\n -> (n + 1, False))
+                _ -> pure True
+              env = AgentEnv {aeSnapshot = snapVar, aeInject = inject, aeNow = pure testNow}
+          bound <- newBoundSocket
+          withAsync (runAgentServer bound path env) $ \_ -> do
+            waitUntilReachable 100 path
+            h <- connectAgentClient path
+            _ <- sendRequest h "{\"id\":1,\"method\":\"get_state\"}"
+            writeIORef attempts 0
+            threadDelay 1000000
+            n <- readIORef attempts
+            hClose h
+            -- 50 ms backoff: about 20 a second; a spin makes thousands.
+            assertBool ("attempts in 1 s: " <> show n) (n >= 1 && n <= 60),
+      testCase "a persistent post failure is reported once, not on every retry" $
+        withSystemTempDirectory "hk" $ \root -> do
+          let path = root </> "s.sock"
+          reports <- newIORef (0 :: Int)
+          snapVar <- newTVarIO (buildTestSnapshot 1)
+          let inject m = case m of
+                I.AgentClients _ -> throwIO (userError "post failed")
+                _ -> atomicModifyIORef' reports (\n -> (n + 1, True))
+              env = AgentEnv {aeSnapshot = snapVar, aeInject = inject, aeNow = pure testNow}
+          bound <- newBoundSocket
+          withAsync (runAgentServer bound path env) $ \_ -> do
+            waitUntilReachable 100 path
+            h <- connectAgentClient path
+            _ <- sendRequest h "{\"id\":1,\"method\":\"get_state\"}"
+            -- About 10 failed retries at 50 ms; one streak, one report.
+            threadDelay 500000
+            n <- readIORef reports
+            hClose h
+            n @?= 1,
       testCase "the client count returns to 0 when clients leave" $
         withSystemTempDirectory "hk" $ \root -> do
           let path = root </> "s.sock"
