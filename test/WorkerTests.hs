@@ -15,6 +15,7 @@ import qualified Data.ByteString as BS
 import qualified Data.ByteString.Char8 as BSC
 import Data.Foldable (for_)
 import Data.Functor.Identity (runIdentity)
+import Data.IORef (modifyIORef', newIORef, readIORef)
 import qualified Data.Map as Map
 import Data.Maybe (fromMaybe)
 import qualified Data.Text as T
@@ -183,13 +184,14 @@ stepExceptionTests =
       testCase "a ClientError is scoped by classify: a 404 fails only that item" $ do
         o <- runCalls (throwingOn [(2, throwIO (failure 404))]) [1, 2, 3]
         (o ^. soOk, map fst (o ^. soFailed), o ^. soAborted) @?= ([1, 3], [2], Nothing),
-      testCase "a step that throws before its first call skips every item" $ do
-        o <- guardStep [1 :: Int, 2] (throwIO (userError "no log dir"))
-        (o ^. soOk, o ^. soSkipped, o ^. soAborted) @?= ([], [1, 2], Just "user error (no log dir)"),
-      testCase "the batch reports such a step as aborted, holds the slot, and skips the rest" $ do
-        let trace = batchTrace (batchEvents (abortedBefore [BookmarkItemId "a"] "user error (no log dir)") remindersOk)
-        map fst trace @?= freedByLastOnly (map fst trace)
-        snd (last trace) @?= Just "archive 0/1 (aborted: user error (no log dir)) · reminders skipped: user error (no log dir)"
+      testCase "a step posts its computed outcome, even when a later call threw" $ do
+        posted <- newIORef []
+        let call bid = if bid == BookmarkItemId "b" then throwIO (userError "disk full") else pure True
+        _ <- runStep (\e -> modifyIORef' posted (<> [e])) "archiving" archivedItemsEvt (runCalls call (map BookmarkItemId ["a", "b", "c"]))
+        readIORef posted >>= \case
+          [HocketUi (SetStatus (Just "archiving")), HocketAsync (ArchivedItems o)] ->
+            (o ^. soOk, o ^. soSkipped, o ^. soAborted) @?= ([BookmarkItemId "a"], map BookmarkItemId ["b", "c"], Just "user error (disk full)")
+          other -> assertFailure ("posted: " <> show other)
     ]
   where
     remindersOk = scriptedOutcome [((BookmarkItemId "r", batchTime), Right True)]

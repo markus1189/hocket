@@ -62,7 +62,7 @@ import Control.Lens.Operators
 import Control.Monad (unless, void)
 import qualified Control.Monad.Catch as Catch
 import Control.Monad.IO.Class (liftIO)
-import Control.Monad.Logger (LoggingT, logErrorN, logInfoN, runFileLoggingT, runStdoutLoggingT)
+import Control.Monad.Logger (LoggingT, defaultOutput, logErrorN, logInfoN, runLoggingT, runStdoutLoggingT)
 import Control.Monad.Loops (unfoldrM)
 import Data.Bifunctor (first)
 import Data.Foldable (for_)
@@ -123,10 +123,10 @@ import Network.Bookmark.Agent.Protocol
   )
 import Network.Bookmark.Agent.Snapshot (AgentSnapshot, asVersion, emptySnapshot, takeSnapshot)
 import Network.Bookmark.Batch (StepOutcome, concatOutcome, soOk)
+import Network.Bookmark.Port (RaindropPort (..))
 import Network.Bookmark.Reminder (reminderPolicy)
 import Network.Bookmark.Types
-  ( BookmarkCredentials,
-    BookmarkItem,
+  ( BookmarkItem,
     BookmarkItemBatch (..),
     BookmarkItemId (..),
     BookmarkRequest (AddBookmark, BatchArchiveBookmarks, RemoveReminder, RetrieveBookmarks, SetReminder),
@@ -163,7 +163,6 @@ import Network.Bookmark.Ui.State
     hsAgentClients,
     hsAgentError,
     hsContents,
-    hsCredentials,
     hsFilterActive,
     hsFilterEditor,
     hsFilterQuery,
@@ -209,8 +208,7 @@ import Network.Bookmark.Ui.Sync
     spSearch,
   )
 import Network.Bookmark.Ui.Widgets (sanitizeForDisplay)
-import Network.Raindrop (raindrop)
-import qualified Network.Raindrop as R
+import Network.Raindrop (servantPort)
 import Network.URI
   ( URI (uriAuthority, uriPath, uriQuery),
     URIAuth (uriRegName),
@@ -252,7 +250,7 @@ import System.Directory (XdgDirectory (..), createDirectoryIfMissing, doesFileEx
 import System.Environment (lookupEnv)
 import System.Exit (ExitCode (..), exitFailure)
 import System.FilePath (takeDirectory, (</>))
-import System.IO (hClose, hPutStr, hPutStrLn, stderr)
+import System.IO (BufferMode (LineBuffering), IOMode (AppendMode), hClose, hPutStr, hPutStrLn, hSetBuffering, stderr, withFile)
 import System.Process
   ( CreateProcess,
     createProcess,
@@ -260,7 +258,7 @@ import System.Process
     waitForProcess,
   )
 import System.Process.Internals (StdStream (CreatePipe))
-import Worker (errorMessageFromException, exceptionMessage, fetchResultEvents, guardStep, postOutcome, runBatch, runCalls, trySync)
+import Worker (errorMessageFromException, exceptionMessage, fetchResultEvents, runBatch, runCalls, runStep, trySync)
 
 makeLensesFor [("std_in", "stdIn"), ("std_err", "stdErr"), ("std_out", "stdOut")] ''CreateProcess
 
@@ -415,6 +413,10 @@ opts =
         <> header "hocket - Your command-line bookmark helper"
     )
 
+-- | What the async handlers need from outside: where to post events, and
+-- Raindrop. The keyboard and UI handlers only post, so they take the channel.
+data Env = Env {envEvents :: !(BChan HocketEvent), envPort :: !RaindropPort}
+
 trigger :: BChan HocketEvent -> HocketEvent -> IO ()
 trigger = writeBChan
 
@@ -500,11 +502,11 @@ vtyEventHandlerNormal _ e = do
   zoom itemList (handleListEventVi handleListEvent e)
 
 internalEventHandler ::
-  BChan HocketEvent ->
+  Env ->
   HocketEvent ->
   EventM Name HocketState ()
-internalEventHandler es (HocketAsync e) = asyncCommandEventHandler es e
-internalEventHandler es (HocketUi e) = uiCommandEventHandler es e
+internalEventHandler env (HocketAsync e) = asyncCommandEventHandler env e
+internalEventHandler env (HocketUi e) = uiCommandEventHandler (envEvents env) e
 
 -- | Run an async-op body only when the single slot is free; otherwise drop the
 -- op (matching the old 'unlessAsyncRunning' drop-on-busy semantics).
@@ -521,47 +523,41 @@ nextDayAt7AM :: IO UTCTime
 nextDayAt7AM = reminderPolicy <$> getCurrentTimeZone <*> getCurrentTime
 
 -- The three 'X' sub-op bodies, run sequentially by 'runBatchOp'.
-runArchiveOp :: BChan HocketEvent -> HocketState -> IO (StepOutcome () Text)
-runArchiveOp es s = do
-  es `trigger` setStatusEvt (Just "archiving")
-  let items = getItemsWithPendingAction ToBeArchived s
-  outcome <- guardStep (map (view biId) items) (performArchive (s ^. hsCredentials) items)
-  postOutcome (trigger es) archivedItemsEvt outcome
+runArchiveOp :: Env -> HocketState -> IO (StepOutcome () Text)
+runArchiveOp env s =
+  runStep (trigger (envEvents env)) "archiving" archivedItemsEvt $
+    performArchive (envPort env) (getItemsWithPendingAction ToBeArchived s)
 
-runSetRemindersOp :: BChan HocketEvent -> HocketState -> IO (StepOutcome () Text)
-runSetRemindersOp es s = do
-  es `trigger` setStatusEvt (Just "setting reminders")
-  let items = getItemsToBeReminded s
-  outcome <- guardStep items (performSetReminders (s ^. hsCredentials) items)
-  postOutcome (trigger es) remindersSetEvt (first (first (view biId)) outcome)
+runSetRemindersOp :: Env -> HocketState -> IO (StepOutcome () Text)
+runSetRemindersOp env s =
+  runStep (trigger (envEvents env)) "setting reminders" remindersSetEvt $
+    first (first (view biId)) <$> performSetReminders (envPort env) (getItemsToBeReminded s)
 
-runRemoveRemindersOp :: BChan HocketEvent -> HocketState -> IO (StepOutcome () Text)
-runRemoveRemindersOp es s = do
-  es `trigger` setStatusEvt (Just "removing reminders")
-  let items = getItemsWithPendingAction ReminderToBeRemoved s
-  outcome <- guardStep items (performRemoveReminders (s ^. hsCredentials) items)
-  postOutcome (trigger es) remindersRemovedEvt (first (view biId) outcome)
+runRemoveRemindersOp :: Env -> HocketState -> IO (StepOutcome () Text)
+runRemoveRemindersOp env s =
+  runStep (trigger (envEvents env)) "removing reminders" remindersRemovedEvt $
+    first (view biId) <$> performRemoveReminders (envPort env) (getItemsWithPendingAction ReminderToBeRemoved s)
 
 -- Run every bucket that has pending work, in order, in one async thread. The
 -- slot is held for the whole batch and freed exactly once via
 -- 'executeBatchDoneEvt', guarded by 'finally' so a sub-op failure can't leak it.
-runBatchOp :: BChan HocketEvent -> HocketState -> IO ()
-runBatchOp es s =
+runBatchOp :: Env -> HocketState -> IO ()
+runBatchOp env s =
   runBatch
-    (trigger es)
+    (trigger (envEvents env))
     ( \case
-        StepArchive -> runArchiveOp es s
-        StepSetReminders -> runSetRemindersOp es s
-        StepRemoveReminders -> runRemoveRemindersOp es s
+        StepArchive -> runArchiveOp env s
+        StepSetReminders -> runSetRemindersOp env s
+        StepRemoveReminders -> runRemoveRemindersOp env s
     )
     (batchStepsWithWork s)
-    `finally` (es `trigger` executeBatchDoneEvt)
+    `finally` (envEvents env `trigger` executeBatchDoneEvt)
 
 asyncCommandEventHandler ::
-  BChan HocketEvent ->
+  Env ->
   AsyncCommand ->
   EventM Name HocketState ()
-asyncCommandEventHandler es FetchItems =
+asyncCommandEventHandler (Env es port) FetchItems =
   withAsyncSlot OpFetchItems $ do
     s <- use id
     _ <- liftIO . async $ do
@@ -569,21 +565,21 @@ asyncCommandEventHandler es FetchItems =
           isUpdateFetch = plan ^. spKind == IncrementalAll
           suffix = maybe "" (\since -> " since: " <> formatPOSIXTime (since - 86400)) $ s ^. hsLastUpdated
       es `trigger` setStatusEvt (Just ("fetching" <> suffix))
-      result <- trySync (retrieveItems (s ^. hsCredentials) (plan ^. spSearch) (plan ^. spCollection))
+      result <- trySync (retrieveItems port (plan ^. spSearch) (plan ^. spCollection))
       let rendered = either (Left . Just . exceptionMessage) (first errorMessageFromException) result
       for_ (fetchResultEvents isUpdateFetch rendered) (trigger es)
     pure ()
 asyncCommandEventHandler _ (FetchCompleted wasAllCollectionsFetch batches) =
   id %= applyFetchCompleted wasAllCollectionsFetch batches
-asyncCommandEventHandler es (FetchFailed err) = do
+asyncCommandEventHandler (Env es _) (FetchFailed err) = do
   id %= completeAsyncOp
   liftIO (es `trigger` setStatusEvt (Just ("failed" <> maybe "<no err>" (": " <>) err)))
-asyncCommandEventHandler es ExecuteBatch = do
+asyncCommandEventHandler env ExecuteBatch = do
   s <- use id
   case batchStepsWithWork s of
     [] -> pure ()
     _ -> withAsyncSlot OpExecuteBatch $ do
-      _ <- liftIO $ async $ runBatchOp es s
+      _ <- liftIO $ async $ runBatchOp env s
       pure ()
 asyncCommandEventHandler _ ExecuteBatchDone = do
   id %= completeAsyncOp
@@ -665,11 +661,11 @@ uiCommandEventHandler es (EditItemInBrowser bit) = do
     Right () -> pure ()
 
 myEventHandler ::
-  BChan HocketEvent ->
+  Env ->
   BrickEvent Name HocketEvent ->
   EventM Name HocketState ()
-myEventHandler es (VtyEvent e) = vtyEventHandler es e
-myEventHandler es (AppEvent e) = internalEventHandler es e
+myEventHandler env (VtyEvent e) = vtyEventHandler (envEvents env) e
+myEventHandler env (AppEvent e) = internalEventHandler env e
 myEventHandler _ _ = pure ()
 
 getConfigPath :: IO FilePath
@@ -716,19 +712,20 @@ runTuiApp mAgentOpt = do
   ensureSchemaFile
   configPath <- getConfigPath
   cred <- input auto (T.pack configPath)
-  events <- newBChan 10
-  tz <- getCurrentTimeZone
-  mAgent <- for mAgentOpt (startAgentServer events)
-  vty <- mkVty Vty.defaultConfig
-  void
-    ( customMain
-        vty
-        (mkVty Vty.defaultConfig)
-        (Just events)
-        (app tz events (snd <$> mAgent))
-        (initialState cred)
-    )
-    `finally` cleanupAgentSocket mAgent
+  withTuiLog $ \runLog -> do
+    events <- newBChan 10
+    tz <- getCurrentTimeZone
+    mAgent <- for mAgentOpt (startAgentServer events)
+    vty <- mkVty Vty.defaultConfig
+    void
+      ( customMain
+          vty
+          (mkVty Vty.defaultConfig)
+          (Just events)
+          (app tz (Env events (servantPort runLog cred)) (snd <$> mAgent))
+          (initialState cred)
+      )
+      `finally` cleanupAgentSocket mAgent
 
 -- | On graceful exit, remove the socket file and then the (now-empty)
 -- containing directory so we do not accumulate stale shells. Wrapped in
@@ -783,7 +780,7 @@ runAddCommand url mCollection tags = do
         logErrorN $ "Error loading config: " <> T.pack (show e)
         liftIO exitFailure
     result <-
-      R.raindrop cred (AddBookmark url mCollection tags) `Catch.catch` \(e :: SomeException) -> do
+      liftIO (runRaindrop (servantPort runStdoutLoggingT cred) (AddBookmark url mCollection tags)) `Catch.catch` \(e :: SomeException) -> do
         logErrorN $ "Error adding bookmark: " <> T.pack (show e)
         return Nothing
     case result of
@@ -803,8 +800,8 @@ main = do
     AddBookmarkCmd url mCollection tags -> runAddCommand url mCollection tags
     AgentCall mpath agentCmd -> runAgentCommand mpath agentCmd
 
-app :: TimeZone -> BChan HocketEvent -> Maybe (TVar AgentSnapshot) -> App HocketState HocketEvent Name
-app tz events mSnapVar =
+app :: TimeZone -> Env -> Maybe (TVar AgentSnapshot) -> App HocketState HocketEvent Name
+app tz env mSnapVar =
   App
     { appDraw = drawGui tz,
       appChooseCursor = \s ->
@@ -812,7 +809,7 @@ app tz events mSnapVar =
           then showCursorNamed FilterEditorName
           else Focus.focusRingCursor (view focusRing) s,
       appHandleEvent = \e -> do
-        myEventHandler events e
+        myEventHandler env e
         id %= syncForRender
         -- Mirror the post-render state for the agent socket. Persistent
         -- data sharing keeps this cheap; the item projection is only fully
@@ -821,7 +818,7 @@ app tz events mSnapVar =
           s <- use id
           liftIO . atomically . modifyTVar' snapVar $ \old ->
             takeSnapshot (asVersion old + 1) s,
-      appStartEvent = liftIO (events `trigger` fetchItemsEvt),
+      appStartEvent = liftIO (envEvents env `trigger` fetchItemsEvt),
       appAttrMap = const hocketAttrMap
     }
 
@@ -1031,46 +1028,45 @@ hBarWithHints :: Text -> Text -> Widget Name
 hBarWithHints leftText rightText =
   withAttr (attrName "bar") (txt leftText <+> padLeft Max (txt rightText))
 
-retrieveItems :: BookmarkCredentials -> Maybe Text -> RaindropCollectionId -> IO (Either ClientError [BookmarkItemBatch])
-retrieveItems cred searchParam collectionId = do
+retrieveItems :: RaindropPort -> Maybe Text -> RaindropCollectionId -> IO (Either ClientError [BookmarkItemBatch])
+retrieveItems port searchParam collectionId = do
   tryClientError $
-    runTuiLoggingT $
-      unfoldrM
-        ( \currentPage -> do
-            (_, items) <- raindrop cred (RetrieveBookmarks currentPage collectionId searchParam)
+    unfoldrM
+      ( \currentPage -> do
+          (_, items) <- runRaindrop port (RetrieveBookmarks currentPage collectionId searchParam)
 
-            let mostRecentUpdate =
-                  if null items
-                    then 0
-                    else maximum (map (utcTimeToPOSIXSeconds . view biLastUpdate) items)
+          let mostRecentUpdate =
+                if null items
+                  then 0
+                  else maximum (map (utcTimeToPOSIXSeconds . view biLastUpdate) items)
 
-            pure $
-              if null items
-                then Nothing
-                else Just (BookmarkItemBatch mostRecentUpdate items (fromIntegral $ length items), currentPage + 1)
-        )
-        0
+          pure $
+            if null items
+              then Nothing
+              else Just (BookmarkItemBatch mostRecentUpdate items (fromIntegral $ length items), currentPage + 1)
+      )
+      0
 
 -- | One batch call, so its outcome applies to every id.
-performArchive :: BookmarkCredentials -> [BookmarkItem] -> IO (StepOutcome BookmarkItemId Text)
-performArchive cred items =
-  runTuiLoggingT $
-    concatOutcome <$> runCalls (raindrop cred . BatchArchiveBookmarks) [map (view biId) items]
+performArchive :: RaindropPort -> [BookmarkItem] -> IO (StepOutcome BookmarkItemId Text)
+performArchive port items =
+  concatOutcome <$> runCalls (runRaindrop port . BatchArchiveBookmarks) [map (view biId) items]
 
-performSetReminders :: BookmarkCredentials -> [(BookmarkItem, UTCTime)] -> IO (StepOutcome (BookmarkItem, UTCTime) Text)
-performSetReminders cred =
-  runTuiLoggingT . runCalls (\(item, reminderTime) -> raindrop cred (SetReminder (view biId item) reminderTime))
+performSetReminders :: RaindropPort -> [(BookmarkItem, UTCTime)] -> IO (StepOutcome (BookmarkItem, UTCTime) Text)
+performSetReminders port = runCalls (\(item, reminderTime) -> runRaindrop port (SetReminder (view biId item) reminderTime))
 
-performRemoveReminders :: BookmarkCredentials -> [BookmarkItem] -> IO (StepOutcome BookmarkItem Text)
-performRemoveReminders cred =
-  runTuiLoggingT . runCalls (raindrop cred . RemoveReminder . view biId)
+performRemoveReminders :: RaindropPort -> [BookmarkItem] -> IO (StepOutcome BookmarkItem Text)
+performRemoveReminders port = runCalls (runRaindrop port . RemoveReminder . view biId)
 
--- | vty owns the terminal while the TUI runs, so stdout logging would draw over it.
-runTuiLoggingT :: LoggingT IO a -> IO a
-runTuiLoggingT act = do
+-- | One log handle for the TUI's lifetime (vty owns the terminal, so the log
+-- goes to a file). An unwritable state dir fails here, before the TUI starts.
+withTuiLog :: ((forall x. LoggingT IO x -> IO x) -> IO a) -> IO a
+withTuiLog k = do
   dir <- getXdgDirectory XdgState "hocket"
   createDirectoryIfMissing True dir
-  runFileLoggingT (dir </> "hocket.log") act
+  withFile (dir </> "hocket.log") AppendMode $ \h -> do
+    hSetBuffering h LineBuffering
+    k (`runLoggingT` defaultOutput h)
 
 tryClientError :: IO a -> IO (Either ClientError a)
 tryClientError = try @ClientError

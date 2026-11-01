@@ -14,7 +14,6 @@ module Network.Bookmark.Batch
     soAborted,
     runItems,
     concatOutcome,
-    abortedBefore,
   )
 where
 
@@ -59,10 +58,6 @@ runItems scope call = go [] []
         Left e -> case scope e of
           ItemScoped -> go ok ((x, CallFailed e) : failed) xs
           Global -> pure (finish ok failed (x : xs) (Just e))
-
--- | A step that failed globally before its first call: every item skipped.
-abortedBefore :: [a] -> e -> StepOutcome a e
-abortedBefore items = StepOutcome [] [] items . Just
 
 -- | Spread the outcome of one call made for a group of items over the items.
 concatOutcome :: StepOutcome [a] e -> StepOutcome a e

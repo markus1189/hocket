@@ -11,7 +11,7 @@ module Worker
     runBatch,
     batchStatus,
     runCalls,
-    guardStep,
+    runStep,
     describeError,
     shortClientError,
     errorMessageFromException,
@@ -49,6 +49,14 @@ fetchResultEvents isUpdateFetch (Right batches) = [setStatusEvt Nothing, fetchCo
 -- | Post a finished step's outcome; what is left for the batch status.
 postOutcome :: (Monad m) => (HocketEvent -> m ()) -> (StepOutcome a Text -> HocketEvent) -> StepOutcome a Text -> m (StepOutcome () Text)
 postOutcome post done outcome = first (const ()) outcome <$ post (done outcome)
+
+-- | One batch step: announce it, run its calls, post their outcome. Nothing
+-- runs after the calls, so a computed outcome always reaches the handlers;
+-- 'runCalls' already turns any synchronous exception into one.
+runStep :: (Monad m) => (HocketEvent -> m ()) -> Text -> (StepOutcome a Text -> HocketEvent) -> m (StepOutcome a Text) -> m (StepOutcome () Text)
+runStep post label done perform = do
+  post (setStatusEvt (Just label))
+  perform >>= postOutcome post done
 
 -- | Run the planned steps in order and stop after one that aborted; the
 -- outcomes of the steps that ran.
@@ -115,11 +123,6 @@ exceptionMessage (SomeException e) = T.pack (displayException e)
 -- there but keeps what already succeeded.
 runCalls :: (MonadCatch m) => (a -> m Bool) -> [a] -> m (StepOutcome a Text)
 runCalls call = fmap (second snd) . runItems fst (fmap (first describeError) . trySync . call)
-
--- | A whole step that threw outside its calls (e.g. setting up the log)
--- becomes a global abort before the first call.
-guardStep :: [a] -> IO (StepOutcome a Text) -> IO (StepOutcome a Text)
-guardStep items act = either (abortedBefore items . exceptionMessage) id <$> trySync act
 
 describeError :: SomeException -> (ErrorScope, Text)
 describeError e = maybe (Global, exceptionMessage e) (\ce -> (classify ce, shortClientError ce)) (fromException e)
