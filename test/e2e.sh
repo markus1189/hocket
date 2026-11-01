@@ -20,16 +20,17 @@ tmp=$(mktemp -d /tmp/hocket-e2e.XXXXXX)
 # A private server without the user's config (remain-on-exit, hooks, ...);
 # remain-on-exit is set here so a crashed hocket's exit status can be read.
 tm() { tmux -L "hocket-e2e-$$" -f /dev/null "$@"; }
+server_socket=''
 cleanup() {
-  # kill-server leaves the server's socket file behind.
-  local server_socket
-  server_socket=$(tm display-message -p -t keepalive '#{socket_path}' 2>/dev/null) || true
   tm kill-server 2>/dev/null || true
+  # kill-server leaves the server's socket file behind.
   [ -z "$server_socket" ] || rm -f "$server_socket"
   rm -r "$tmp"
 }
 trap cleanup EXIT
 tm new-session -d -s keepalive 'sleep 100000'
+# Read once, while the server surely runs: cleanup may find it gone.
+server_socket=$(tm display-message -p -t keepalive '#{socket_path}')
 tm set-option -g remain-on-exit on
 
 name='' sock='' dump=''
