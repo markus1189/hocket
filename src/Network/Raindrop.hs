@@ -1,8 +1,10 @@
 {-# LANGUAGE GADTs #-}
 {-# LANGUAGE OverloadedStrings #-}
+{-# LANGUAGE RankNTypes #-}
 
 module Network.Raindrop
   ( raindrop,
+    servantPort,
     ErrorScope (..),
     classify,
   )
@@ -11,11 +13,12 @@ where
 import Control.Exception (throwIO)
 import Control.Lens (view, (^.))
 import Control.Monad.IO.Class (MonadIO, liftIO)
-import Control.Monad.Logger (MonadLogger, logWarnN)
+import Control.Monad.Logger (LoggingT, MonadLogger, logWarnN)
 import Control.Retry (RetryPolicyM, RetryStatus (rsIterNumber), exponentialBackoff, limitRetries, retrying)
 import Data.Maybe (fromMaybe)
 import qualified Data.Text as T
 import Network.Bookmark.Batch (ErrorScope (..))
+import Network.Bookmark.Port (RaindropPort (..))
 import Network.Bookmark.Types (BookmarkCredentials, BookmarkItemId (..), BookmarkRequest (..), RaindropCollectionId (RaindropCollectionId), RaindropToken (..), archiveCollectionId, raindropToken, _BookmarkItemId)
 import Network.HTTP.Types.Status (statusCode)
 import Network.Raindrop.Api
@@ -79,3 +82,7 @@ raindrop creds req = case req of
     archiveId = view archiveCollectionId creds
     rawId = (^. _BookmarkItemId)
     ok call = (\(ApiResult b) -> b) <$> runRetrying call
+
+-- | The real Raindrop behind the port; retries stay in 'raindrop', below it.
+servantPort :: (forall x. LoggingT IO x -> IO x) -> BookmarkCredentials -> RaindropPort
+servantPort runLog creds = RaindropPort (runLog . raindrop creds)

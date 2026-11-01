@@ -19,6 +19,7 @@ library
   hs-source-dirs:      src
   exposed-modules:     Network.Raindrop
                      , Network.Bookmark.Batch
+                     , Network.Bookmark.Port
                      , Network.Raindrop.Api
                      , Network.Bookmark.Agent.Protocol
                      , Network.Bookmark.Agent.Snapshot
