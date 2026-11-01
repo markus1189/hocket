@@ -21,7 +21,7 @@ module Gen
 where
 
 import Control.Exception (toException)
-import Control.Lens ((&), (.~))
+import Control.Lens ((&), (.~), (^.))
 import qualified Data.ByteString.Lazy.Char8 as LBS
 import Data.Map (Map)
 import qualified Data.Map as Map
@@ -97,16 +97,18 @@ genPendingAction = Gen.choice [pure None, pure ToBeArchived, ToBeReminded <$> ge
 -- on items without one and only removed from items that have one.
 genConsistentAction :: BookmarkItem -> Gen PendingAction
 genConsistentAction item
-  | isJust (_biReminder item) = Gen.element [None, ToBeArchived, ReminderToBeRemoved]
+  | isJust (item ^. biReminder) = Gen.element [None, ToBeArchived, ReminderToBeRemoved]
   | otherwise = Gen.choice [pure None, pure ToBeArchived, ToBeReminded <$> genUTCTime]
 
 genContents :: Gen (Map BookmarkItemId (PendingAction, BookmarkItem))
 genContents = do
   items <- Gen.list (Range.linear 0 30) genBookmarkItem
-  Map.fromList <$> traverse (\i -> (\a -> (_biId i, (a, i))) <$> genConsistentAction i) items
+  Map.fromList <$> traverse (\i -> (\a -> (i ^. biId, (a, i))) <$> genConsistentAction i) items
 
 -- | Today's model is 'HocketState'; only the fields the pure core reads are
--- generated, the brick list stays as 'initialState' leaves it.
+-- generated, the brick list stays as 'initialState' leaves it. The archive
+-- collection is one 'genBookmarkItem' also assigns, so some items already
+-- sit in it.
 genModel :: Gen HocketState
 genModel = do
   contents <- genContents
@@ -115,7 +117,7 @@ genModel = do
   futureRem <- Gen.bool
   video <- genVideoFilterMode
   pure $
-    initialState (BookmarkCredentials (RaindropToken "") 0)
+    initialState (BookmarkCredentials (RaindropToken "") 4711)
       & hsContents .~ contents
       & hsLastUpdated .~ lastUpdated
       & hsStatus .~ status
