@@ -6,7 +6,8 @@ import Control.Exception (toException)
 import Data.Bifunctor (bimap)
 import Data.Foldable (for_)
 import qualified Data.Sequence as Seq
-import Gen (genClientErrorWithScope)
+import Data.String (fromString)
+import Gen (clientErrorRows, genClientErrorRow)
 import Hedgehog (cover, forAll, property, verifiedTermination, (===))
 import Network.HTTP.Types (http11, mkStatus)
 import Network.Raindrop (ErrorScope (..), classify)
@@ -46,11 +47,10 @@ classifyTests =
         classify (UnsupportedContentType "text/html" (response 200)) @?= Global,
       testCase "global: invalid content-type header" $
         classify (InvalidContentTypeHeader (response 200)) @?= Global,
-      -- 1 of 10 generator rows is item-scoped; verified termination judges
-      -- coverage statistically instead of failing on a low 100-sample draw.
+      -- Each row is 1 in 10; verified termination judges coverage
+      -- statistically instead of failing on a low 100-sample draw.
       testProperty "classify maps every generated ClientError to its labelled scope" $ verifiedTermination $ property $ do
-        (err, scope) <- forAll genClientErrorWithScope
-        cover 5 "item-scoped" (scope == ItemScoped)
-        cover 5 "global" (scope == Global)
+        (row, err, scope) <- forAll genClientErrorRow
+        for_ clientErrorRows $ \(name, _, _) -> cover 3 (fromString name) (row == name)
         classify err === scope
     ]

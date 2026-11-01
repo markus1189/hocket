@@ -10,7 +10,8 @@ module Gen
     genUTCTime,
     genModel,
     genClientError,
-    genClientErrorWithScope,
+    clientErrorRows,
+    genClientErrorRow,
     genFailureScript,
     genAgentCmd,
     genAgentSnapshot,
@@ -141,29 +142,32 @@ genStatus codes = (`mkStatus` "") <$> Gen.element codes
 genMediaType :: Gen MediaType
 genMediaType = Gen.element ["text" // "html", "text" // "plain", "application" // "xml"]
 
--- | One generator per D6 row (plan §5, rulings in §11), each labelled with
--- its scope by hand so a property can check 'classify' against it.
-genClientErrorWithScope :: Gen (ClientError, ErrorScope)
-genClientErrorWithScope =
-  Gen.choice
-    [ failure ItemScoped [400, 404, 405, 409, 410, 422, 499],
-      failure Global [401, 403],
-      failure Global [408],
-      failure Global [429],
-      failure Global [500, 502, 503, 504, 599],
-      failure Global [100, 301, 302, 304],
-      pure (ConnectionError (toException (userError "connection refused")), Global),
-      labelled Global $ DecodeFailure "Error in $: key \"items\" not found" <$> (genStatus [200] >>= genResponse),
-      labelled Global $ UnsupportedContentType <$> genMediaType <*> (genStatus [200] >>= genResponse),
-      labelled Global $ InvalidContentTypeHeader <$> (genStatus [200] >>= genResponse)
-    ]
+-- | The D6 table (plan §5, rulings in §11): one generator per row, each
+-- named and scoped by hand so a property can check 'classify' against it
+-- and cover every row.
+clientErrorRows :: [(String, ErrorScope, Gen ClientError)]
+clientErrorRows =
+  [ ("other 4xx", ItemScoped, failure [400, 404, 405, 409, 410, 422, 499]),
+    ("401/403", Global, failure [401, 403]),
+    ("408", Global, failure [408]),
+    ("429", Global, failure [429]),
+    ("5xx", Global, failure [500, 502, 503, 504, 599]),
+    ("1xx/3xx", Global, failure [100, 301, 302, 304]),
+    ("connection", Global, pure (ConnectionError (toException (userError "connection refused")))),
+    ("decode", Global, DecodeFailure "Error in $: key \"items\" not found" <$> (genStatus [200] >>= genResponse)),
+    ("content type", Global, UnsupportedContentType <$> genMediaType <*> (genStatus [200] >>= genResponse)),
+    ("content-type header", Global, InvalidContentTypeHeader <$> (genStatus [200] >>= genResponse))
+  ]
   where
-    labelled scope = fmap (,scope)
-    failure scope codes = labelled scope $ FailureResponse req <$> (genStatus codes >>= genResponse)
+    failure codes = FailureResponse req <$> (genStatus codes >>= genResponse)
     req = defaultRequest {requestBody = Nothing, requestPath = (BaseUrl Https "api.raindrop.io" 443 "/rest/v1", "")}
 
+-- | A uniformly chosen D6 row: its name, the error, and its scope.
+genClientErrorRow :: Gen (String, ClientError, ErrorScope)
+genClientErrorRow = Gen.choice [(name,,scope) <$> gen | (name, scope, gen) <- clientErrorRows]
+
 genClientError :: Gen ClientError
-genClientError = fst <$> genClientErrorWithScope
+genClientError = (\(_, err, _) -> err) <$> genClientErrorRow
 
 -- | Per-call outcomes for a scripted fake: 'Right False' is Raindrop's
 -- @result: false@ answer.
