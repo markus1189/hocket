@@ -11,9 +11,9 @@ import qualified Brick.Widgets.List as L
 import CharacterizationTests (characterizationTests)
 import ClassifyTests (classifyTests)
 import Control.Concurrent (forkIO, threadDelay)
-import Control.Concurrent.Async (withAsync)
+import Control.Concurrent.Async (poll, withAsync)
 import Control.Concurrent.STM (TVar, atomically, modifyTVar', newTVarIO)
-import Control.Exception (IOException, SomeException, finally, throwIO, try)
+import Control.Exception (IOException, SomeException, displayException, finally, throwIO, try)
 import Control.Lens (ix, to, view, _1, _2)
 import Control.Lens.Operators
 import Control.Monad (void)
@@ -77,6 +77,7 @@ import System.IO
   ( BufferMode (LineBuffering),
     Handle,
     IOMode (ReadWriteMode),
+    hClose,
     hFlush,
     hSetBuffering,
   )
@@ -876,20 +877,21 @@ testNow = I.Now (read "2020-01-01 06:00:00 UTC") utc
 -- race where a test launches a server in the background and immediately
 -- probes it before the server has actually bound its path.
 waitUntilReachable :: Int -> FilePath -> IO ()
-waitUntilReachable attempts path
-  | attempts <= 0 = assertFailure ("server never became reachable at " ++ path)
-  | otherwise =
-      reachable path >>= \ok ->
-        if ok
-          then pure ()
-          else threadDelay 20000 >> waitUntilReachable (attempts - 1) path
+waitUntilReachable attempts0 path = go attempts0 []
   where
-    reachable :: FilePath -> IO Bool
+    -- On failure, the causes of the last attempts, newest first.
+    go attempts errs
+      | attempts <= 0 = assertFailure ("server never became reachable at " ++ path ++ "; last attempts: " ++ intercalate " | " (take 5 errs))
+      | otherwise =
+          reachable path
+            >>= maybe (pure ()) (\e -> threadDelay 20000 >> go (attempts - 1) (e : errs))
+    reachable :: FilePath -> IO (Maybe String)
     reachable p = do
       sock <- socket AF_UNIX Stream defaultProtocol
-      r <- try @IOException (connect sock (SockAddrUnix p) >> socketToHandle sock ReadWriteMode >> pure ())
+      -- Close the probe, or the server holds it as a client until GC.
+      r <- try @IOException (connect sock (SockAddrUnix p) >> socketToHandle sock ReadWriteMode >>= hClose)
       close sock
-      pure (not (isLeft r))
+      pure (either (Just . show) (const Nothing) r)
 
 -- | Run the agent server on a throwaway socket with a snapshot TVar we own,
 -- handing both that TVar and the event BChan to the action so the test can
@@ -926,18 +928,20 @@ serveThenCleanup :: FilePath -> IO () -> IO ()
 serveThenCleanup path whileUp = do
   ours <- socketDirIsOurs path
   bound <- newBoundSocket
-  withAsync (runAgentServer bound path quietEnv) $ \_ -> waitUntilReachable 100 path >> whileUp
+  withAsync (quietEnv >>= runAgentServer bound path) $ \_ -> waitUntilReachable 100 path >> whileUp
   cleanupAgentSocket bound ours path
 
-quietEnv :: AgentEnv
-quietEnv = AgentEnv {aeSnapshot = undefined, aeInject = const (pure True), aeNow = pure testNow}
+-- | A real TVar, not undefined: 'AgentEnv' is strict, and the accept loop
+-- forces it on the first connection; an undefined field killed the server.
+quietEnv :: IO AgentEnv
+quietEnv = (\v -> AgentEnv {aeSnapshot = v, aeInject = const (pure True), aeNow = pure testNow}) <$> newTVarIO emptySnapshot
 
 -- | Start a server on a path that holds something else; under the old
 -- reclaim it unlinked that and served forever, hence the timeout.
 startOnOccupied :: FilePath -> IO (Maybe (Either IOException ()))
 startOnOccupied path = do
   bound <- newBoundSocket
-  timeout 2000000 (try @IOException (runAgentServer bound path quietEnv))
+  timeout 2000000 (try @IOException (quietEnv >>= runAgentServer bound path))
 
 -- | What sits at a path, for failure messages: absent, or type and dev+inode.
 describePath :: FilePath -> IO String
@@ -961,10 +965,10 @@ reachableOr what path instances = do
   r <- try @SomeException (waitUntilReachable 100 path)
   case r of
     Right () -> pure ()
-    Left _ -> do
+    Left e -> do
       at' <- describePath path
       ids <- traverse (\(n, b) -> (\i -> n <> " = " <> show i) <$> boundSocketId b) instances
-      assertFailure (what <> "; path holds " <> at' <> "; " <> intercalate ", " ids)
+      assertFailure (what <> "; path holds " <> at' <> "; " <> intercalate ", " ids <> "; " <> unwords (lines (displayException e)))
 
 agentServerIntegrationTests :: TestTree
 agentServerIntegrationTests =
@@ -1153,22 +1157,28 @@ agentServerIntegrationTests =
         withSystemTempDirectory "hk" $ \root -> do
           let path = root </> "s.sock"
           bound1 <- newBoundSocket
-          withAsync (runAgentServer bound1 path quietEnv) $ \_ -> do
+          withAsync (quietEnv >>= runAgentServer bound1 path) $ \a1 -> do
             reachableOr "instance 1 never became reachable" path [("bound1", bound1)]
             removeFile path
             bound2 <- newBoundSocket
-            withAsync (runAgentServer bound2 path quietEnv) $ \_ -> do
+            withAsync (quietEnv >>= runAgentServer bound2 path) $ \a2 -> do
               reachableOr "instance 2 never became reachable" path [("bound1", bound1), ("bound2", bound2)]
               cleanupAgentSocket bound1 False path
               -- Deterministic: the path still holds instance 2's socket.
               id2 <- boundSocketId bound2
               after <- describePath path
               assertBool ("cleanup with bound1 changed the path: " <> after <> ", bound2 = " <> show id2) =<< holdsSocket path id2
-              reachableOr "instance 2 unreachable after cleanup" path [("bound1", bound1), ("bound2", bound2)],
+              r <- try @SomeException (reachableOr "instance 2 unreachable after cleanup" path [("bound1", bound1), ("bound2", bound2)])
+              case r of
+                Right () -> pure ()
+                Left e -> do
+                  s1 <- poll a1
+                  s2 <- poll a2
+                  assertFailure (unwords (lines (displayException e)) <> "; server 1: " <> maybe "running" show s1 <> "; server 2: " <> maybe "running" show s2),
       testCase "a losing second instance does not unlink the live socket (B7b)" $
         withAgentServer $ \_ _ path -> do
           bound2 <- newBoundSocket
-          r <- try @IOException (runAgentServer bound2 path quietEnv)
+          r <- try @IOException (quietEnv >>= runAgentServer bound2 path)
           assertBool "second bind should fail" (isLeft r)
           cleanupAgentSocket bound2 False path
           waitUntilReachable 1 path,
