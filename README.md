@@ -125,7 +125,20 @@ hocket tui --agent-socket
 
 # Same, with an explicit socket path
 hocket tui --agent-socket-path /path/to/control.sock
+
+# Fixture mode: a fake Raindrop seeded from a list response, for trying
+# things out and for tests. Reads no config or credentials, so it cannot
+# touch your account; the header shows FIXTURE.
+hocket tui --fixture test/raindrop-items1.json
+
+# Script failures (repeatable: STEP[:N]=STATUS, STEP is fetch | archive |
+# set-reminders | remove-reminders, STATUS an HTTP code or conn), and write
+# the store to a file on exit
+hocket tui --fixture seed.json --fixture-fail archive=503 --fixture-dump out.json
 ```
+
+`test/e2e.sh` drives fixture-mode sessions through the agent socket and
+checks the outcome of five scenarios (see the script's header).
 
 #### Add Bookmarks from Command Line
 ```bash

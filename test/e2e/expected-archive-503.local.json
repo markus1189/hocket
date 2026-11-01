@@ -1,0 +1,13 @@
+{
+  "flagged": [
+    {
+      "action": "archive",
+      "id": "1001"
+    },
+    {
+      "action": "reminder",
+      "id": "1002"
+    }
+  ],
+  "status": "archive 0/1 (aborted: 503) · reminders skipped: 503"
+}

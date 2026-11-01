@@ -1,0 +1,9 @@
+{
+  "flagged": [
+    {
+      "action": "reminder",
+      "id": "1002"
+    }
+  ],
+  "status": "reminders 2/3 (1 failed: 404)"
+}

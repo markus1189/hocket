@@ -18,6 +18,10 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 ### Running the Application
 - `hocket tui` - Start the terminal user interface (requires config.dhall)
+- `hocket tui --fixture FILE` - Run against a fake Raindrop; never use the real account to try changes out
+
+### End-to-end tests
+- `test/e2e.sh [SCENARIO...]` - Fixture sessions driven over the agent socket; run before merging any change to workers, handlers or the agent socket. `HOCKET=path` skips the nix build
 
 ## Architecture Overview
 
