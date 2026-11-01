@@ -201,7 +201,32 @@ scenario_filter_typing() {
   finish
 }
 
-scenarios=(all-three archive-503 reminder-404 empty-fetch key-a filter-typing)
+# D2 through the keys: the shell passes the list's height, so a page jumps,
+# and Down in the filter editor moves the selection.
+scenario_navigation() {
+  start navigation seed-basic.json || return 1
+  local ids
+  mapfile -t ids < <(agent list_items | jq -r '.result[].id')
+  ((${#ids[@]} >= 3)) || {
+    fail "want 3 visible items, got ${#ids[@]}"
+    return 1
+  }
+  local last=${ids[-1]}
+  # g first: the marker may have shown an item above the selection, which
+  # stays on its item.
+  nav g "${ids[0]}" && nav j "${ids[1]}" && nav j "${ids[2]}" && nav G "$last" && nav g "${ids[0]}" &&
+    nav NPage "$last" && nav g "${ids[0]}" && key / && nav Down "${ids[1]}" || return 1
+  key Escape
+  finish
+}
+
+# nav KEY ID: press KEY, then ID must be selected.
+nav() {
+  key "$1"
+  wait_for 5 "$1 to select $2" state_is ".selected == \"$2\""
+}
+
+scenarios=(all-three archive-503 reminder-404 empty-fetch key-a filter-typing navigation)
 (($# == 0)) || scenarios=("$@")
 for s in "${scenarios[@]}"; do
   if "scenario_${s//-/_}"; then
