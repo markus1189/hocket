@@ -14,7 +14,8 @@ data ItemKey = KeyArchive | KeyRemind | KeyUnflag | KeyEnter | KeySpace
   deriving (Show, Eq, Enum, Bounded)
 
 -- | What a key posts, decided on the state at key time; the flag change
--- itself happens when the posted 'ShiftItem' / 'ShiftItemReminder' arrives.
+-- itself happens when the posted 'ShiftItem' / 'ArchiveItem' /
+-- 'ShiftItemReminder' arrives.
 itemKeyEvents :: ItemKey -> HocketState -> [HocketEvent]
 itemKeyEvents key s = case focusedItem s of
   Nothing -> []
@@ -24,7 +25,7 @@ itemKeyEvents key s = case focusedItem s of
      in case key of
           KeySpace -> [browseItemEvt bit]
           KeyEnter -> [browseItemEvt bit, shiftItemEvt bid]
-          KeyArchive -> [shiftItemEvt bid | action /= ToBeArchived]
+          KeyArchive -> [archiveItemEvt bid | action /= ToBeArchived]
           KeyRemind -> [shiftItemReminderEvt bid | not (isToBeReminded action)]
           KeyUnflag ->
             [shiftItemEvt bid | action == ToBeArchived]

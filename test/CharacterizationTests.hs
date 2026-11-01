@@ -171,6 +171,7 @@ press key s0 = foldl deliver (syncForRender s0, []) (itemKeyEvents key s0)
   where
     deliver (s, browsed) = \case
       HocketUi (ShiftItem bid) -> (syncForRender (shiftItem bid s), browsed)
+      HocketUi (ArchiveItem bid) -> (syncForRender (archiveItem bid s), browsed)
       HocketUi (ShiftItemReminder bid) -> (syncForRender (shiftItemReminder bid t7 s), browsed)
       HocketUi (BrowseItem bit) -> (s, browsed <> [bit ^. biId . _BookmarkItemId])
       other -> error ("unexpected event from a key: " <> show other)
@@ -196,10 +197,8 @@ keyTableTests =
     rows =
       [ Row KeyArchive False None ToBeArchived True,
         Row KeyArchive False ToBeArchived ToBeArchived False,
-        -- pins bug B4, flipped in Phase 1
-        Row KeyArchive False (ToBeReminded tPrev) None True,
-        -- pins bug B4, flipped in Phase 1
-        Row KeyArchive True ReminderToBeRemoved None True,
+        Row KeyArchive False (ToBeReminded tPrev) ToBeArchived True,
+        Row KeyArchive True ReminderToBeRemoved ToBeArchived True,
         Row KeyRemind False None (ToBeReminded t7) True,
         Row KeyRemind False ToBeArchived (ToBeReminded t7) True,
         Row KeyRemind False (ToBeReminded tPrev) (ToBeReminded tPrev) False,

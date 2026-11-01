@@ -155,6 +155,7 @@ import Network.Bookmark.Ui.State
     HocketState,
     Name (..),
     VideoFilterMode (..),
+    archiveItem,
     batchStepsWithWork,
     cancelFilter,
     clearAllFlags,
@@ -632,6 +633,8 @@ uiCommandEventHandler ::
   EventM Name HocketState ()
 uiCommandEventHandler _ (ShiftItem bid) =
   id %= shiftItem bid
+uiCommandEventHandler _ (ArchiveItem bid) =
+  id %= archiveItem bid
 uiCommandEventHandler _ (ShiftItemReminder bid) = do
   reminderTime <- liftIO nextDayAt7AM
   id %= shiftItemReminder bid reminderTime

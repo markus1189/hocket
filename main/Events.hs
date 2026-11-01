@@ -11,6 +11,7 @@ module Events
     remindersRemovedEvt,
     asyncActionFailedEvt,
     shiftItemEvt,
+    archiveItemEvt,
     shiftItemReminderEvt,
     removeItemsEvt,
     setStatusEvt,
@@ -58,6 +59,7 @@ data AsyncCommand
 
 data UiCommand
   = ShiftItem !BookmarkItemId
+  | ArchiveItem !BookmarkItemId
   | ShiftItemReminder !BookmarkItemId
   | RemoveItems !(Set BookmarkItemId)
   | SetStatus !(Maybe Text)
@@ -107,6 +109,9 @@ asyncActionFailedEvt maybeMsg = HocketAsync (AsyncActionFailed maybeMsg)
 
 shiftItemEvt :: BookmarkItemId -> HocketEvent
 shiftItemEvt bid = HocketUi (ShiftItem bid)
+
+archiveItemEvt :: BookmarkItemId -> HocketEvent
+archiveItemEvt bid = HocketUi (ArchiveItem bid)
 
 shiftItemReminderEvt :: BookmarkItemId -> HocketEvent
 shiftItemReminderEvt bid = HocketUi (ShiftItemReminder bid)
