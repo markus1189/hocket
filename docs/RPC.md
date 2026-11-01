@@ -331,8 +331,9 @@ a hint: on timeout the response is `{"ok": false, "error":
 "timeout waiting for state change"}`.
 
 Because the snapshot only advances on render, `wait_version` can in
-principle wait until the next repaint. This is the building block for an
-agent that needs to wait until its injected change actually lands.
+principle wait until the next repaint. It is the building block for an
+agent that waits until its injected change lands, but not enough on its
+own: it returns after the *next* applied event, whichever that is (§6.1).
 
 ---
 
@@ -365,15 +366,24 @@ decode → validate → transcribe → inject
 
 **Acknowledging injection is not acking effect.** `ok: true` means *the
 event was queued*, not that the UI has processed or rendered it. To confirm
-the effect landed, use `wait_version` after the current version and re-read.
+the effect landed, wait for the condition: re-read, and while it does not
+hold yet, `wait_version` after the last version seen, until a deadline (the
+skill has the loop). Bound it by time, not by a count of waits: every agent
+connection is itself an event (the client count, `AgentClients`), so a
+wait usually returns at once.
 
 Writes are **idempotent by construction** — they are the same events the
 keyboard fires, so replaying a write is no different from the user pressing
 the same key twice.
 
-The returned `version` is the snapshot version at injection time; the *next*
-successful render will be strictly greater, so `wait_version` with `after`
-= that version returns once the effect is reflected.
+The returned `version` is the snapshot version at injection time. A
+`wait_version` with `after` = that version returns once the *next* event is
+applied, and that need not be this write: events queued before it (another
+agent's write, a running fetch's or batch's results) are applied first. One
+wait and one read can therefore still show the state before the write.
+(SM-agent reproduces it: with a refresh running in a second agent,
+`set_flag 1001 archive`, `wait_version --after V`, `list_items` showed 1001
+unflagged.)
 
 ### 6.2 `set_flag`
 
@@ -433,8 +443,8 @@ params: {}
 ```
 
 Triggers a resync — the `r` key. `async_op` becomes `fetch` until
-completion. The agent should follow with `wait_version` to learn when the
-updated data lands.
+completion. To learn when the updated data has landed, wait until `async_op`
+is null again (`wait_version` in a loop, as for any write, §6.1).
 
 ### 6.7 `set_filter`
 
