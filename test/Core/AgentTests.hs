@@ -95,6 +95,12 @@ agentSnapshotTests =
       testCase "setShowFutureReminders is a plain assignment" $ do
         let s = setShowFutureReminders True testState
         s ^. mShowFutureReminders @?= True,
+      testCase "takeSnapshot and stateView carry the applied seq" $ do
+        let snap = takeSnapshot 1 (testState & mAppliedSeq .~ 3)
+        asAppliedSeq snap @?= 3
+        case stateView snap of
+          A.Object o -> KM.lookup (AKey.fromText "applied_seq") o @?= Just (A.Number 3)
+          _ -> assertFailure "stateView is not an object",
       testCase "setAgentClients sets the header count" $ do
         let s = setAgentClients 2 testState
         s ^. mAgentClients @?= 2
@@ -149,7 +155,7 @@ agentProtocolTests =
         case v of
           A.Object o -> do
             -- top-level keys the README documents
-            for_ ["version", "counts", "selected", "filter_query", "video_filter", "show_future_reminders", "status", "last_updated", "async_op"] $ \k ->
+            for_ ["version", "counts", "selected", "filter_query", "video_filter", "show_future_reminders", "status", "last_updated", "async_op", "applied_seq"] $ \k ->
               assertBool ("stateView missing key " <> k) (KM.member (AKey.fromText (T.pack k)) o)
             -- counts subobject
             case KM.lookup (AKey.fromText "counts") o of

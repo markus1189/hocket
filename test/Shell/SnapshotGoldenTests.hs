@@ -25,7 +25,8 @@ item i link tags created rem' =
   BookmarkItem (BookmarkItemId i) link ("excerpt " <> i) ("note " <> i) "link" tags False (at created) (at created) "example.org" ("title " <> i) 0 [] (-1) (i == "2") (at <$> rem')
 
 -- | Every flag, a reminder hidden by the future-reminder filter, a video
--- hidden by the video filter, the second visible item selected, a status.
+-- hidden by the video filter, the second visible item selected, a status,
+-- agent write 5 applied.
 state :: Model
 state =
   let s0 =
@@ -44,6 +45,7 @@ state =
           & setShowFutureReminders False
           & mStatus ?~ "archive ok"
           & mLastUpdated ?~ 1790000000
+          & mAppliedSeq .~ 5
           & settle
    in settle (s0 & mSelected ?~ ((s0 ^. mVisible) V.! 1 ^. biId))
 

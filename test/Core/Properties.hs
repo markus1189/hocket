@@ -7,6 +7,7 @@ import Control.Lens ((%~), (&), (.~), (^.))
 import Data.Aeson (FromJSON (parseJSON), withObject, (.:))
 import qualified Data.Aeson as A
 import Data.Aeson.Types (Parser)
+import Data.Bifunctor (first)
 import qualified Data.Map as Map
 import Data.Text (Text)
 import Data.Time.Clock (addUTCTime)
@@ -18,6 +19,8 @@ import qualified Hedgehog.Range as Range
 import Hocket.Agent.Protocol
 import Hocket.Agent.Snapshot
 import Hocket.App.Model
+import Hocket.App.Msg (Msg (..))
+import Hocket.App.Update (update)
 import Hocket.Domain.Bookmark
 import Test.Tasty (TestTree, testGroup)
 import Test.Tasty.Hedgehog (testProperty)
@@ -38,6 +41,11 @@ propertyTests =
       testProperty "AgentSnapshot JSON round-trips" $ property $ do
         snap <- forAll genAgentSnapshot
         tripping snap A.encode (fmap unWire . A.eitherDecode),
+      testProperty "AgentWrite n i is Intent i that also sets the applied seq to n" $ property $ do
+        start <- forAll genModel
+        i <- forAll (genIntent (Map.keys (start ^. mContents)))
+        n <- forAll (Gen.int (Range.linear 0 1000))
+        update (AgentWrite n i) start === first (mAppliedSeq .~ n) (update (Intent i) start),
       testProperty "settle keeps the selection visible, or Nothing exactly when nothing is (I4)" $ property $ do
         start <- forAllWith (show . (^. mContents)) genModel
         -- Any prior selection: visible, hidden, unknown, or none.
@@ -91,6 +99,7 @@ instance FromJSON Wire where
         <*> o .: "status"
         <*> o .: "last_updated"
         <*> (o .: "async_op" >>= traverse asyncOpP)
+        <*> o .: "applied_seq"
 
 newtype WireItem = WireItem {unWireItem :: SnapshotItem}
 

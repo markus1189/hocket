@@ -47,6 +47,7 @@ module Hocket.App.Model
     mAgentClients,
     setAgentError,
     mAgentError,
+    mAppliedSeq,
     clearAllFlags,
     clearFlagsForItems,
     clearToBeRemindedFlags,
@@ -147,12 +148,17 @@ data Model = Model
     -- | Set when the agent socket server died; the shared status line is
     -- overwritten within a frame, so the header carries this instead.
     _mAgentError :: !(Maybe Text),
+    -- | The seq of the last agent write update ran (plan §12): part of the
+    -- model so that the snapshot publishes it together with what the write
+    -- did, never before.
+    _mAppliedSeq :: !Int,
     -- | What the list shows, in order; only 'settle' writes it.
     _mVisible :: !(V.Vector BookmarkItem),
     -- | The selection, by id: always visible, or 'Nothing' when nothing is
     -- (I4). The brick list follows it, never the other way round.
     _mSelected :: !(Maybe BookmarkItemId)
   }
+  deriving (Show, Eq)
 
 makeLenses ''Model
 
@@ -231,6 +237,7 @@ initialModel =
     T.empty
     0
     Nothing
+    0
     V.empty
     Nothing
 

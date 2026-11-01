@@ -29,6 +29,7 @@ import Hocket.App.Model
   ( AsyncOp (..),
     Model,
     VideoFilterMode (..),
+    mAppliedSeq,
     mAsyncOp,
     mContents,
     mFilterQuery,
@@ -78,7 +79,8 @@ data AgentSnapshot = AgentSnapshot
     asShowFutureReminders :: !Bool,
     asStatus :: !(Maybe Text),
     asLastUpdated :: !(Maybe POSIXTime),
-    asAsyncOp :: !(Maybe AsyncOp)
+    asAsyncOp :: !(Maybe AsyncOp),
+    asAppliedSeq :: !Int
   }
   deriving (Show, Eq)
 
@@ -127,7 +129,8 @@ instance ToJSON AgentSnapshot where
         "show_future_reminders" .= asShowFutureReminders snap,
         "status" .= asStatus snap,
         "last_updated" .= asLastUpdated snap,
-        "async_op" .= fmap asyncOpToText (asAsyncOp snap)
+        "async_op" .= fmap asyncOpToText (asAsyncOp snap),
+        "applied_seq" .= asAppliedSeq snap
       ]
 
 -- | Project the given state into a snapshot carrying the given version.
@@ -144,7 +147,8 @@ takeSnapshot v s =
       asShowFutureReminders = s ^. mShowFutureReminders,
       asStatus = s ^. mStatus,
       asLastUpdated = s ^. mLastUpdated,
-      asAsyncOp = s ^. mAsyncOp
+      asAsyncOp = s ^. mAsyncOp,
+      asAppliedSeq = s ^. mAppliedSeq
     }
   where
     visibleBookmarks = V.toList (s ^. mVisible)
@@ -185,5 +189,6 @@ emptySnapshot =
       asShowFutureReminders = False,
       asStatus = Nothing,
       asLastUpdated = Nothing,
-      asAsyncOp = Nothing
+      asAsyncOp = Nothing,
+      asAppliedSeq = 0
     }

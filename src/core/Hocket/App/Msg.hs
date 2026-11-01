@@ -1,3 +1,5 @@
+{-# LANGUAGE LambdaCase #-}
+
 -- | What the TUI core reacts to (plan §4.2). Every flag, batch and view
 -- action of the keyboard and the agent arrives as an 'Intent' (G2);
 -- navigation and the filter editor follow in Phase 4. Phase 3 moves the
@@ -8,6 +10,7 @@ module Hocket.App.Msg
     Intent (..),
     Msg (..),
     StepResult (..),
+    publishes,
   )
 where
 
@@ -72,6 +75,9 @@ data Intent
 
 data Msg
   = Intent !Intent
+  | -- | An agent write with the seq the server gave it: the 'Intent', and
+    -- the seq becomes the model's applied seq.
+    AgentWrite !Int !Intent
   | -- | A browser or clipboard call failed; the text goes to the status line.
     SystemFailed !Text
   | -- | The cleaned URL that reached the clipboard.
@@ -92,6 +98,14 @@ data Msg
     -- 'StepDone's. The only thing that frees the batch slot.
     BatchFinished !(Maybe Text)
   deriving (Show, Eq)
+
+-- | Whether the event loops publish a snapshot after this message. Not
+-- after a client count: connects and disconnects would move the version
+-- an agent waits on, and the header is not part of the snapshot.
+publishes :: Msg -> Bool
+publishes = \case
+  AgentClients _ -> False
+  _ -> True
 
 -- | What a batch step got done, per step: set-reminders carries the times
 -- that were sent (B3).

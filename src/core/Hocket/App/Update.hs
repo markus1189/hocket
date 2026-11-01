@@ -57,6 +57,7 @@ update msg s = case msg of
   Intent (SetShowFutureReminders b) -> refilter (setShowFutureReminders b)
   Intent (SetStatus t) -> (s & mStatus ?~ t, [])
   Intent (Navigate height nav) -> (s & mSelected .~ navigate height nav (s ^. mVisible) (`getPendingActionForItem` s) (s ^. mSelected), [])
+  AgentWrite n i -> first (mAppliedSeq .~ n) (update (Intent i) s)
   AgentClients n -> (setAgentClients n s, [])
   -- The status line is overwritten within a frame, so the header keeps it.
   AgentServerDied err -> (s & mStatus ?~ ("agent socket failed: " <> err) & setAgentError (Just err), [])

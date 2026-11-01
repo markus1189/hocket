@@ -18,6 +18,7 @@ module Gen
     genFailureScript,
     genAgentCmd,
     genAgentSnapshot,
+    genIntent,
     genVideoFilterMode,
     genAsyncOp,
   )
@@ -43,6 +44,8 @@ import Hocket.Adapter.Raindrop (ErrorScope (..))
 import Hocket.Agent.Protocol
 import Hocket.Agent.Snapshot
 import Hocket.App.Model
+import Hocket.App.Msg (Intent (..), Now (..), Target (..))
+import Hocket.App.Nav (Nav (..))
 import Hocket.Domain.Bookmark
 import Network.HTTP.Media (MediaType, (//))
 import Network.HTTP.Types (Status, http11, mkStatus)
@@ -124,6 +127,7 @@ genModel = do
   status <- Gen.maybe genWord
   futureRem <- Gen.bool
   video <- genVideoFilterMode
+  applied <- Gen.int (Range.linear 0 1000)
   pure $
     initialModel
       & mContents .~ contents
@@ -131,6 +135,7 @@ genModel = do
       & mStatus .~ status
       & mShowFutureReminders .~ futureRem
       & mVideoFilter .~ video
+      & mAppliedSeq .~ applied
 
 -- | A fixture store with archive collection 4711 and a small page size, so
 -- paging is exercised.
@@ -251,3 +256,44 @@ genAgentSnapshot =
     <*> Gen.maybe (Gen.text (Range.linear 0 20) Gen.unicode)
     <*> Gen.maybe genPOSIXTime
     <*> Gen.maybe genAsyncOp
+    <*> Gen.int (Range.linear 0 100000)
+
+-- | Every 'Intent' constructor; ids are drawn from @known@ about half the
+-- time, so that most intents meet an item.
+genIntent :: [BookmarkItemId] -> Gen Intent
+genIntent known =
+  Gen.choice
+    [ SetArchive <$> target,
+      ToggleArchive <$> target,
+      ToggleReminder <$> target <*> now,
+      Unflag <$> target,
+      SetFlag <$> bid <*> genFlagAction <*> now,
+      pure ClearAllFlags,
+      pure FlagAllArchive,
+      pure Execute,
+      pure Refresh,
+      Open <$> target,
+      OpenAndFlag <$> bid,
+      EditInRaindrop <$> target,
+      CopyUrl <$> target,
+      Select <$> bid,
+      pure FilterEnter,
+      FilterText <$> query,
+      pure FilterLock,
+      pure FilterCancel,
+      SetFilter <$> query,
+      SetVideoFilter <$> genVideoFilterMode,
+      pure ToggleVideoOnly,
+      pure ToggleHideVideos,
+      pure ToggleFutureReminders,
+      SetShowFutureReminders <$> Gen.bool,
+      SetStatus <$> Gen.text (Range.linear 0 20) Gen.unicode,
+      Navigate <$> Gen.int (Range.linear 0 60) <*> nav,
+      pure Quit
+    ]
+  where
+    bid = if null known then genBookmarkItemId else Gen.choice [genBookmarkItemId, Gen.element known]
+    target = Gen.choice [pure Selected, ById <$> bid]
+    now = Now <$> genUTCTime <*> genTimeZone
+    query = Gen.text (Range.linear 0 10) Gen.alphaNum
+    nav = Gen.choice [Gen.element [Up, Down, Top, Bottom, NextFlagged, PrevFlagged], Page <$> Gen.int (Range.linear (-3) 3), HalfPage <$> Gen.int (Range.linear (-3) 3)]

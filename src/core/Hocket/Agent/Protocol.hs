@@ -250,7 +250,8 @@ stateView snap =
       "show_future_reminders" .= asShowFutureReminders snap,
       "status" .= asStatus snap,
       "last_updated" .= asLastUpdated snap,
-      "async_op" .= fmap asyncOpToText (asAsyncOp snap)
+      "async_op" .= fmap asyncOpToText (asAsyncOp snap),
+      "applied_seq" .= asAppliedSeq snap
     ]
   where
     items = asItems snap
