@@ -9,8 +9,9 @@ module Hocket.Agent.Intent (toIntent) where
 import Hocket.Agent.Protocol (WriteCmd (..))
 import Hocket.App.Msg
 
--- | Mirrors the shell's @toEvent@: the same command reaches the same state
--- change. 'Now' replaces the reminder clock @toEvent@ sampled itself.
+-- | The Intent a write stands for, the one its key produces, so an agent
+-- reaches no state a key could not. The server's @writeMsg@ samples 'Now'
+-- once per write.
 toIntent :: Now -> WriteCmd -> Intent
 toIntent now = \case
   CmdSetFlag bid act -> SetFlag bid act now

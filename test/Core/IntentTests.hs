@@ -45,7 +45,7 @@ intentTests :: TestTree
 intentTests =
   testGroup
     "toIntent"
-    [ testCase "every write command maps like the shell's toEvent" $
+    [ testCase "every write command maps to its key's Intent" $
         map (toIntent now . fst) rows @?= map snd rows,
       testCase "the table has one row per constructor" $
         length (nub (map (constructorName . fst) rows)) @?= length rows,

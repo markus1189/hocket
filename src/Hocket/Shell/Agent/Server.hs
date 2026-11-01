@@ -262,7 +262,7 @@ dispatch env rid = \case
     case validateWrite snap w of
       Left err -> pure (errResponse rid err)
       Right w' -> do
-        evt <- toEvent env w'
+        evt <- writeMsg env w'
         accepted <- aeInject env evt
         pure $
           if accepted
@@ -274,8 +274,8 @@ dispatch env rid = \case
 
 -- | A validated write as the Intent the keyboard would produce. The clock is
 -- sampled here, in the shell, once per write.
-toEvent :: AgentEnv -> WriteCmd -> IO Msg
-toEvent env cmd = Intent . (`toIntent` cmd) <$> aeNow env
+writeMsg :: AgentEnv -> WriteCmd -> IO Msg
+writeMsg env cmd = Intent . (`toIntent` cmd) <$> aeNow env
 
 -- | Serve the agent socket at this path for the length of the action, which
 -- gets the snapshot its loop must publish to. On the way out the server
