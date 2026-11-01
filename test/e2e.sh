@@ -21,7 +21,11 @@ tmp=$(mktemp -d /tmp/hocket-e2e.XXXXXX)
 # remain-on-exit is set here so a crashed hocket's exit status can be read.
 tm() { tmux -L "hocket-e2e-$$" -f /dev/null "$@"; }
 cleanup() {
+  # kill-server leaves the server's socket file behind.
+  local server_socket
+  server_socket=$(tm display-message -p -t keepalive '#{socket_path}' 2>/dev/null) || true
   tm kill-server 2>/dev/null || true
+  [ -z "$server_socket" ] || rm -f "$server_socket"
   rm -r "$tmp"
 }
 trap cleanup EXIT
