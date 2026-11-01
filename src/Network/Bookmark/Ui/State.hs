@@ -81,10 +81,11 @@ import qualified Brick.Widgets.List as L
 import Control.Applicative ((<|>))
 import Control.Lens
 import qualified Data.Text.Zipper as Z
-#if !MIN_VERSION_base(4,20,0)
-import Data.Foldable (foldl')
-#endif
+#if MIN_VERSION_base(4,20,0)
 import Data.Foldable (maximumBy)
+#else
+import Data.Foldable (foldl', maximumBy)
+#endif
 import Data.Function (on)
 import Data.Functor (($>))
 import Data.Map (Map)
