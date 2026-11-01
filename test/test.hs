@@ -3,7 +3,7 @@
 {-# LANGUAGE TypeApplications #-}
 
 import AgentClient (callAgent, isChannelFullError)
-import AgentServer (AgentEnv (..), cleanupAgentSocket, newBoundSocket, runAgentServer, socketDirIsOurs)
+import AgentServer (AgentEnv (..), BoundSocket, boundSocketId, cleanupAgentSocket, newBoundSocket, runAgentServer, socketDirIsOurs)
 import BatchTests (batchTests)
 import Brick.BChan (BChan, newBChan, readBChan, writeBChan)
 import Brick.Widgets.Edit (applyEdit)
@@ -13,7 +13,7 @@ import ClassifyTests (classifyTests)
 import Control.Concurrent (forkIO, threadDelay)
 import Control.Concurrent.Async (withAsync)
 import Control.Concurrent.STM (TVar, atomically, modifyTVar', newTVarIO)
-import Control.Exception (IOException, finally, throwIO, try)
+import Control.Exception (IOException, SomeException, finally, throwIO, try)
 import Control.Lens (ix, view, _1, _2)
 import Control.Lens.Operators
 import Control.Monad (void)
@@ -78,10 +78,11 @@ import System.IO
     hSetBuffering,
   )
 import System.IO.Temp (withSystemTempDirectory)
-import System.Posix.Files (createSymbolicLink, fileMode, getFileStatus, setFileMode)
+import System.Posix.Files (createSymbolicLink, deviceID, fileID, fileMode, getFileStatus, getSymbolicLinkStatus, isSocket, setFileMode)
 import System.Posix.Process (getProcessID)
 import System.Posix.Signals (Handler (Default), installHandler, raiseSignal, sigHUP, sigTERM)
 import System.Posix.Time (epochTime)
+import System.Posix.Types (DeviceID, FileID)
 import System.Timeout (timeout)
 import SystemTests (systemTests)
 import Test.Tasty
@@ -920,6 +921,33 @@ startOnOccupied path = do
   bound <- newBoundSocket
   timeout 2000000 (try @IOException (runAgentServer bound path quietEnv))
 
+-- | What sits at a path, for failure messages: absent, or type and dev+inode.
+describePath :: FilePath -> IO String
+describePath path = do
+  r <- try @IOException (getSymbolicLinkStatus path)
+  pure $ case r of
+    Left e -> "nothing (" <> show e <> ")"
+    Right st -> (if isSocket st then "socket " else "non-socket ") <> show (deviceID st, fileID st)
+
+holdsSocket :: FilePath -> Maybe (DeviceID, FileID) -> IO Bool
+holdsSocket path expected = do
+  r <- try @IOException (getSymbolicLinkStatus path)
+  pure $ case (r, expected) of
+    (Right st, Just i) -> isSocket st && (deviceID st, fileID st) == i
+    _ -> False
+
+-- | 'waitUntilReachable' with the standard budget, failing with what the
+-- path holds and what each instance recorded.
+reachableOr :: String -> FilePath -> [(String, BoundSocket)] -> IO ()
+reachableOr what path instances = do
+  r <- try @SomeException (waitUntilReachable 100 path)
+  case r of
+    Right () -> pure ()
+    Left _ -> do
+      at' <- describePath path
+      ids <- traverse (\(n, b) -> (\i -> n <> " = " <> show i) <$> boundSocketId b) instances
+      assertFailure (what <> "; path holds " <> at' <> "; " <> intercalate ", " ids)
+
 agentServerIntegrationTests :: TestTree
 agentServerIntegrationTests =
   testGroup
@@ -1108,13 +1136,17 @@ agentServerIntegrationTests =
           let path = root </> "s.sock"
           bound1 <- newBoundSocket
           withAsync (runAgentServer bound1 path quietEnv) $ \_ -> do
-            waitUntilReachable 100 path
+            reachableOr "instance 1 never became reachable" path [("bound1", bound1)]
             removeFile path
             bound2 <- newBoundSocket
             withAsync (runAgentServer bound2 path quietEnv) $ \_ -> do
-              waitUntilReachable 100 path
+              reachableOr "instance 2 never became reachable" path [("bound1", bound1), ("bound2", bound2)]
               cleanupAgentSocket bound1 False path
-              waitUntilReachable 1 path,
+              -- Deterministic: the path still holds instance 2's socket.
+              id2 <- boundSocketId bound2
+              after <- describePath path
+              assertBool ("cleanup with bound1 changed the path: " <> after <> ", bound2 = " <> show id2) =<< holdsSocket path id2
+              reachableOr "instance 2 unreachable after cleanup" path [("bound1", bound1), ("bound2", bound2)],
       testCase "a losing second instance does not unlink the live socket (B7b)" $
         withAgentServer $ \_ _ path -> do
           bound2 <- newBoundSocket

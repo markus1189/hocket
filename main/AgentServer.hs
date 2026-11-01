@@ -12,6 +12,7 @@ module AgentServer
     runAgentServer,
     BoundSocket,
     newBoundSocket,
+    boundSocketId,
     socketDirIsOurs,
     cleanupAgentSocket,
     resolveAgentSocketPath,
@@ -131,6 +132,10 @@ newtype BoundSocket = BoundSocket (IORef (Maybe (DeviceID, FileID)))
 
 newBoundSocket :: IO BoundSocket
 newBoundSocket = BoundSocket <$> newIORef Nothing
+
+-- | What the instance recorded after its bind; 'Nothing' until then.
+boundSocketId :: BoundSocket -> IO (Maybe (DeviceID, FileID))
+boundSocketId (BoundSocket ref) = readIORef ref
 
 -- | Whether 'runAgentServer' will create the socket's directory, making it
 -- hocket's to remove on exit. Ask before starting the server.
