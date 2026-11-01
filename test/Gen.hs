@@ -113,9 +113,7 @@ genContents = do
   Map.fromList <$> traverse (\i -> (\a -> (i ^. biId, (a, i))) <$> genConsistentAction i) items
 
 -- | Today's model is 'HocketState'; only the fields the pure core reads are
--- generated, the brick list stays as 'initialState' leaves it. The archive
--- collection is one 'genBookmarkItem' also assigns, so some items already
--- sit in it.
+-- generated, the brick list stays as 'initialState' leaves it.
 genModel :: Gen HocketState
 genModel = do
   contents <- genContents
@@ -124,7 +122,7 @@ genModel = do
   futureRem <- Gen.bool
   video <- genVideoFilterMode
   pure $
-    initialState (BookmarkCredentials (RaindropToken "") 4711)
+    initialState
       & hsContents .~ contents
       & hsLastUpdated .~ lastUpdated
       & hsStatus .~ status

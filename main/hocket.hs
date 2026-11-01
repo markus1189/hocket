@@ -131,14 +131,12 @@ import Network.Bookmark.Fake (encodeFixtureDump, fakePort)
 import Network.Bookmark.Port (RaindropPort (..))
 import Network.Bookmark.Reminder (reminderPolicy)
 import Network.Bookmark.Types
-  ( BookmarkCredentials (..),
-    BookmarkItem,
+  ( BookmarkItem,
     BookmarkItemBatch (..),
     BookmarkItemId (..),
     BookmarkRequest (AddBookmark, BatchArchiveBookmarks, RemoveReminder, RetrieveBookmarks, SetReminder),
     PendingAction (..),
     RaindropCollectionId,
-    RaindropToken (..),
     URL (..),
     biCreated,
     biExcerpt,
@@ -719,14 +717,14 @@ runTuiApp mAgentOpt Nothing = do
   ensureSchemaFile
   configPath <- getConfigPath
   cred <- input auto (T.pack configPath)
-  withTuiLog $ \runLog -> runTui mAgentOpt False (servantPort runLog cred) (initialState cred)
+  withTuiLog $ \runLog -> runTui mAgentOpt False (servantPort runLog cred) initialState
 -- Fixture mode never reads the config or credentials, so it cannot reach
 -- the real account.
 runTuiApp mAgentOpt (Just fo) = do
   seed <- LBS.readFile (foSeed fo)
   store <- either (\e -> hPutStrLn stderr ("hocket: bad fixture " <> foSeed fo <> ": " <> e) >> exitFailure) pure (fixtureStore fo seed)
   ref <- newIORef store
-  runTui mAgentOpt True (fakePort getCurrentTime ref) (initialState (BookmarkCredentials (RaindropToken "") 0))
+  runTui mAgentOpt True (fakePort getCurrentTime ref) initialState
     `finally` for_ (foDump fo) (\out -> readIORef ref >>= LBS.writeFile out . encodeFixtureDump)
 
 runTui :: Maybe AgentSocketOpt -> Bool -> RaindropPort -> HocketState -> IO ()

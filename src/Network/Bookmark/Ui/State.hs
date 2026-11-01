@@ -20,7 +20,6 @@ module Network.Bookmark.Ui.State
     asyncOpRunning,
     batchStepsWithWork,
     hsStatus,
-    hsCredentials,
     hsShowFutureReminders,
     hsVideoFilter,
     hsFilterActive,
@@ -124,7 +123,6 @@ data HocketState = HocketState
     _hsAsyncOp :: !(Maybe AsyncOp),
     _hsStatus :: !(Maybe Text),
     _hsContents :: !(Map BookmarkItemId (PendingAction, BookmarkItem)),
-    _hsCredentials :: !BookmarkCredentials,
     _hsShowFutureReminders :: !Bool,
     _hsVideoFilter :: !VideoFilterMode,
     _hsFilterActive :: !Bool,
@@ -209,8 +207,8 @@ batchStepsWithWork s =
           stepIf (counts ^. icReminderToBeRemoved > 0) StepRemoveReminders
         ]
 
-initialState :: BookmarkCredentials -> HocketState
-initialState creds =
+initialState :: HocketState
+initialState =
   HocketState
     (L.list ItemListName V.empty 1)
     (F.focusRing [ItemListName])
@@ -218,7 +216,6 @@ initialState creds =
     Nothing
     Nothing
     Map.empty
-    creds
     False
     NoVideoFilter
     False

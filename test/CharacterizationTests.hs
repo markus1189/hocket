@@ -25,7 +25,7 @@ characterizationTests =
   testGroup "Characterization (Phase 0 pins)" [syncTests, stepResultTests, keyTableTests]
 
 emptyState :: HocketState
-emptyState = initialState (BookmarkCredentials (RaindropToken "") 0)
+emptyState = initialState
 
 item :: Text -> Int -> BookmarkItem
 item i coll =

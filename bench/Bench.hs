@@ -83,7 +83,7 @@ mkItem i =
 mkState :: Int -> HocketState
 mkState n =
   syncForRender $
-    insertItems (map mkItem [1 .. n]) (initialState (BookmarkCredentials (RaindropToken "") 0))
+    insertItems (map mkItem [1 .. n]) initialState
 
 itemId :: Int -> BookmarkItemId
 itemId = BookmarkItemId . T.pack . show

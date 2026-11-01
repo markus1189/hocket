@@ -193,7 +193,7 @@ bookmarkItem2 = bookmarkItem1 {_biLastUpdate = read "2016-05-22 12:54:59 UTC", _
 bookmarkItem1_same_ts_diff_title :: BookmarkItem
 bookmarkItem1_same_ts_diff_title = bookmarkItem1 {_biTitle = "title for same ts item"}
 
-testState = initialState (BookmarkCredentials (RaindropToken "") 0)
+testState = initialState
 
 -- Fixtures for the 'X'-batch regression test: three items, one per bucket.
 batchReminderTime :: UTCTime
@@ -678,18 +678,7 @@ agentSnapshotTests =
         s ^. hsShowFutureReminders @?= True,
       testCase "setAgentClients sets the header count" $ do
         let s = setAgentClients 2 testState
-        s ^. hsAgentClients @?= 2,
-      testCase "credentials never appear in the encoded snapshot" $
-        let s =
-              syncForRender
-                ( insertItems
-                    [agentItemA]
-                    (initialState (BookmarkCredentials (RaindropToken "super-secret-token") 0))
-                )
-            encoded = LBS.unpack (A.encode (takeSnapshot 1 s))
-         in assertBool
-              "raindrop token must not appear in snapshot JSON"
-              (not ("super-secret-token" `isInfixOf` encoded))
+        s ^. hsAgentClients @?= 2
     ]
 
 agentProtocolTests :: TestTree
