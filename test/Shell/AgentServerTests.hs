@@ -113,7 +113,7 @@ sendRequest h line = do
       Right v -> pure v
 
 -- | Observe the next, non-announcement event injected into the event
--- channel (blocking). Skips SetAgentClients connect/disconnect bookkeeping.
+-- channel (blocking). Skips AgentClients connect/disconnect bookkeeping.
 readAgentInjected :: BChan I.Msg -> IO I.Msg
 readAgentInjected ch = do
   ev <- readBChan ch

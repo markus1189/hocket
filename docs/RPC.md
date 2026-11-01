@@ -44,6 +44,7 @@ For the operations guide, see the *Agent Control Socket* section of the
   - [6.12 `open_and_flag`](#612-open_and_flag)
   - [6.13 `set_status`](#613-set_status)
 - [7. Concurrency model](#7-concurrency-model)
+  - [7.1 Known limitation: waiting for one write](#71-known-limitation-waiting-for-one-write)
 - [8. Security](#8-security)
 - [9. Design constraints](#9-design-constraints)
 - [10. Example session](#10-example-session)
@@ -536,7 +537,7 @@ shown (and vice-versa); there is no separate agent lane.
         │         accept loop                          (STM/readTVarIO)
         │         └─ fork per client ── wait_version (check) / reads / writes
         ▼
- publish client count ──► BChan ──► SetAgentClients ──► header [agent]
+ publish client count ──► BChan ──► AgentClients ──► header [agent]
 ```
 
 - The **agent server thread** owns a `runAgentServer` accept loop; it never
@@ -545,7 +546,7 @@ shown (and vice-versa); there is no separate agent lane.
   connection are isolated.
 - **One thread per client**, spawned with `forkFinally`. The client count is
   mirrored into the TUI header as `[agent]` while `≥ 1` client is connected
-  (`SetAgentClients`).
+  (`AgentClients`).
 - **`wait_version` blocks only the client's thread** via `STM.check`; the
   event loop and other clients are unaffected.
 - **Single shared event channel.** Keyboard and agent writes feed the same
@@ -556,6 +557,18 @@ shown (and vice-versa); there is no separate agent lane.
   read `readTVarIO` / within `STM` by server threads. The only sequential
   point is the version bump, which happens inside the render thread, so
   versions are never duplicated.
+
+### 7.1 Known limitation: waiting for one write
+
+An agent cannot wait for exactly its own write. A write answers with the
+snapshot version at injection (§6.1), not with a mark for its own event, and
+`wait_version` wakes on any render: one for an event queued before the
+write, or one for a connection (§4.2), which every agent call is. Until the
+protocol can say which event a write became (a sequence number per write
+with a `wait_applied` method, say, or connections that do not render), the
+reliable pattern is the skill's: re-read until the state shows the effect,
+waiting with `wait_version` in between, bounded by a deadline rather than by
+a number of waits. Both fixes change the wire and are left for later.
 
 ---
 

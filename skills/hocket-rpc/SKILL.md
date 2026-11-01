@@ -143,7 +143,10 @@ hocket agent set_status "reviewing 40 unread bookmarks"
 ## Gotchas
 
 - **Acknowledged is not applied.** Injection success means the event was
-  queued on a channel of capacity 10. Confirm with `wait_version`.
+  queued on a channel of capacity 10. Confirm by waiting for the effect
+  itself, until a deadline (recipe above): one `wait_version` may wake for an
+  earlier event or for any agent's connection, and the protocol cannot yet
+  name your write's own event (spec §7.1).
 - **`version` is a pulse, not a digest.** It increments on any render,
   including ones that changed nothing you care about. Never treat it as a
   content hash; re-read state after it moves.
