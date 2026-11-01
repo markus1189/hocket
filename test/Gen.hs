@@ -10,6 +10,8 @@ module Gen
     genUTCTime,
     genTimeZone,
     genModel,
+    genFake,
+    genFailRule,
     genClientError,
     clientErrorRows,
     genClientErrorRow,
@@ -38,6 +40,7 @@ import qualified Hedgehog.Gen as Gen
 import qualified Hedgehog.Range as Range
 import Network.Bookmark.Agent.Protocol
 import Network.Bookmark.Agent.Snapshot
+import Network.Bookmark.Fake (FailRule (..), FailStatus (..), FakeRaindrop, emptyFake, frItems, frPageSize)
 import Network.Bookmark.Types
 import Network.Bookmark.Ui.State
 import Network.HTTP.Media (MediaType, (//))
@@ -128,6 +131,22 @@ genModel = do
       & hsStatus .~ status
       & hsShowFutureReminders .~ futureRem
       & hsVideoFilter .~ video
+
+-- | A fixture store with archive collection 4711 and a small page size, so
+-- paging is exercised.
+genFake :: Gen FakeRaindrop
+genFake = do
+  items <- Gen.list (Range.linear 0 40) genBookmarkItem
+  size <- Gen.integral (Range.linear 1 7)
+  pure (emptyFake 4711 & frPageSize .~ size & frItems .~ Map.fromList [(i ^. biId, i) | i <- items])
+
+-- | A @--fixture-fail@ rule: any step, every call or the N-th, any status.
+genFailRule :: Gen FailRule
+genFailRule =
+  FailRule
+    <$> Gen.enumBounded
+    <*> Gen.maybe (Gen.int (Range.linear 1 5))
+    <*> Gen.choice [pure FailConn, FailHttp <$> Gen.element [400, 404, 429, 500, 503]]
 
 genPOSIXTime :: Gen POSIXTime
 genPOSIXTime = (/ 1000) . fromInteger <$> Gen.integral (Range.linear 1400000000000 1900000000000)

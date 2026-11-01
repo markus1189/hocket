@@ -15,7 +15,7 @@ import qualified Data.Map as Map
 import Data.Text (Text)
 import qualified Data.Text as T
 import Data.Time (Day, UTCTime (..), addUTCTime, defaultTimeLocale, formatTime)
-import Gen (genBookmarkItem, genUTCTime)
+import Gen (genFake, genUTCTime)
 import Hedgehog (Gen, Property, annotateShow, assert, forAll, property, (===))
 import qualified Hedgehog.Gen as Gen
 import qualified Hedgehog.Range as Range
@@ -256,12 +256,6 @@ emptySeedTest =
       Right fr -> do
         Map.null (fr ^. frItems) @?= True
         fetch 0 "-1" Nothing fr @?= Right (0, [])
-
-genFake :: Gen FakeRaindrop
-genFake = do
-  items <- Gen.list (Range.linear 0 40) genBookmarkItem
-  size <- Gen.integral (Range.linear 1 7)
-  pure (emptyFake archive & frPageSize .~ size & frItems .~ Map.fromList [(i ^. biId, i) | i <- items])
 
 -- | Page from 0 until the first empty page, like the real fetch loop.
 fetchAll :: Text -> Maybe Text -> FakeRaindrop -> Either ClientError [BookmarkItem]
