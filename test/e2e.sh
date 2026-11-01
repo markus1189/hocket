@@ -1,5 +1,6 @@
 #!/usr/bin/env nix
 #! nix shell nixpkgs#bash nixpkgs#coreutils nixpkgs#tmux nixpkgs#jq nixpkgs#diffutils --command bash
+# shellcheck shell=bash
 # End-to-end runs of `hocket tui --fixture`, driven over the agent socket
 # (plan §6 Phase 2.4). Never touches the real account.
 #
@@ -33,7 +34,7 @@ tm new-session -d -s keepalive 'sleep 100000'
 server_socket=$(tm display-message -p -t keepalive '#{socket_path}')
 tm set-option -g remain-on-exit on
 
-name='' sock='' dump=''
+name='' sock='' dump='' desktop=''
 failed=()
 
 fail() {
@@ -62,23 +63,36 @@ state_is() { agent get_state | jq -e ".result | $1"; }
 action_is() { agent get_item "$1" | jq -e ".result.pending.action == \"$2\""; }
 
 # Writes from one client are injected in order, so once a later write shows
-# in get_state, every earlier one has been handled. The marker write must not
-# touch what the expected files compare: a status marker could overwrite the
-# batch's final status, which may already sit in the queue. Only this script
-# sets show_future_reminders, so alternating it is a clean marker. Then wait
-# for the async slot to be free again.
-marker=false
+# in get_state, every earlier one has been handled. The marker must not touch
+# what the expected files compare: a status marker could overwrite a batch's
+# final status, or be overwritten by FetchCompleted before it is seen. So
+# show_future_reminders goes false -> true -> false, each step awaited: the
+# setting ends unchanged, and showing more items never moves the selection.
+# A scenario that turns it on asserts with wait_for until it is off again.
 settle() {
-  if [ "$marker" = false ]; then marker=true; else marker=false; fi
-  agent set_show_future_reminders "$([ "$marker" = true ] && echo --show || echo --hide)" >/dev/null &&
-    wait_for 10 "the marker write" state_is ".show_future_reminders == $marker" &&
+  state_is '.show_future_reminders == false' >/dev/null || {
+    fail "settle needs show_future_reminders off; the scenario left it on"
+    return 1
+  }
+  agent set_show_future_reminders --show >/dev/null &&
+    wait_for 10 "the marker" state_is '.show_future_reminders == true' &&
+    agent set_show_future_reminders --hide >/dev/null &&
+    wait_for 10 "the marker's reset" state_is '.show_future_reminders == false' &&
     wait_for 20 "the async slot to be free" state_is '.async_op == null'
 }
 
-start() { # NAME SEED [ARGS...]
+start() { # NAME SEED [--desktop] [ARGS...]
   name=$1
   local seed=$2 dir=$tmp/$1
   shift 2
+  # --desktop: log what the browser and clipboard would have done, and let
+  # key() send the keys that do it.
+  desktop=''
+  if [ "${1-}" = --desktop ]; then
+    shift
+    desktop=$dir/desktop.jsonl
+    set -- --fixture-desktop-log "$desktop" "$@"
+  fi
   # The socket gets a directory of its own: hocket removes the socket's
   # directory on exit (plan B7).
   mkdir -p "$dir/home" "$dir/config" "$dir/state" "$dir/runtime" "$dir/cwd" "$dir/sock"
@@ -95,12 +109,25 @@ start() { # NAME SEED [ARGS...]
   wait_for 10 "the agent socket" test -S "$sock" && settle
 }
 
-# Enter, Space and e open a browser, fixture mode or not.
+# Enter, Space, e and y reach the browser or clipboard; fixture mode only
+# records them, and a scenario sends them only when it checks that record.
 key() {
   case "$1" in
-  Enter | Space | ' ' | e | C-m | C-j) fail "refusing to send '$1'" ;;
-  *) tm send-keys -t "$name" "$1" ;;
+  Enter | Space | ' ' | e | y | C-m | C-j)
+    [ -n "$desktop" ] || {
+      fail "refusing to send '$1' without --desktop"
+      return 1
+    }
+    ;;
   esac
+  tm send-keys -t "$name" "$1"
+}
+
+# filter_lock TEXT: type TEXT into the filter editor and lock it with Enter,
+# which in the editor only keeps the query.
+filter_lock() {
+  key / && tm send-keys -t "$name" -l "$1" && tm send-keys -t "$name" Enter &&
+    wait_for 5 "the filter \"$1\"" state_is ".filter_query == \"$1\""
 }
 
 # Always quit with Q: a killed hocket skips its exit path (and the dump).
@@ -137,7 +164,10 @@ finish() {
   echo "$local_json" >"$dir/local.json"
   diff -u <(jq -S . "$here/e2e/expected-$name.json") "$dir/server.json" >&2 || ok=1
   diff -u <(jq -S . "$here/e2e/expected-$name.local.json") "$dir/local.json" >&2 || ok=1
-  ((ok == 0)) || fail "dump or local state differs from the expected files (diffs above)"
+  if [ -n "$desktop" ]; then
+    diff -u "$here/e2e/expected-$name.desktop.jsonl" <(cat "$desktop" 2>/dev/null) >&2 || ok=1
+  fi
+  ((ok == 0)) || fail "dump, local state or desktop log differs from the expected files (diffs above)"
 }
 
 flag() { agent set_flag "$1" --action "$2" >/dev/null; }
