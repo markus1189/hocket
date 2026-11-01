@@ -117,6 +117,7 @@ test-suite test
                      , HeadlessTests
                      , Gen
                      , SnapshotGoldenTests
+                     , SMFixtureTests
                      , IntentTests
                      , NavTests
                      , VisibleTests
