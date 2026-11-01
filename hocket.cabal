@@ -118,6 +118,7 @@ test-suite test
                      , FixtureTests
                      , Gen
                      , IntentTests
+                     , KeyIntentTests
                      , PlanTests
                      , ReminderTests
                      , Keys
@@ -159,6 +160,7 @@ test-suite test
                      , text-zipper
                      , time
                      , vector
+                     , vty
 
 benchmark bench
   default-language:    Haskell2010
