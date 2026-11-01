@@ -22,6 +22,7 @@ library
                      , Network.Raindrop.Api
                      , Network.Bookmark.Agent.Protocol
                      , Network.Bookmark.Agent.Snapshot
+                     , Network.Bookmark.Fake
                      , Network.Bookmark.Reminder
                      , Network.Bookmark.Types
                      , Network.Bookmark.Ui.State
@@ -29,6 +30,7 @@ library
                      , Network.Bookmark.Ui.Widgets
   Build-depends:       aeson
                      , base
+                     , bytestring
                      , brick
                      , containers
                      , dhall
@@ -40,6 +42,7 @@ library
                      , retry
                      , servant
                      , servant-client
+                     , servant-client-core
                      , sorted-list
                      , text
                      , text-zipper
