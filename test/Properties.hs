@@ -3,10 +3,11 @@
 
 module Properties (propertyTests) where
 
-import Control.Lens ((^.))
+import Control.Lens ((%~), (&), (.~), (^.))
 import Data.Aeson (FromJSON (parseJSON), withObject, (.:))
 import qualified Data.Aeson as A
 import Data.Aeson.Types (Parser)
+import qualified Data.Map as Map
 import Data.Text (Text)
 import Data.Time.Clock (addUTCTime)
 import Gen
@@ -36,25 +37,29 @@ propertyTests =
       testProperty "AgentSnapshot JSON round-trips" $ property $ do
         snap <- forAll genAgentSnapshot
         tripping snap A.encode (fmap unWire . A.eitherDecode),
-      testProperty "insertItems is independent of insertion order" $ property $ do
+      testProperty "insertItems is order-independent and keeps existing flags" $ property $ do
         start <- forAllWith (show . (^. hsContents)) genModel
-        items <- forAll genItemVersions
+        items <- forAll (genItemVersions (Map.keys (start ^. hsContents)))
         shuffled <- forAll (Gen.shuffle items)
-        insertItems shuffled start ^. hsContents === insertItems items start ^. hsContents
+        let result = insertItems items start ^. hsContents
+        insertItems shuffled start ^. hsContents === result
+        Map.map fst (start ^. hsContents) === Map.map fst (Map.intersection result (start ^. hsContents))
     ]
 
--- | Several versions per id with distinct '_biLastUpdate': Raindrop never
+-- | Several versions per id with distinct 'biLastUpdate': Raindrop never
 -- sends two different bodies with the same id and timestamp, so ties are not
--- a case 'insertItem' has to order.
-genItemVersions :: Gen [BookmarkItem]
-genItemVersions = concat <$> Gen.list (Range.linear 0 15) versions
+-- a case 'insertItem' has to order. About half the ids are drawn from
+-- @known@, so updates of flagged items are exercised too.
+genItemVersions :: [BookmarkItemId] -> Gen [BookmarkItem]
+genItemVersions known = concat <$> Gen.list (Range.linear 0 15) versions
   where
     versions = do
       base <- genBookmarkItem
+      bid <- if null known then pure (base ^. biId) else Gen.choice [pure (base ^. biId), Gen.element known]
       n <- Gen.int (Range.linear 1 4)
       titles <- Gen.list (Range.singleton n) (Gen.text (Range.linear 0 10) Gen.alphaNum)
       pure
-        [ base {_biLastUpdate = addUTCTime (fromIntegral k) (_biLastUpdate base), _biTitle = t}
+        [ base & biId .~ bid & biLastUpdate %~ addUTCTime (fromIntegral k) & biTitle .~ t
         | (k, t) <- zip [0 :: Int ..] titles
         ]
 
