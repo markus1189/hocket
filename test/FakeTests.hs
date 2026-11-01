@@ -76,7 +76,7 @@ withRule :: Text -> FakeRaindrop -> FakeRaindrop
 withRule spec fr = either (error . T.unpack) (\r -> fr & frRules %~ (<> [r])) (parseFixtureFail spec)
 
 fakeTests :: TestTree
-fakeTests = testGroup "Fake Raindrop" [requestTests, failureTests, parserTests, seedTests, emptySeedTest, fakeProperties]
+fakeTests = testGroup "Fake Raindrop" [requestTests, failureTests, parserTests, seedTests, emptySeedTest, dumpTest, fakeProperties]
 
 requestTests :: TestTree
 requestTests =
@@ -186,6 +186,16 @@ seedTests =
         Map.size (fr ^. frItems) @?= 18
         all ((== (-1)) . (^. biCollectionId)) (fr ^. frItems) @?= True
 
+dumpTest :: TestTree
+dumpTest =
+  testCase "a dump of the seed reads back to the same items" $ do
+    body <- LBS.readFile "test/raindrop-items1.json"
+    case seedFake archive body of
+      Left e -> assertFailure e
+      Right fr -> do
+        Map.size (fr ^. frItems) @?= 18
+        fmap (^. frItems) (seedFake archive (encodeFixtureDump fr)) @?= Right (fr ^. frItems)
+
 -- | The B1 E2E seed: an empty account.
 emptySeedTest :: TestTree
 emptySeedTest =
@@ -239,7 +249,10 @@ fakeProperties =
       testProperty "paging returns every item exactly once" $ property $ do
         fr <- forAll genFake
         fmap ids (fetchAll "0" Nothing fr) === Right (Map.keys (fr ^. frItems)),
-      testProperty "a failed call leaves the store unchanged but counted" failedCallUnchanged
+      testProperty "a failed call leaves the store unchanged but counted" failedCallUnchanged,
+      testProperty "a dump seeds the same items" $ property $ do
+        fr <- forAll genFake
+        fmap (^. frItems) (seedFake archive (encodeFixtureDump fr)) === Right (fr ^. frItems)
     ]
 
 failedCallUnchanged :: Property

@@ -45,6 +45,7 @@ module Network.Bookmark.Fake
     FailRule (..),
     emptyFake,
     seedFake,
+    encodeFixtureDump,
     serveFake,
     parseFixtureFail,
   )
@@ -53,6 +54,7 @@ where
 import Control.Exception (toException)
 import Control.Lens
 import Data.Aeson (eitherDecode)
+import qualified Data.Aeson as A
 import qualified Data.ByteString.Lazy as LBS
 import Data.List (find, sortOn)
 import Data.Map (Map)
@@ -104,6 +106,14 @@ seedFake :: Int -> LBS.ByteString -> Either String FakeRaindrop
 seedFake archive body = do
   Items _ items <- eitherDecode body
   pure (emptyFake archive & frItems .~ Map.fromList [(i ^. biId, i) | i <- items])
+
+-- | The store's items as a Raindrop list response, so a dump can seed the
+-- next run through 'seedFake'.
+encodeFixtureDump :: FakeRaindrop -> LBS.ByteString
+encodeFixtureDump fr =
+  A.encode (A.object ["result" A..= True, "items" A..= items, "count" A..= length items])
+  where
+    items = Map.elems (fr ^. frItems)
 
 stepOf :: BookmarkRequest a -> Maybe FakeStep
 stepOf = \case
