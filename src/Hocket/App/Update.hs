@@ -25,13 +25,13 @@ import Hocket.App.Sync (applyArchived, applyFetchCompleted, applyRemindersRemove
 import Hocket.Domain.Bookmark
 import Hocket.Domain.Reminder (reminderPolicy)
 
-update :: Msg -> HocketState -> (HocketState, [Effect])
+update :: Msg -> Model -> (Model, [Effect])
 update msg s = case msg of
   Intent Quit -> (s, [Halt])
   Intent (Open t) -> (s, [OpenUrl Firefox (bit ^. biLink) | bit <- target t])
   Intent (EditInRaindrop t) -> (s, [OpenUrl XdgOpen (editUrl bit) | bit <- target t])
   Intent (CopyUrl t) -> (s, [CopyText (bit ^. biLink) | bit <- target t])
-  Intent (OpenAndFlag bid) -> case s ^? hsContents . ix bid . _2 of
+  Intent (OpenAndFlag bid) -> case s ^? mContents . ix bid . _2 of
     Just bit -> (settle (setPendingAction bid ToBeArchived s), [OpenUrl Firefox (bit ^. biLink)])
     Nothing -> (s, [])
   -- The key intents carry no guard (keyIntents); the no-ops of the old key
@@ -44,9 +44,9 @@ update msg s = case msg of
   Intent ClearAllFlags -> (clearAllFlags s, [])
   Intent FlagAllArchive -> (setAllFlagsToArchive s, [])
   -- Agent @select_item@: only an item the list shows can be selected.
-  Intent (Select bid) -> (s & hsSelected %~ \cur -> if V.any ((== bid) . (^. biId)) (s ^. hsVisible) then Just bid else cur, [])
+  Intent (Select bid) -> (s & mSelected %~ \cur -> if V.any ((== bid) . (^. biId)) (s ^. mVisible) then Just bid else cur, [])
   Intent FilterEnter -> (enterFilterMode s, [])
-  Intent (FilterText t) -> refilter (hsFilterQuery .~ t)
+  Intent (FilterText t) -> refilter (mFilterQuery .~ t)
   Intent FilterLock -> (lockFilter s, [])
   Intent FilterCancel -> refilter cancelFilter
   Intent (SetFilter q) -> refilter (setFilterQuery q)
@@ -55,29 +55,29 @@ update msg s = case msg of
   Intent ToggleHideVideos -> refilter toggleInvertedVideoFilter
   Intent ToggleFutureReminders -> refilter toggleShowFutureReminders
   Intent (SetShowFutureReminders b) -> refilter (setShowFutureReminders b)
-  Intent (SetStatus t) -> (s & hsStatus ?~ t, [])
-  Intent (Navigate height nav) -> (s & hsSelected .~ navigate height nav (s ^. hsVisible) (`getPendingActionForItem` s) (s ^. hsSelected), [])
+  Intent (SetStatus t) -> (s & mStatus ?~ t, [])
+  Intent (Navigate height nav) -> (s & mSelected .~ navigate height nav (s ^. mVisible) (`getPendingActionForItem` s) (s ^. mSelected), [])
   AgentClients n -> (setAgentClients n s, [])
   -- The status line is overwritten within a frame, so the header keeps it.
-  AgentServerDied err -> (s & hsStatus ?~ ("agent socket failed: " <> err) & setAgentError (Just err), [])
+  AgentServerDied err -> (s & mStatus ?~ ("agent socket failed: " <> err) & setAgentError (Just err), [])
   -- One async op at a time: a refresh while one runs is dropped, as before.
   Intent Refresh -> case tryAcquireAsyncOp OpFetchItems s of
     Nothing -> (s, [])
-    Just fetching -> (fetching & hsStatus ?~ ("fetching" <> since), [StartFetch (planSync lastUpdated)])
-  FetchCompleted wasAllCollectionsFetch batches -> (applyFetchCompleted wasAllCollectionsFetch batches (s & hsStatus .~ Nothing), [])
-  FetchFailed err -> (completeAsyncOp s & hsStatus ?~ ("failed" <> maybe "<no err>" (": " <>) err), [])
+    Just fetching -> (fetching & mStatus ?~ ("fetching" <> since), [StartFetch (planSync lastUpdated)])
+  FetchCompleted wasAllCollectionsFetch batches -> (applyFetchCompleted wasAllCollectionsFetch batches (s & mStatus .~ Nothing), [])
+  FetchFailed err -> (completeAsyncOp s & mStatus ?~ ("failed" <> maybe "<no err>" (": " <>) err), [])
   -- Nothing to send, or an async op already running: dropped, as before.
   Intent Execute -> case (planBatch s, tryAcquireAsyncOp OpExecuteBatch s) of
-    (Just plan, Just running) -> (running & hsBatch ?~ BatchProgress (planSteps plan) [], [StartBatch plan])
+    (Just plan, Just running) -> (running & mBatch ?~ BatchProgress (planSteps plan) [], [StartBatch plan])
     _ -> (s, [])
-  BatchStepStarted step -> (s & hsStatus ?~ stepLabel step, [])
-  StepDone result -> (applyStep result s & hsBatch . _Just . bpRan <>~ [ranStep result], [])
+  BatchStepStarted step -> (s & mStatus ?~ stepLabel step, [])
+  StepDone result -> (applyStep result s & mBatch . _Just . bpRan <>~ [ranStep result], [])
   -- An error that ended the batch early replaces the summary, as before.
-  BatchFinished err -> (completeAsyncOp s & hsBatch .~ Nothing & hsStatus .~ (err <|> (s ^. hsBatch >>= summary)), [])
-  SystemFailed err -> (s & hsStatus ?~ err, [])
-  Copied url -> (s & hsStatus ?~ ("Copied: " <> url), [])
+  BatchFinished err -> (completeAsyncOp s & mBatch .~ Nothing & mStatus .~ (err <|> (s ^. mBatch >>= summary)), [])
+  SystemFailed err -> (s & mStatus ?~ err, [])
+  Copied url -> (s & mStatus ?~ ("Copied: " <> url), [])
   where
-    lastUpdated = s ^. hsLastUpdated
+    lastUpdated = s ^. mLastUpdated
     since = maybe "" (\t -> " since: " <> formatPOSIXTime (t - 86400)) lastUpdated
     -- What is visible changes, so the list follows at once, as before.
     refilter f = (settle (f s), [])
@@ -137,7 +137,7 @@ stepName = \case
 
 -- | Only what the server accepted changes locally; failed and skipped items
 -- keep their flags.
-applyStep :: StepResult -> HocketState -> HocketState
+applyStep :: StepResult -> Model -> Model
 applyStep = \case
   Archived o -> applyArchived (o ^. soOk)
   RemindersSetAt o -> applyRemindersSet (o ^. soOk)
@@ -155,7 +155,7 @@ flagFor now = \case
   FlagNone -> None
 
 -- | Keys act on the focused item; an unknown id is no item.
-targetItem :: HocketState -> Target -> Maybe BookmarkItem
+targetItem :: Model -> Target -> Maybe BookmarkItem
 targetItem s = \case
   Selected -> focusedItem s
-  ById bid -> s ^? hsContents . ix bid . _2
+  ById bid -> s ^? mContents . ix bid . _2

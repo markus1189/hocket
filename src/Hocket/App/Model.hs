@@ -4,10 +4,10 @@
 {-# LANGUAGE ViewPatterns #-}
 
 module Hocket.App.Model
-  ( HocketState,
-    hsNumItems,
-    hsLastUpdated,
-    hsContents,
+  ( Model,
+    mNumItems,
+    mLastUpdated,
+    mContents,
     Name (..),
     VideoFilterMode (..),
     AsyncOp (..),
@@ -15,24 +15,24 @@ module Hocket.App.Model
     BatchProgress (BatchProgress),
     bpPlanned,
     bpRan,
-    hsBatch,
-    hsAsyncOp,
+    mBatch,
+    mAsyncOp,
     tryAcquireAsyncOp,
     completeAsyncOp,
     asyncOpRunning,
     batchStepsWithWork,
-    hsStatus,
-    hsShowFutureReminders,
-    hsVideoFilter,
-    hsFilterActive,
-    hsFilterQuery,
+    mStatus,
+    mShowFutureReminders,
+    mVideoFilter,
+    mFilterActive,
+    mFilterQuery,
     ItemCounts,
     icNone,
     icToBeArchived,
     icToBeReminded,
     icReminderToBeRemoved,
     icFutureReminders,
-    initialState,
+    initialModel,
     insertItem,
     insertItems,
     removeItem,
@@ -44,9 +44,9 @@ module Hocket.App.Model
     setVideoFilterMode,
     setShowFutureReminders,
     setAgentClients,
-    hsAgentClients,
+    mAgentClients,
     setAgentError,
-    hsAgentError,
+    mAgentError,
     clearAllFlags,
     clearFlagsForItems,
     clearToBeRemindedFlags,
@@ -70,8 +70,8 @@ module Hocket.App.Model
     removeReminderFromItems,
     SortByUpdated,
     settle,
-    hsVisible,
-    hsSelected,
+    mVisible,
+    mSelected,
     visibleItems,
     getSortDate,
     isVideoBookmark,
@@ -132,44 +132,44 @@ data BatchProgress = BatchProgress
 
 makeLenses ''BatchProgress
 
-data HocketState = HocketState
-  { _hsLastUpdated :: !(Maybe POSIXTime),
-    _hsAsyncOp :: !(Maybe AsyncOp),
-    _hsBatch :: !(Maybe BatchProgress),
-    _hsStatus :: !(Maybe Text),
-    _hsContents :: !(Map BookmarkItemId (PendingAction, BookmarkItem)),
-    _hsShowFutureReminders :: !Bool,
-    _hsVideoFilter :: !VideoFilterMode,
-    _hsFilterActive :: !Bool,
+data Model = Model
+  { _mLastUpdated :: !(Maybe POSIXTime),
+    _mAsyncOp :: !(Maybe AsyncOp),
+    _mBatch :: !(Maybe BatchProgress),
+    _mStatus :: !(Maybe Text),
+    _mContents :: !(Map BookmarkItemId (PendingAction, BookmarkItem)),
+    _mShowFutureReminders :: !Bool,
+    _mVideoFilter :: !VideoFilterMode,
+    _mFilterActive :: !Bool,
     -- | The filter text (plan D3): the core's; the editor only edits it.
-    _hsFilterQuery :: !Text,
-    _hsAgentClients :: !Int,
+    _mFilterQuery :: !Text,
+    _mAgentClients :: !Int,
     -- | Set when the agent socket server died; the shared status line is
     -- overwritten within a frame, so the header carries this instead.
-    _hsAgentError :: !(Maybe Text),
+    _mAgentError :: !(Maybe Text),
     -- | What the list shows, in order; only 'settle' writes it.
-    _hsVisible :: !(V.Vector BookmarkItem),
+    _mVisible :: !(V.Vector BookmarkItem),
     -- | The selection, by id: always visible, or 'Nothing' when nothing is
     -- (I4). The brick list follows it, never the other way round.
-    _hsSelected :: !(Maybe BookmarkItemId)
+    _mSelected :: !(Maybe BookmarkItemId)
   }
 
-makeLenses ''HocketState
+makeLenses ''Model
 
-asyncOpRunning :: HocketState -> Bool
-asyncOpRunning s = case s ^. hsAsyncOp of
+asyncOpRunning :: Model -> Bool
+asyncOpRunning s = case s ^. mAsyncOp of
   Nothing -> False
   Just _ -> True
 
 -- | Acquire the single async slot (marking it in-flight), or 'Nothing' if
 -- another op already owns it.
-tryAcquireAsyncOp :: AsyncOp -> HocketState -> Maybe HocketState
+tryAcquireAsyncOp :: AsyncOp -> Model -> Maybe Model
 tryAcquireAsyncOp whichOp s
   | asyncOpRunning s = Nothing
-  | otherwise = Just (s & hsAsyncOp ?~ whichOp)
+  | otherwise = Just (s & mAsyncOp ?~ whichOp)
 
-completeAsyncOp :: HocketState -> HocketState
-completeAsyncOp = hsAsyncOp .~ Nothing
+completeAsyncOp :: Model -> Model
+completeAsyncOp = mAsyncOp .~ Nothing
 
 newtype SortByUpdated = SBU BookmarkItem
 
@@ -194,10 +194,10 @@ data ItemCounts = ItemCounts
 
 makeLenses ''ItemCounts
 
-hsNumItems :: HocketState -> ItemCounts
-hsNumItems s = foldl' step (ItemCounts 0 0 0 0 0) (s ^. hsContents)
+mNumItems :: Model -> ItemCounts
+mNumItems s = foldl' step (ItemCounts 0 0 0 0 0) (s ^. mContents)
   where
-    countFuture = not (s ^. hsShowFutureReminders)
+    countFuture = not (s ^. mShowFutureReminders)
     step c (action, item) =
       (if countFuture && isJust (item ^. biReminder) then icFutureReminders +~ 1 else id) $
         case action of
@@ -207,9 +207,9 @@ hsNumItems s = foldl' step (ItemCounts 0 0 0 0 0) (s ^. hsContents)
           ReminderToBeRemoved -> c & icReminderToBeRemoved +~ 1
 
 -- | The non-empty 'X' sub-buckets, in the order the batch op runs them.
-batchStepsWithWork :: HocketState -> [BatchStep]
+batchStepsWithWork :: Model -> [BatchStep]
 batchStepsWithWork s =
-  let counts = hsNumItems s
+  let counts = mNumItems s
       stepIf pending step = [step | pending]
    in concat
         [ stepIf (counts ^. icToBeArchived > 0) StepArchive,
@@ -217,9 +217,9 @@ batchStepsWithWork s =
           stepIf (counts ^. icReminderToBeRemoved > 0) StepRemoveReminders
         ]
 
-initialState :: HocketState
-initialState =
-  HocketState
+initialModel :: Model
+initialModel =
+  Model
     Nothing
     Nothing
     Nothing
@@ -234,33 +234,33 @@ initialState =
     V.empty
     Nothing
 
-insertItem :: BookmarkItem -> HocketState -> HocketState
+insertItem :: BookmarkItem -> Model -> Model
 insertItem bit s =
-  s & hsContents %~ Map.insertWith newer (_biId bit) (None, bit)
+  s & mContents %~ Map.insertWith newer (_biId bit) (None, bit)
   where
     newer :: (a, BookmarkItem) -> (a, BookmarkItem) -> (a, BookmarkItem)
     newer newBi oldBi = (fst oldBi, maximumBy (comparing _biLastUpdate) (map snd [oldBi, newBi]))
 
-insertItems :: (Foldable f) => f BookmarkItem -> HocketState -> HocketState
+insertItems :: (Foldable f) => f BookmarkItem -> Model -> Model
 insertItems = flip (foldl' (flip insertItem))
 
-removeItem :: BookmarkItemId -> HocketState -> HocketState
-removeItem bid s = s & hsContents . at bid .~ Nothing
+removeItem :: BookmarkItemId -> Model -> Model
+removeItem bid s = s & mContents . at bid .~ Nothing
 
-removeItems :: (Foldable f) => f BookmarkItemId -> HocketState -> HocketState
+removeItems :: (Foldable f) => f BookmarkItemId -> Model -> Model
 removeItems = flip (foldl' (flip removeItem))
 
-togglePendingAction :: BookmarkItemId -> HocketState -> HocketState
-togglePendingAction bid = hsContents . ix bid . _1 %~ toggle
+togglePendingAction :: BookmarkItemId -> Model -> Model
+togglePendingAction bid = mContents . ix bid . _1 %~ toggle
   where
     toggle None = ToBeArchived
     toggle ToBeArchived = None
     toggle (ToBeReminded _) = None
     toggle ReminderToBeRemoved = None
 
-togglePendingActionToReminder :: BookmarkItemId -> UTCTime -> HocketState -> HocketState
+togglePendingActionToReminder :: BookmarkItemId -> UTCTime -> Model -> Model
 togglePendingActionToReminder bid reminderTime s =
-  case s ^. hsContents . at bid of
+  case s ^. mContents . at bid of
     Just (currentAction, item) ->
       let hasExistingReminder = isJust (item ^. biReminder)
           newAction = case currentAction of
@@ -268,74 +268,74 @@ togglePendingActionToReminder bid reminderTime s =
             ToBeReminded _ -> None
             ReminderToBeRemoved -> None
             ToBeArchived -> if hasExistingReminder then ReminderToBeRemoved else ToBeReminded reminderTime
-       in s & hsContents . at bid ?~ (newAction, item)
+       in s & mContents . at bid ?~ (newAction, item)
     Nothing -> s
 
-focusedItem :: HocketState -> Maybe BookmarkItem
-focusedItem s = s ^. hsSelected >>= \bid -> s ^? hsContents . ix bid . _2
+focusedItem :: Model -> Maybe BookmarkItem
+focusedItem s = s ^. mSelected >>= \bid -> s ^? mContents . ix bid . _2
 
-getPendingActionForItem :: BookmarkItemId -> HocketState -> PendingAction
+getPendingActionForItem :: BookmarkItemId -> Model -> PendingAction
 getPendingActionForItem bid s =
-  case s ^. hsContents . at bid of
+  case s ^. mContents . at bid of
     Just (action, _) -> action
     Nothing -> None
 
 -- | The cursor's move after a key's flag change: the next visible item.
 -- Flags do not change what is visible, so the move sees the same list.
-selectNext :: HocketState -> HocketState
-selectNext s = s & hsSelected .~ Nav.navigate 0 Nav.Down (s ^. hsVisible) (`getPendingActionForItem` s) (s ^. hsSelected)
+selectNext :: Model -> Model
+selectNext s = s & mSelected .~ Nav.navigate 0 Nav.Down (s ^. mVisible) (`getPendingActionForItem` s) (s ^. mSelected)
 
 -- | The key-path toggles: flip the flag, then move the cursor down.
-shiftItem :: BookmarkItemId -> HocketState -> HocketState
+shiftItem :: BookmarkItemId -> Model -> Model
 shiftItem bid = selectNext . togglePendingAction bid
 
 -- | Archive from any flag; 'shiftItem' would clear a reminder flag instead.
-archiveItem :: BookmarkItemId -> HocketState -> HocketState
+archiveItem :: BookmarkItemId -> Model -> Model
 archiveItem bid = selectNext . setPendingAction bid ToBeArchived
 
 -- | Key @u@: what 'shiftItem' and 'shiftItemReminder' do to a flagged item,
 -- which ends at 'None' whatever the reminder time.
-unflagItem :: BookmarkItemId -> HocketState -> HocketState
+unflagItem :: BookmarkItemId -> Model -> Model
 unflagItem bid = selectNext . setPendingAction bid None
 
-shiftItemReminder :: BookmarkItemId -> UTCTime -> HocketState -> HocketState
+shiftItemReminder :: BookmarkItemId -> UTCTime -> Model -> Model
 shiftItemReminder bid reminderTime = selectNext . togglePendingActionToReminder bid reminderTime
 
 -- | Idempotent flag assignment for the agent socket: unlike the keyboard
 -- toggles this cannot flip the wrong way when the caller's view is stale.
 -- A no-op for unknown ids.
-setPendingAction :: BookmarkItemId -> PendingAction -> HocketState -> HocketState
-setPendingAction bid act = hsContents . ix bid . _1 .~ act
+setPendingAction :: BookmarkItemId -> PendingAction -> Model -> Model
+setPendingAction bid act = mContents . ix bid . _1 .~ act
 
 -- | Replace the fuzzy filter query wholesale (agents set it in one step
 -- rather than char-by-char) and leave filter-input mode locked in.
-setFilterQuery :: Text -> HocketState -> HocketState
-setFilterQuery q = (hsFilterQuery .~ q) . (hsFilterActive .~ False)
+setFilterQuery :: Text -> Model -> Model
+setFilterQuery q = (mFilterQuery .~ q) . (mFilterActive .~ False)
 
-setVideoFilterMode :: VideoFilterMode -> HocketState -> HocketState
-setVideoFilterMode m = hsVideoFilter .~ m
+setVideoFilterMode :: VideoFilterMode -> Model -> Model
+setVideoFilterMode m = mVideoFilter .~ m
 
-setShowFutureReminders :: Bool -> HocketState -> HocketState
-setShowFutureReminders b = hsShowFutureReminders .~ b
+setShowFutureReminders :: Bool -> Model -> Model
+setShowFutureReminders b = mShowFutureReminders .~ b
 
-setAgentClients :: Int -> HocketState -> HocketState
-setAgentClients n = hsAgentClients .~ n
+setAgentClients :: Int -> Model -> Model
+setAgentClients n = mAgentClients .~ n
 
-setAgentError :: Maybe Text -> HocketState -> HocketState
-setAgentError e = hsAgentError .~ e
+setAgentError :: Maybe Text -> Model -> Model
+setAgentError e = mAgentError .~ e
 
-setAllFlags :: PendingAction -> HocketState -> HocketState
-setAllFlags action = hsContents . mapped . _1 .~ action
+setAllFlags :: PendingAction -> Model -> Model
+setAllFlags action = mContents . mapped . _1 .~ action
 
-clearAllFlags :: HocketState -> HocketState
+clearAllFlags :: Model -> Model
 clearAllFlags = setAllFlags None
 
-clearFlagsForItems :: PendingAction -> [BookmarkItemId] -> HocketState -> HocketState
+clearFlagsForItems :: PendingAction -> [BookmarkItemId] -> Model -> Model
 clearFlagsForItems targetAction bids s =
   foldl'
     ( \st bid ->
-        case st ^. hsContents . at bid of
-          Just (action, item) | action == targetAction -> st & hsContents . at bid ?~ (None, item)
+        case st ^. mContents . at bid of
+          Just (action, item) | action == targetAction -> st & mContents . at bid ?~ (None, item)
           _ -> st
     )
     s
@@ -351,45 +351,45 @@ isReminderAction (ToBeReminded _) = True
 isReminderAction ReminderToBeRemoved = True
 isReminderAction _ = False
 
-clearToBeRemindedFlags :: [BookmarkItemId] -> HocketState -> HocketState
+clearToBeRemindedFlags :: [BookmarkItemId] -> Model -> Model
 clearToBeRemindedFlags bids s =
   foldl'
     ( \st bid ->
-        case st ^. hsContents . at bid of
-          Just (action, item) | isToBeReminded action -> st & hsContents . at bid ?~ (None, item)
+        case st ^. mContents . at bid of
+          Just (action, item) | isToBeReminded action -> st & mContents . at bid ?~ (None, item)
           _ -> st
     )
     s
     bids
 
-setAllFlagsToArchive :: HocketState -> HocketState
+setAllFlagsToArchive :: Model -> Model
 setAllFlagsToArchive = setAllFlags ToBeArchived
 
-toggleShowFutureReminders :: HocketState -> HocketState
-toggleShowFutureReminders s = s & hsShowFutureReminders %~ not
+toggleShowFutureReminders :: Model -> Model
+toggleShowFutureReminders s = s & mShowFutureReminders %~ not
 
-toggleVideoFilter :: HocketState -> HocketState
-toggleVideoFilter s = s & hsVideoFilter %~ toggleShowMode
+toggleVideoFilter :: Model -> Model
+toggleVideoFilter s = s & mVideoFilter %~ toggleShowMode
   where
     toggleShowMode NoVideoFilter = ShowOnlyVideos
     toggleShowMode ShowOnlyVideos = NoVideoFilter
     toggleShowMode HideVideos = ShowOnlyVideos
 
-toggleInvertedVideoFilter :: HocketState -> HocketState
-toggleInvertedVideoFilter s = s & hsVideoFilter %~ toggleHideMode
+toggleInvertedVideoFilter :: Model -> Model
+toggleInvertedVideoFilter s = s & mVideoFilter %~ toggleHideMode
   where
     toggleHideMode NoVideoFilter = HideVideos
     toggleHideMode HideVideos = NoVideoFilter
     toggleHideMode ShowOnlyVideos = HideVideos
 
-enterFilterMode :: HocketState -> HocketState
-enterFilterMode = hsFilterActive .~ True
+enterFilterMode :: Model -> Model
+enterFilterMode = mFilterActive .~ True
 
-lockFilter :: HocketState -> HocketState
-lockFilter = hsFilterActive .~ False
+lockFilter :: Model -> Model
+lockFilter = mFilterActive .~ False
 
-cancelFilter :: HocketState -> HocketState
-cancelFilter = (hsFilterActive .~ False) . (hsFilterQuery .~ T.empty)
+cancelFilter :: Model -> Model
+cancelFilter = (mFilterActive .~ False) . (mFilterQuery .~ T.empty)
 
 bookmarkSearchText :: BookmarkItem -> Text
 bookmarkSearchText bi =
@@ -401,27 +401,27 @@ isVideoBookmark item = hasYouTubeInUrl || hasVideoTag
     hasYouTubeInUrl = T.isInfixOf "youtu.be" (T.toLower $ item ^. biLink) || T.isInfixOf "youtube" (T.toLower $ item ^. biLink)
     hasVideoTag = any (\tag -> T.toLower tag == "video") (item ^. biTags)
 
-updateItemsWithReminder :: [BookmarkItemId] -> UTCTime -> HocketState -> HocketState
+updateItemsWithReminder :: [BookmarkItemId] -> UTCTime -> Model -> Model
 updateItemsWithReminder bids reminderTime s =
   foldl'
     ( \st bid ->
-        case st ^. hsContents . at bid of
+        case st ^. mContents . at bid of
           Just (action, item) ->
             let updatedItem = item & biReminder ?~ reminderTime
-             in st & hsContents . at bid ?~ (action, updatedItem)
+             in st & mContents . at bid ?~ (action, updatedItem)
           Nothing -> st
     )
     s
     bids
 
-removeReminderFromItems :: [BookmarkItemId] -> HocketState -> HocketState
+removeReminderFromItems :: [BookmarkItemId] -> Model -> Model
 removeReminderFromItems bids s =
   foldl'
     ( \st bid ->
-        case st ^. hsContents . at bid of
+        case st ^. mContents . at bid of
           Just (action, item) ->
             let updatedItem = item & biReminder .~ Nothing
-             in st & hsContents . at bid ?~ (action, updatedItem)
+             in st & mContents . at bid ?~ (action, updatedItem)
           Nothing -> st
     )
     s
@@ -431,17 +431,17 @@ removeReminderFromItems bids s =
 -- selected item stays selected while it is visible; when it disappears the
 -- item now at its index takes over (clamped at the end); with no selection
 -- the first item is selected.
-settle :: HocketState -> HocketState
+settle :: Model -> Model
 settle s =
   s
-    & hsVisible .~ visible
-    & hsSelected .~ selected
+    & mVisible .~ visible
+    & mSelected .~ selected
   where
-    visible = visibleItems (s ^. hsShowFutureReminders) (s ^. hsVideoFilter) (s ^. hsFilterQuery) (s ^. hsContents)
+    visible = visibleItems (s ^. mShowFutureReminders) (s ^. mVideoFilter) (s ^. mFilterQuery) (s ^. mContents)
     indexIn items bid = V.findIndex ((== bid) . view biId) items
-    selected = case s ^. hsSelected of
+    selected = case s ^. mSelected of
       Just bid | isJust (indexIn visible bid) -> Just bid
-      prev -> view biId <$> visible V.!? clamp 0 (V.length visible - 1) (fromMaybe 0 (prev >>= indexIn (s ^. hsVisible)))
+      prev -> view biId <$> visible V.!? clamp 0 (V.length visible - 1) (fromMaybe 0 (prev >>= indexIn (s ^. mVisible)))
 
 -- | The items the list shows, newest sort date ('getSortDate') first: the
 -- future-reminder, video and text filters, in that order.

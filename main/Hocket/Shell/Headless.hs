@@ -14,7 +14,7 @@ import Brick.BChan (readBChan)
 import Control.Concurrent.STM
 import Data.Maybe (isNothing)
 import Hocket.Agent.Snapshot (AgentSnapshot, asAsyncOp, emptySnapshot)
-import Hocket.App.Model (HocketState, settle)
+import Hocket.App.Model (Model, settle)
 import Hocket.App.Msg (Intent (Refresh), Msg (Intent))
 import Hocket.Shell.Interpret (Env (..), publishSTM, step, tookMsg)
 
@@ -33,7 +33,7 @@ newLoop = Loop <$> newTVarIO emptySnapshot <*> newTVarIO True
 -- which counts as pending until the loop has taken it, and as in hand until
 -- the loop has published what it did. Not covered: the agent server's
 -- client count, which its poster thread posts on its own schedule (retrying
--- every 50 ms while the channel is full), so hsAgentClients may still lag
+-- every 50 ms while the channel is full), so mAgentClients may still lag
 -- behind an idle loop.
 loopIdle :: Env -> Loop -> STM Bool
 loopIdle env loop = do
@@ -44,7 +44,7 @@ loopIdle env loop = do
 
 -- | Start as the TUI does, with a refresh, then run every message until one
 -- halts; the final model.
-runHeadless :: Env -> Loop -> HocketState -> IO HocketState
+runHeadless :: Env -> Loop -> Model -> IO Model
 runHeadless env loop = run (Intent Refresh)
   where
     run m s = do

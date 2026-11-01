@@ -30,8 +30,8 @@ characterizationTests :: TestTree
 characterizationTests =
   testGroup "Characterization (Phase 0 pins)" [syncTests, stepResultTests, keyTableTests, selectionTests]
 
-emptyState :: HocketState
-emptyState = initialState
+emptyState :: Model
+emptyState = initialModel
 
 item :: Text -> Int -> BookmarkItem
 item i coll =
@@ -56,14 +56,14 @@ item i coll =
 posix :: String -> POSIXTime
 posix = utcTimeToPOSIXSeconds . read
 
-flagOf :: Text -> HocketState -> Maybe PendingAction
-flagOf i s = s ^? hsContents . ix (BookmarkItemId i) . _1
+flagOf :: Text -> Model -> Maybe PendingAction
+flagOf i s = s ^? mContents . ix (BookmarkItemId i) . _1
 
-reminderOf :: Text -> HocketState -> Maybe (Maybe UTCTime)
-reminderOf i s = s ^? hsContents . ix (BookmarkItemId i) . _2 . biReminder
+reminderOf :: Text -> Model -> Maybe (Maybe UTCTime)
+reminderOf i s = s ^? mContents . ix (BookmarkItemId i) . _2 . biReminder
 
-ids :: HocketState -> [Text]
-ids s = [i | BookmarkItemId i <- Map.keys (s ^. hsContents)]
+ids :: Model -> [Text]
+ids s = [i | BookmarkItemId i <- Map.keys (s ^. mContents)]
 
 syncTests :: TestTree
 syncTests =
@@ -105,9 +105,9 @@ syncTests =
             (Just 100, 200, False, Just 100)
           ]
         $ \(old, ts, nonEmpty, expected) -> do
-          let s = emptyState & hsLastUpdated .~ old
+          let s = emptyState & mLastUpdated .~ old
               page = [item "a" (-1) | nonEmpty]
-          ((old, ts, nonEmpty), applyFetched ts page True s ^. hsLastUpdated)
+          ((old, ts, nonEmpty), applyFetched ts page True s ^. mLastUpdated)
             @?= ((old, ts, nonEmpty), expected),
       testCase "merging a page leaves the fetch slot alone (B1b)" $ do
         let Just fetching = tryAcquireAsyncOp OpFetchItems emptyState
@@ -157,7 +157,7 @@ withRem = biReminder ?~ read "2026-01-01 07:00:00 UTC"
 -- | Three visible items with the target focused at index 0. The target sorts
 -- first by its far-future date; future reminders are shown so a target with
 -- a reminder stays visible.
-keyState :: Bool -> PendingAction -> HocketState
+keyState :: Bool -> PendingAction -> Model
 keyState hasReminder flag =
   insertItems [target, item "n1" (-1), item "n2" (-1)] emptyState
     & setShowFutureReminders True
@@ -185,7 +185,7 @@ keyNow = Now (read "2026-11-01 12:00:00 UTC") (minutesToTimeZone 60)
 
 -- | Press a key the way the shell does: its intents through 'update' within
 -- one event, then the render sync. Returns the opened item ids.
-press :: ItemKey -> HocketState -> (HocketState, [Text])
+press :: ItemKey -> Model -> (Model, [Text])
 press key s0 = case keyIntents keyNow 10 (keyEvent key) start of
   Nothing -> error ("not a keymap key: " <> show key)
   Just intents ->
@@ -207,14 +207,14 @@ keyTableTests =
       <> [ testCase "no focused item: every key changes nothing and opens nothing" $
              for_ [minBound .. maxBound] $ \k -> do
                let (after, browsed) = press k emptyState
-               (k, browsed, Map.null (after ^. hsContents), after ^. hsSelected) @?= (k, [], True, Nothing)
+               (k, browsed, Map.null (after ^. mContents), after ^. mSelected) @?= (k, [], True, Nothing)
          ]
   where
     rowTest (Row k hasReminder from to moves) =
       testCase (show k <> (if hasReminder then " (has reminder) " else " ") <> show from <> " → " <> show to <> (if moves then " ↓" else "")) $ do
         let (after, browsed) = press k (keyState hasReminder from)
         flagOf "t" after @?= Just to
-        after ^. hsSelected @?= after ^? hsVisible . ix (if moves then 1 else 0) . biId
+        after ^. mSelected @?= after ^? mVisible . ix (if moves then 1 else 0) . biId
         browsed @?= ["t" | k `elem` [KeyEnter, KeySpace]]
     rows =
       [ Row KeyArchive False None ToBeArchived True,
@@ -246,15 +246,15 @@ keyTableTests =
 dated :: Text -> String -> BookmarkItem
 dated i day = item i (-1) & biCreated .~ read (day <> " 12:00:00 UTC")
 
-threeItems :: HocketState
+threeItems :: Model
 threeItems = settle (insertItems [dated "a" "2026-01-03", dated "b" "2026-01-02", dated "c" "2026-01-01"] emptyState)
 
-selectedId :: HocketState -> Maybe Text
-selectedId s = (^. _BookmarkItemId) <$> s ^. hsSelected
+selectedId :: Model -> Maybe Text
+selectedId s = (^. _BookmarkItemId) <$> s ^. mSelected
 
 -- | Select the item at a visible index, as a cursor move would.
-at' :: Int -> HocketState -> HocketState
-at' i s = s & hsSelected .~ (s ^? hsVisible . ix i . biId)
+at' :: Int -> Model -> Model
+at' i s = s & mSelected .~ (s ^? mVisible . ix i . biId)
 
 -- | How the selection follows changes: by id since D2 (plan §11 #20).
 selectionTests :: TestTree
@@ -272,7 +272,7 @@ selectionTests =
         selectedId (settle (insertItem (dated "n" "2026-01-04") (at' 1 threeItems))) @?= Just "b",
       testCase "a refilter that hides items above: the cursor stays on its item too (D2)" $ do
         -- "a" has a reminder, so hiding future reminders hides it.
-        let shown = settle (threeItems & hsContents . ix (BookmarkItemId "a") . _2 . biReminder ?~ read "2030-01-01 07:00:00 UTC" & setShowFutureReminders True)
+        let shown = settle (threeItems & mContents . ix (BookmarkItemId "a") . _2 . biReminder ?~ read "2030-01-01 07:00:00 UTC" & setShowFutureReminders True)
         selectedId (at' 1 shown) @?= Just "b"
         selectedId (settle (setShowFutureReminders False (at' 1 shown))) @?= Just "b"
     ]

@@ -15,9 +15,9 @@ import Hocket.App.Nav (Nav (..))
 -- mode synchronously), and every key while the filter editor has focus, so
 -- @Q@ typed into a filter never quits. Flag guards such as @a@ on an archived
 -- item are 'update''s, so action keys always yield their Intent.
-keyIntents :: Now -> Int -> Event -> HocketState -> Maybe [Intent]
+keyIntents :: Now -> Int -> Event -> Model -> Maybe [Intent]
 keyIntents now height e s
-  | s ^. hsFilterActive = Nothing
+  | s ^. mFilterActive = Nothing
   | otherwise = case e of
       EvKey (KChar ' ') [] -> Just [I.Open I.Selected]
       EvKey KEnter [] -> Just [I.Open I.Selected, I.ToggleArchive I.Selected]

@@ -115,9 +115,9 @@ genContents = do
   items <- Gen.list (Range.linear 0 30) genBookmarkItem
   Map.fromList <$> traverse (\i -> (\a -> (i ^. biId, (a, i))) <$> genConsistentAction i) items
 
--- | Today's model is 'HocketState'; only the fields the pure core reads are
--- generated, the brick list stays as 'initialState' leaves it.
-genModel :: Gen HocketState
+-- | Today's model is 'Model'; only the fields the pure core reads are
+-- generated, the brick list stays as 'initialModel' leaves it.
+genModel :: Gen Model
 genModel = do
   contents <- genContents
   lastUpdated <- Gen.maybe genPOSIXTime
@@ -125,12 +125,12 @@ genModel = do
   futureRem <- Gen.bool
   video <- genVideoFilterMode
   pure $
-    initialState
-      & hsContents .~ contents
-      & hsLastUpdated .~ lastUpdated
-      & hsStatus .~ status
-      & hsShowFutureReminders .~ futureRem
-      & hsVideoFilter .~ video
+    initialModel
+      & mContents .~ contents
+      & mLastUpdated .~ lastUpdated
+      & mStatus .~ status
+      & mShowFutureReminders .~ futureRem
+      & mVideoFilter .~ video
 
 -- | A fixture store with archive collection 4711 and a small page size, so
 -- paging is exercised.

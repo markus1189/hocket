@@ -17,8 +17,8 @@ now = Now (read "2026-11-01 10:00:00 UTC") utc
 key :: Char -> Event
 key c = EvKey (KChar c) []
 
-filtering :: HocketState
-filtering = initialState & hsFilterActive .~ True
+filtering :: Model
+filtering = initialModel & mFilterActive .~ True
 
 rows :: [(Event, [Intent])]
 rows =
@@ -65,10 +65,10 @@ keyIntentTests =
     "keyIntents"
     [ testCase "every action key yields its Intents" $
         for_ rows $
-          \(e, is) -> (e, keyIntents now height e initialState) @?= (e, Just is),
+          \(e, is) -> (e, keyIntents now height e initialModel) @?= (e, Just is),
       testCase "unknown keys stay with the shell" $
         for_ [key 'x', EvKey (KChar 'j') [MCtrl]] $ \e ->
-          (e, keyIntents now height e initialState) @?= (e, Nothing),
+          (e, keyIntents now height e initialModel) @?= (e, Nothing),
       testCase "the keymap is not asked while the filter editor has focus" $
         for_ (map fst rows) $
           \e -> (e, keyIntents now height e filtering) @?= (e, Nothing),

@@ -39,18 +39,18 @@ initialUi = UiState (L.list ItemListName V.empty 1) (editorText FilterEditorName
 editorQuery :: UiState -> Text
 editorQuery = T.concat . getEditContents . view uiEditor
 
--- | The list shows what is visible with the selection on 'hsSelected'. The
+-- | The list shows what is visible with the selection on 'mSelected'. The
 -- editor gets the query only when the two differ (an agent's set_filter, a
 -- cancel), cursor at the end, so typing keeps its cursor and typing after
 -- set_filter appends.
-reconcile :: HocketState -> UiState -> UiState
+reconcile :: Model -> UiState -> UiState
 reconcile s ui =
   ui
     & uiList . L.listElementsL .~ visible
-    & uiList . L.listSelectedL .~ (s ^. hsSelected >>= \bid -> V.findIndex ((== bid) . view biId) visible)
+    & uiList . L.listSelectedL .~ (s ^. mSelected >>= \bid -> V.findIndex ((== bid) . view biId) visible)
     & editor
   where
-    visible = s ^. hsVisible
+    visible = s ^. mVisible
     editor u
-      | editorQuery u == s ^. hsFilterQuery = u
-      | otherwise = u & uiEditor %~ applyEdit (const (Z.gotoEOL (Z.textZipper [s ^. hsFilterQuery] (Just 1))))
+      | editorQuery u == s ^. mFilterQuery = u
+      | otherwise = u & uiEditor %~ applyEdit (const (Z.gotoEOL (Z.textZipper [s ^. mFilterQuery] (Just 1))))

@@ -57,8 +57,8 @@ fetchEmissionTests =
         fetchResult False (Right []) @?= FetchCompleted False [],
       testCase "FetchCompleted merges the pages in order, as page-by-page delivery did" $ do
         let s = applyFetchCompleted False [page1, page2] emptyState
-        Map.keys (s ^. hsContents) @?= [BookmarkItemId "a", BookmarkItemId "b"]
-        s ^. hsLastUpdated @?= Just 20,
+        Map.keys (s ^. mContents) @?= [BookmarkItemId "a", BookmarkItemId "b"]
+        s ^. mLastUpdated @?= Just 20,
       testCase "trySync returns a synchronous exception, rendered on one line" $ do
         r <- trySync (throwIO (userError "disk full") :: IO ())
         either (Just . exceptionMessage) (const Nothing) r @?= Just "user error (disk full)",
@@ -122,7 +122,7 @@ stepEmissionTests =
     erase = first (const ())
 
 -- | Items for one archive and one set-reminders bucket.
-batchState :: HocketState
+batchState :: Model
 batchState =
   insertItems [item "a" (-1), item "r" (-1)] emptyState
     & setPendingAction (BookmarkItemId "a") ToBeArchived
@@ -134,7 +134,7 @@ batchTime = read "2026-11-02 06:00:00 UTC"
 -- | Execute, then the worker's messages, all through update: the slot and
 -- the status after each message.
 batchTrace :: [Msg] -> [(Bool, Maybe T.Text)]
-batchTrace = map (\s -> (asyncOpRunning s, s ^. hsStatus)) . drop 1 . scanl deliver started
+batchTrace = map (\s -> (asyncOpRunning s, s ^. mStatus)) . drop 1 . scanl deliver started
   where
     started = fst (update (Intent Execute) batchState)
     deliver s m = fst (update m s)

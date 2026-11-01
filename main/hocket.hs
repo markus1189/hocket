@@ -98,25 +98,25 @@ import Hocket.Agent.Protocol
   )
 import Hocket.Agent.Snapshot (AgentSnapshot)
 import Hocket.App.Model
-  ( HocketState,
+  ( Model,
     Name (..),
     VideoFilterMode (..),
     focusedItem,
     getPendingActionForItem,
-    hsAgentClients,
-    hsAgentError,
-    hsFilterActive,
-    hsFilterQuery,
-    hsLastUpdated,
-    hsNumItems,
-    hsStatus,
-    hsVideoFilter,
     icFutureReminders,
     icNone,
     icReminderToBeRemoved,
     icToBeArchived,
     icToBeReminded,
-    initialState,
+    initialModel,
+    mAgentClients,
+    mAgentError,
+    mFilterActive,
+    mFilterQuery,
+    mLastUpdated,
+    mNumItems,
+    mStatus,
+    mVideoFilter,
     settle,
   )
 import Hocket.App.Msg (Intent (FilterCancel, FilterLock, FilterText, Navigate, Refresh), Msg (..))
@@ -184,7 +184,7 @@ import System.FilePath ((</>))
 import System.IO (BufferMode (LineBuffering), IOMode (AppendMode), hPutStrLn, hSetBuffering, stderr, withFile)
 
 -- | The model, and what the shell derives from it for brick (plan §4.3).
-data AppState = AppState {_model :: !HocketState, _ui :: !UiState}
+data AppState = AppState {_model :: !Model, _ui :: !UiState}
 
 makeLenses ''AppState
 
@@ -345,7 +345,7 @@ vtyEventHandler ::
   EventM Name AppState ()
 vtyEventHandler env e = do
   s <- use model
-  if s ^. hsFilterActive
+  if s ^. mFilterActive
     then case e of
       -- Handled here, not via the BChan, so they stay ordered with the
       -- keystrokes the editor already applied synchronously.
@@ -373,7 +373,7 @@ applyMsg env m = do
 reportEditor :: Env -> EventM Name AppState ()
 reportEditor env = do
   typed <- uses ui editorQuery
-  query <- use (model . hsFilterQuery)
+  query <- use (model . mFilterQuery)
   unless (typed == query) $ applyMsg env (Intent (FilterText typed))
 
 -- | The list viewport's height in rows, as brick's page moves measure it;
@@ -433,17 +433,17 @@ runTuiApp mAgentOpt Nothing = do
   ensureSchemaFile
   configPath <- getConfigPath
   cred <- input auto (T.pack configPath)
-  withTuiLog $ \runLog -> runTui mAgentOpt False (servantPort runLog cred) initialState
+  withTuiLog $ \runLog -> runTui mAgentOpt False (servantPort runLog cred) initialModel
 -- Fixture mode never reads the config or credentials, so it cannot reach
 -- the real account.
 runTuiApp mAgentOpt (Just fo) = do
   seed <- LBS.readFile (foSeed fo)
   store <- either (\e -> hPutStrLn stderr ("hocket: bad fixture " <> foSeed fo <> ": " <> e) >> exitFailure) pure (fixtureStore fo seed)
   ref <- newIORef store
-  runTui mAgentOpt True (fakePort getCurrentTime ref) initialState
+  runTui mAgentOpt True (fakePort getCurrentTime ref) initialModel
     `finally` for_ (foDump fo) (\out -> readIORef ref >>= LBS.writeFile out . encodeFixtureDump)
 
-runTui :: Maybe AgentSocketOpt -> Bool -> RaindropPort -> HocketState -> IO ()
+runTui :: Maybe AgentSocketOpt -> Bool -> RaindropPort -> Model -> IO ()
 runTui mAgentOpt isFixture port s0 = do
   env <- newEnv port systemPort systemNow
   tz <- getCurrentTimeZone
@@ -499,7 +499,7 @@ app tz isFixture env mSnapVar =
   App
     { appDraw = drawGui tz isFixture,
       appChooseCursor = \s ->
-        if s ^. model . hsFilterActive
+        if s ^. model . mFilterActive
           then showCursorNamed FilterEditorName
           else const Nothing,
       appHandleEvent = \e -> do
@@ -576,20 +576,20 @@ drawGui tz isFixture (AppState s u) = [w]
       vBox
         [ fixtureTag
             <+> hBarWithHints
-              ( ( case (s ^. hsAgentError, s ^. hsAgentClients > 0) of
+              ( ( case (s ^. mAgentError, s ^. mAgentClients > 0) of
                     (Just _, _) -> "[agent: socket failed] "
                     (Nothing, True) -> "[agent] "
                     (Nothing, False) -> ""
                 )
                   <> "Hocket"
-                  <> ( case s ^. hsVideoFilter of
+                  <> ( case s ^. mVideoFilter of
                          NoVideoFilter -> ""
                          ShowOnlyVideos -> " (+V)"
                          HideVideos -> " (-V)"
                      )
-                  <> ( if T.null (s ^. hsFilterQuery)
+                  <> ( if T.null (s ^. mFilterQuery)
                          then ""
-                         else " (/" <> sanitizeForDisplay (s ^. hsFilterQuery) <> ")"
+                         else " (/" <> sanitizeForDisplay (s ^. mFilterQuery) <> ")"
                      )
                   <> ": "
                   <> ( \counts ->
@@ -604,7 +604,7 @@ drawGui tz isFixture (AppState s u) = [w]
                                  else ""
                           in base <> reminderPart
                      )
-                    (hsNumItems s)
+                    (mNumItems s)
               )
               "spc:Browse ent:Browse+flag e:Edit y:Copied URL r:Refresh S:Toggle future reminders v:Video filter V:Hide videos /:Filter X:Execute Flags a:Archive flag s:Reminder flag u:Unflag J/K:Jump U:Unflag all Q:Quit",
           hBorder,
@@ -628,18 +628,18 @@ drawGui tz isFixture (AppState s u) = [w]
                       ( maybe
                           "<never>"
                           (sformat F.hms . utcToLocalTime tz . posixSecondsToUTCTime)
-                          (s ^. hsLastUpdated)
+                          (s ^. mLastUpdated)
                       )
                   )
               ),
-          if s ^. hsFilterActive
+          if s ^. mFilterActive
             then
               withAttr (attrName "bar") . padRight Max $
                 txt "/" <+> renderEditor (txt . sanitizeForDisplay . T.concat) True (u ^. uiEditor)
-            else txt (fromMaybe " " (s ^. hsStatus))
+            else txt (fromMaybe " " (s ^. mStatus))
         ]
 
-listDrawElementWithAction :: HocketState -> Bool -> BookmarkItem -> Widget Name
+listDrawElementWithAction :: Model -> Bool -> BookmarkItem -> Widget Name
 listDrawElementWithAction s sel e =
   let actionIndicator = case getPendingActionForItem (view biId e) s of
         ToBeArchived -> "A "

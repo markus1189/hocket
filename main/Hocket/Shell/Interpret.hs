@@ -34,7 +34,7 @@ import Hocket.Adapter.System (cleanUrl)
 import Hocket.Agent.Snapshot (AgentSnapshot, asVersion, takeSnapshot)
 import Hocket.App.Batch (StepOutcome, concatOutcome)
 import Hocket.App.Effect
-import Hocket.App.Model (BatchStep (..), HocketState)
+import Hocket.App.Model (BatchStep (..), Model)
 import Hocket.App.Msg
 import Hocket.App.Plan (BatchPlan (..), planSteps)
 import Hocket.App.Sync (SyncKind (IncrementalAll), spCollection, spKind, spSearch)
@@ -84,7 +84,7 @@ tookMsg env = modifyTVar' (envPending env) (subtract 1)
 -- order, each effect's immediate answers through 'step' again, depth first.
 -- True when an effect was 'Halt'; the effects after it still run, as brick
 -- only stops after the event.
-step :: Env -> Msg -> HocketState -> IO (HocketState, Bool)
+step :: Env -> Msg -> Model -> IO (Model, Bool)
 step env m s0 = foldM run (s1, False) effects
   where
     (s1, effects) = update m s0
@@ -95,12 +95,12 @@ step env m s0 = foldM run (s1, False) effects
 -- | Mirror the settled model for the agent socket, one version per event.
 -- Persistent data sharing keeps this cheap; the item projection is only
 -- fully forced by a server thread that actually serves it.
-publish :: TVar AgentSnapshot -> HocketState -> IO ()
+publish :: TVar AgentSnapshot -> Model -> IO ()
 publish snapVar = atomically . publishSTM snapVar
 
 -- | 'publish' inside a transaction, for a loop that must change more in
 -- the same step.
-publishSTM :: TVar AgentSnapshot -> HocketState -> STM ()
+publishSTM :: TVar AgentSnapshot -> Model -> STM ()
 publishSTM snapVar s = modifyTVar' snapVar $ \old -> takeSnapshot (asVersion old + 1) s
 
 -- | Run one effect. What the TUI waits for (browser, clipboard) answers

@@ -1,6 +1,6 @@
 {-# LANGUAGE OverloadedStrings #-}
 
--- | A serializable mirror of 'HocketState' for the agent control socket.
+-- | A serializable mirror of 'Model' for the agent control socket.
 -- Deliberately excludes credentials: the Raindrop token structurally cannot
 -- cross the socket because it is not part of this type.
 module Hocket.Agent.Snapshot
@@ -27,17 +27,17 @@ import Data.Time.Clock.POSIX (POSIXTime)
 import qualified Data.Vector as V
 import Hocket.App.Model
   ( AsyncOp (..),
-    HocketState,
+    Model,
     VideoFilterMode (..),
-    hsAsyncOp,
-    hsContents,
-    hsFilterQuery,
-    hsLastUpdated,
-    hsSelected,
-    hsShowFutureReminders,
-    hsStatus,
-    hsVideoFilter,
-    hsVisible,
+    mAsyncOp,
+    mContents,
+    mFilterQuery,
+    mLastUpdated,
+    mSelected,
+    mShowFutureReminders,
+    mStatus,
+    mVideoFilter,
+    mVisible,
   )
 import Hocket.Domain.Bookmark
   ( BookmarkItem,
@@ -133,29 +133,29 @@ instance ToJSON AgentSnapshot where
 -- | Project the given state into a snapshot carrying the given version.
 -- Visible items (those surviving the filter pipeline, in display order) come
 -- first, followed by the remaining hidden items.
-takeSnapshot :: Int -> HocketState -> AgentSnapshot
+takeSnapshot :: Int -> Model -> AgentSnapshot
 takeSnapshot v s =
   AgentSnapshot
     { asVersion = v,
       asItems = visibleItems <> hiddenItems,
-      asSelected = s ^. hsSelected,
-      asFilterQuery = s ^. hsFilterQuery,
-      asVideoFilter = s ^. hsVideoFilter,
-      asShowFutureReminders = s ^. hsShowFutureReminders,
-      asStatus = s ^. hsStatus,
-      asLastUpdated = s ^. hsLastUpdated,
-      asAsyncOp = s ^. hsAsyncOp
+      asSelected = s ^. mSelected,
+      asFilterQuery = s ^. mFilterQuery,
+      asVideoFilter = s ^. mVideoFilter,
+      asShowFutureReminders = s ^. mShowFutureReminders,
+      asStatus = s ^. mStatus,
+      asLastUpdated = s ^. mLastUpdated,
+      asAsyncOp = s ^. mAsyncOp
     }
   where
-    visibleBookmarks = V.toList (s ^. hsVisible)
+    visibleBookmarks = V.toList (s ^. mVisible)
     visibleIdSet = Set.fromList (map (view biId) visibleBookmarks)
     visibleItems =
       mapMaybe
-        (\bit -> mkItem True <$> Map.lookup (view biId bit) (s ^. hsContents))
+        (\bit -> mkItem True <$> Map.lookup (view biId bit) (s ^. mContents))
         visibleBookmarks
     hiddenItems =
       [ mkItem False entry
-      | (bid, entry) <- Map.toList (s ^. hsContents),
+      | (bid, entry) <- Map.toList (s ^. mContents),
         bid `Set.notMember` visibleIdSet
       ]
     mkItem :: Bool -> (PendingAction, BookmarkItem) -> SnapshotItem

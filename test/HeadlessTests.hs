@@ -13,7 +13,7 @@ import Data.Time (UTCTime, utc)
 import Hocket.Adapter.Fake (FakeRaindrop, fakePort, frItems, seedFake)
 import Hocket.Agent.Protocol (FlagAction (FlagArchive))
 import Hocket.Agent.Snapshot (AgentSnapshot (..), SnapshotItem (..))
-import Hocket.App.Model (AsyncOp (OpFetchItems), hsStatus, initialState)
+import Hocket.App.Model (AsyncOp (OpFetchItems), initialModel, mStatus)
 import Hocket.App.Msg (Intent (..), Msg (..), Now (..), Target (..))
 import Hocket.Domain.Bookmark (BookmarkItemId (..), URL (..), biCollectionId)
 import Hocket.Port (RaindropPort (..), SystemPort (..))
@@ -37,7 +37,7 @@ busyTests =
     let blocking = SystemPort (\_ _ -> putMVar entered () >> takeMVar release) (\_ -> pure ())
     env <- newEnv (fakePort (pure t0) store) blocking (pure (Now t0 utc))
     loop <- newLoop
-    withAsync (runHeadless env loop initialState) $ \running -> do
+    withAsync (runHeadless env loop initialModel) $ \running -> do
       waitIdle env loop
       postMsg env (Intent (Open (ById (BookmarkItemId "1001"))))
       takeMVar entered
@@ -103,7 +103,7 @@ loopTests =
         settled = waitIdle env loop
         visible = map siId . filter siVisible . asItems <$> readTVarIO (loopSnapshot loop)
         a = BookmarkItemId "1001"
-    withAsync (runHeadless env loop initialState) $ \running -> do
+    withAsync (runHeadless env loop initialModel) $ \running -> do
       settled
       visible >>= (@?= map BookmarkItemId ["1001", "1002", "1004"])
       post (SetFlag a FlagArchive (Now t0 utc))
@@ -116,4 +116,4 @@ loopTests =
       post Quit
       final <- timeout 5000000 (wait running) >>= maybe (assertFailure "Quit did not end the loop") pure
       readIORef calls >>= (@?= ["firefox https://example.com/1002"])
-      final ^. hsStatus @?= Nothing
+      final ^. mStatus @?= Nothing

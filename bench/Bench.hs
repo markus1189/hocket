@@ -20,8 +20,8 @@ import Hocket.Shell.Tui.Reconcile (UiState, initialUi, reconcile, uiList)
 import Test.Tasty.Bench
 
 -- Show forces every field of every item; good enough for one-off setup.
-instance NFData HocketState where
-  rnf s = rnf (show (s ^. hsContents))
+instance NFData Model where
+  rnf s = rnf (show (s ^. mContents))
 
 vocab :: [Text]
 vocab =
@@ -85,15 +85,15 @@ mkItem i =
   where
     epoch = posixSecondsToUTCTime 1700000000
 
-mkState :: Int -> HocketState
+mkState :: Int -> Model
 mkState n =
   settle $
-    insertItems (map mkItem [1 .. n]) initialState
+    insertItems (map mkItem [1 .. n]) initialModel
 
 itemId :: Int -> BookmarkItemId
 itemId = BookmarkItemId . T.pack . show
 
-flagMany :: [Int] -> (HocketState, UiState) -> (HocketState, UiState)
+flagMany :: [Int] -> (Model, UiState) -> (Model, UiState)
 flagMany is v0 = foldl' step v0 is
   where
     step (st, ui) i = case validateWrite (takeSnapshot 0 st) (CmdSetFlag (itemId i) FlagArchive) of
@@ -103,7 +103,7 @@ flagMany is v0 = foldl' step v0 is
 -- | An agent write as the TUI applies it: update, then the settle and
 -- reconcile that follow every event. Both are forced per write, as the
 -- strict model forced syncForRender's list write before Phase 4.
-applyWrite :: WriteCmd -> (HocketState, UiState) -> (HocketState, UiState)
+applyWrite :: WriteCmd -> (Model, UiState) -> (Model, UiState)
 applyWrite cmd (st, ui) = st' `seq` ui' `seq` (st', ui')
   where
     st' = settle (fst (update (Intent (toIntent benchNow cmd)) st))
@@ -111,10 +111,10 @@ applyWrite cmd (st, ui) = st' `seq` ui' `seq` (st', ui')
 
 -- | After a filter change: the model settles and the view follows, the
 -- work syncForRender did alone while the list lived in the model.
-render :: HocketState -> Int
+render :: Model -> Int
 render st = length (reconcile (settle st) initialUi ^. uiList . L.listElementsL)
 
-shownCount :: (HocketState, UiState) -> Int
+shownCount :: (Model, UiState) -> Int
 shownCount = length . view (uiList . L.listElementsL) . snd
 
 benchNow :: Now
@@ -150,7 +150,7 @@ main =
               bench "flag 100 (validate+sync)" $ nf (shownCount . flagMany [1 .. 100]) (s, ui),
               bench "flag 100 (sync only)" $ nf (shownCount . foldl' (\v i -> applyWrite (CmdSetFlag (itemId i) FlagArchive) v) (s, ui)) [1 .. 100]
             ],
-          bench "hsNumItems" $ nf (\st -> let c = hsNumItems st in c ^. icNone + c ^. icFutureReminders) s,
+          bench "hsNumItems" $ nf (\st -> let c = mNumItems st in c ^. icNone + c ^. icFutureReminders) s,
           -- SnapshotItem fields are strict, so WHNF of each list cell forces the projection.
           bench "takeSnapshot" $ nf (foldl' (\a i -> a + fromEnum (siVisible i)) 0 . asItems . takeSnapshot 0) s
         ]

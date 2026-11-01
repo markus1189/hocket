@@ -14,7 +14,7 @@ import Data.IORef (IORef, modifyIORef', newIORef, readIORef, writeIORef)
 import Data.Time (utc)
 import Hocket.Adapter.System (cleanUrl, urlReplacements)
 import Hocket.App.Effect (Effect (..), Opener (..))
-import Hocket.App.Model (hsStatus, insertItems)
+import Hocket.App.Model (insertItems, mStatus)
 import Hocket.App.Msg (Intent (..), Msg (..), Now (..), Target (..))
 import Hocket.Domain.Bookmark (BookmarkItemId (..), URL (..), biLink)
 import Hocket.Port (RaindropPort (..), SystemPort (..))
@@ -34,7 +34,7 @@ stepTests =
         (env, calls) <- recordingEnv
         let s = insertItems [item "a" (-1) & biLink .~ "https://m.imdb.com/a"] emptyState
         (s', halted) <- step env (Intent (CopyUrl (ById (BookmarkItemId "a")))) s
-        (halted, s' ^. hsStatus) @?= (False, Just "Copied: https://imdb.com/a")
+        (halted, s' ^. mStatus) @?= (False, Just "Copied: https://imdb.com/a")
         readIORef calls >>= (@?= ["copy https://imdb.com/a"]),
       testCase "Halt is reported, not acted on" $ do
         (env, _) <- recordingEnv

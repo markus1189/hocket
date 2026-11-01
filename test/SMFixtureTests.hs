@@ -33,7 +33,7 @@ t0 :: UTCTime
 t0 = read "2026-11-01 00:00:00 UTC"
 
 -- | The store, and how many times the clock has been read so far.
-data Model (v :: Type -> Type) = Model !FakeRaindrop !Int
+data FixtureModel (v :: Type -> Type) = FixtureModel !FakeRaindrop !Int
 
 -- | Any request, with what is needed to compare its answers.
 data SomeRequest = forall a. (Show a) => SomeRequest (BookmarkRequest a)
@@ -61,11 +61,11 @@ outcome :: (Show a) => Either ClientError a -> Outcome
 outcome = either (\e -> Left (classify e, show e)) (Right . show)
 
 -- | What the pure fake answers at the model's next clock reading.
-predict :: SomeRequest -> Model v -> (Outcome, Model v)
-predict (SomeRequest req) (Model fr ticks) =
+predict :: SomeRequest -> FixtureModel v -> (Outcome, FixtureModel v)
+predict (SomeRequest req) (FixtureModel fr ticks) =
   let now = addUTCTime (fromIntegral (ticks + 1)) t0
       (res, fr') = serveFake now req fr
-   in (outcome res, Model fr' (ticks + 1))
+   in (outcome res, FixtureModel fr' (ticks + 1))
 
 genRequest :: FakeRaindrop -> Gen SomeRequest
 genRequest fr =
@@ -111,10 +111,10 @@ observe before req r seen =
         )
       _ -> (False, False)
 
-call :: RaindropPort -> IORef FakeRaindrop -> IORef Seen -> Command Gen (PropertyT IO) Model
+call :: RaindropPort -> IORef FakeRaindrop -> IORef Seen -> Command Gen (PropertyT IO) FixtureModel
 call port ref seen =
   Command
-    (\(Model fr _) -> Just (Call <$> genRequest fr))
+    (\(FixtureModel fr _) -> Just (Call <$> genRequest fr))
     ( \(Call (SomeRequest req)) -> do
         before <- liftIO (readIORef ref)
         r <- liftIO (try (runRaindrop port req))
@@ -123,7 +123,7 @@ call port ref seen =
         pure (outcome r, store)
     )
     [ Update (\m (Call r) _ -> snd (predict r m)),
-      Ensure $ \before (Model expectedStore _) (Call r) (got, store) -> do
+      Ensure $ \before (FixtureModel expectedStore _) (Call r) (got, store) -> do
         fst (predict r before) === got
         expectedStore === store
     ]
@@ -138,10 +138,10 @@ smFixture = withTests 200 . property $ do
   let clock = atomicModifyIORef' ticks (\n -> (n + 1, addUTCTime (fromIntegral (n + 1)) t0))
       port = fakePort clock ref
   seen <- liftIO (newIORef noneSeen)
-  actions <- forAll (Gen.sequential (Range.linear 1 40) (Model start 0) [call port ref seen])
+  actions <- forAll (Gen.sequential (Range.linear 1 40) (FixtureModel start 0) [call port ref seen])
   -- Shrinking reruns from here: every run starts from the seed.
   liftIO (writeIORef ref start >> writeIORef ticks 0 >> writeIORef seen noneSeen)
-  executeSequential (Model start 0) actions
+  executeSequential (FixtureModel start 0) actions
   -- QS measured about 51%, 47% and 55% per sequence.
   Seen lateError boundaryDay emptyPage <- liftIO (readIORef seen)
   cover 35 "an error after earlier counted calls" lateError

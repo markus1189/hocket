@@ -58,7 +58,7 @@ planSync lastUpdated =
           else RaindropCollectionId "-1"
    in SyncPlan (if isUpdateFetch then IncrementalAll else InitialUnsorted) collectionToFetch searchParam
 
-applyFetched :: POSIXTime -> [BookmarkItem] -> Bool -> HocketState -> HocketState
+applyFetched :: POSIXTime -> [BookmarkItem] -> Bool -> Model -> Model
 applyFetched ts bis wasAllCollectionsFetch = execState $ do
   if wasAllCollectionsFetch
     then do
@@ -69,27 +69,27 @@ applyFetched ts bis wasAllCollectionsFetch = execState $ do
       id %= insertItems itemsToPotentiallyAdd
     else id %= insertItems bis
 
-  currentLastUpdated <- use hsLastUpdated
+  currentLastUpdated <- use mLastUpdated
   let newTimestampToConsider = if null bis then Nothing else Just ts
   case (currentLastUpdated, newTimestampToConsider) of
-    (Nothing, Just newTs) -> hsLastUpdated .= Just newTs
-    (Just oldTs, Just newTs) -> when (newTs >= oldTs) $ hsLastUpdated .= Just newTs
+    (Nothing, Just newTs) -> mLastUpdated .= Just newTs
+    (Just oldTs, Just newTs) -> when (newTs >= oldTs) $ mLastUpdated .= Just newTs
     _ -> pure ()
 
 -- | The terminal message of a fetch: merge the pages in order, then free the
 -- slot exactly once, also when there were no pages.
-applyFetchCompleted :: Bool -> [BookmarkItemBatch] -> HocketState -> HocketState
+applyFetchCompleted :: Bool -> [BookmarkItemBatch] -> Model -> Model
 applyFetchCompleted wasAllCollectionsFetch batches s =
   completeAsyncOp $ foldl (\st (BookmarkItemBatch ts bis _) -> applyFetched ts bis wasAllCollectionsFetch st) s batches
 
 -- | The local effect of what a batch step reported as done.
-applyArchived :: [BookmarkItemId] -> HocketState -> HocketState
+applyArchived :: [BookmarkItemId] -> Model -> Model
 applyArchived = removeItems
 
 -- | Stores the time that was sent, whatever the flag says by now (B3).
-applyRemindersSet :: [(BookmarkItemId, UTCTime)] -> HocketState -> HocketState
+applyRemindersSet :: [(BookmarkItemId, UTCTime)] -> Model -> Model
 applyRemindersSet sent s =
   clearToBeRemindedFlags (map fst sent) (foldl (\st (bid, t) -> updateItemsWithReminder [bid] t st) s sent)
 
-applyRemindersRemoved :: [BookmarkItemId] -> HocketState -> HocketState
+applyRemindersRemoved :: [BookmarkItemId] -> Model -> Model
 applyRemindersRemoved bis = clearFlagsForItems ReminderToBeRemoved bis . removeReminderFromItems bis

@@ -107,4 +107,4 @@ outcomeProperty =
         let bid = BookmarkItemId . T.pack . show
             flagged = insertItems [item (T.pack (show i)) (-1) | i <- items] emptyState & setAllFlagsToArchive
             after = applyArchived (map bid ok) flagged
-        Map.map fst (after ^. hsContents) === Map.fromList [(bid i, ToBeArchived) | i <- items, i `notElem` ok]
+        Map.map fst (after ^. mContents) === Map.fromList [(bid i, ToBeArchived) | i <- items, i `notElem` ok]

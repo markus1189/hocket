@@ -214,7 +214,7 @@ bookmarkItem2 = bookmarkItem1 {_biLastUpdate = read "2016-05-22 12:54:59 UTC", _
 bookmarkItem1_same_ts_diff_title :: BookmarkItem
 bookmarkItem1_same_ts_diff_title = bookmarkItem1 {_biTitle = "title for same ts item"}
 
-testState = initialState
+testState = initialModel
 
 -- Fixtures for the 'X'-batch regression test: three items, one per bucket.
 batchReminderTime :: UTCTime
@@ -230,7 +230,7 @@ batchArmRmvRem :: BookmarkItem
 batchArmRmvRem = bookmarkItem1 {_biId = BookmarkItemId "bx3", _biReminder = Just (read "2016-05-22 12:33:11 UTC")}
 
 -- State with pending work in all three 'X' buckets at once.
-armedBatchState :: HocketState
+armedBatchState :: Model
 armedBatchState =
   insertItems [batchArmArchive, batchArmSetRem, batchArmRmvRem] testState
     & togglePendingAction (_biId batchArmArchive)
@@ -275,33 +275,33 @@ xKeyBatchConcurrencyTests =
 
 hocketStateTests =
   testGroup
-    "HocketState insertItem/insertItems"
+    "Model insertItem/insertItems"
     [ testCase "insertItem: new item gets None status and correct data" $
         let s = insertItem bookmarkItem1 testState
-         in Map.lookup (_biId bookmarkItem1) (view hsContents s) @?= Just (None, bookmarkItem1),
+         in Map.lookup (_biId bookmarkItem1) (view mContents s) @?= Just (None, bookmarkItem1),
       testCase "insertItem: updates with newer item" $
         let stateWithOldItem = insertItem bookmarkItem1 testState
-            stateWithOldItemPending = stateWithOldItem & hsContents . ix (_biId bookmarkItem1) . _1 .~ ToBeArchived
+            stateWithOldItemPending = stateWithOldItem & mContents . ix (_biId bookmarkItem1) . _1 .~ ToBeArchived
             stateAfterUpdate = insertItem bookmarkItem2 stateWithOldItemPending
-         in Map.lookup (_biId bookmarkItem1) (view hsContents stateAfterUpdate) @?= Just (ToBeArchived, bookmarkItem2),
+         in Map.lookup (_biId bookmarkItem1) (view mContents stateAfterUpdate) @?= Just (ToBeArchived, bookmarkItem2),
       testCase "insertItem: older item does not overwrite newer; status and data preserved" $
         let stateWithNewerItem = insertItem bookmarkItem2 testState
-            stateWithNewerItemPending = stateWithNewerItem & hsContents . ix (_biId bookmarkItem2) . _1 .~ ToBeArchived
+            stateWithNewerItemPending = stateWithNewerItem & mContents . ix (_biId bookmarkItem2) . _1 .~ ToBeArchived
             stateAfterAttemptedUpdate = insertItem bookmarkItem1 stateWithNewerItemPending
-         in Map.lookup (_biId bookmarkItem2) (view hsContents stateAfterAttemptedUpdate) @?= Just (ToBeArchived, bookmarkItem2),
+         in Map.lookup (_biId bookmarkItem2) (view mContents stateAfterAttemptedUpdate) @?= Just (ToBeArchived, bookmarkItem2),
       testCase "insertItem: item with same timestamp does overwrite; status preserved, data updated" $
         let stateWithOriginalItem = insertItem bookmarkItem1 testState
-            stateWithOriginalItemPending = stateWithOriginalItem & hsContents . ix (_biId bookmarkItem1) . _1 .~ ToBeArchived
+            stateWithOriginalItemPending = stateWithOriginalItem & mContents . ix (_biId bookmarkItem1) . _1 .~ ToBeArchived
             stateAfterAttemptedUpdate = insertItem bookmarkItem1_same_ts_diff_title stateWithOriginalItemPending
-         in Map.lookup (_biId bookmarkItem1) (view hsContents stateAfterAttemptedUpdate) @?= Just (ToBeArchived, bookmarkItem1_same_ts_diff_title),
+         in Map.lookup (_biId bookmarkItem1) (view mContents stateAfterAttemptedUpdate) @?= Just (ToBeArchived, bookmarkItem1_same_ts_diff_title),
       testCase "insertItems: inserting an item that is present overwrites if newer" $
         let s = insertItems [bookmarkItem1, bookmarkItem2] testState
-         in fmap (view (_2 . biTitle)) (Map.lookup (_biId bookmarkItem1) (view hsContents s)) @?= Just "newer title",
+         in fmap (view (_2 . biTitle)) (Map.lookup (_biId bookmarkItem1) (view mContents s)) @?= Just "newer title",
       testCase "insertItems: inserting an item that is present overwrites if newer, insertion order does not matter" $
         let s = insertItems [bookmarkItem2, bookmarkItem1] testState
-         in fmap (view (_2 . biTitle)) (Map.lookup (_biId bookmarkItem1) (view hsContents s)) @?= Just "newer title",
+         in fmap (view (_2 . biTitle)) (Map.lookup (_biId bookmarkItem1) (view mContents s)) @?= Just "newer title",
       testCase "insertItems: basic insertion count" $
-        length (insertItems [bookmarkItem1] testState ^. hsContents) @?= 1
+        length (insertItems [bookmarkItem1] testState ^. mContents) @?= 1
     ]
 
 fuzzyMatchTests :: TestTree
@@ -398,7 +398,7 @@ filterOtherBookmark =
 --   * Matching: edit the title/domain/excerpt/note fields or the query. The
 --     match target is title+domain+excerpt+note (tags are excluded).
 --   * Ordering: edit '_biCreated'. To make an item sort by a reminder instead,
---     set '_biReminder' AND run with @hsShowFutureReminders .~ True@, otherwise
+--     set '_biReminder' AND run with @mShowFutureReminders .~ True@, otherwise
 --     'hasFutureReminder' hides it.
 tuningBookmarks :: [BookmarkItem]
 tuningBookmarks =
@@ -433,8 +433,8 @@ tuningBookmarks =
 runTuning :: Text -> [BookmarkItem]
 runTuning q =
   let base = insertItems tuningBookmarks testState
-      filtered = settle (base & hsFilterQuery .~ q)
-   in V.toList (view hsVisible filtered)
+      filtered = settle (base & mFilterQuery .~ q)
+   in V.toList (view mVisible filtered)
 
 -- | True iff the list is in non-increasing order (the render invariant).
 isDescending :: (Ord a) => [a] -> Bool
@@ -491,46 +491,46 @@ filterStateTests =
         fuzzyMatch "uniquenote" (bookmarkSearchText filterTestBookmark) @?= True,
       testCase "bookmarkSearchText excludes tags" $
         fuzzyMatch "zzqtag" (bookmarkSearchText filterTestBookmark) @?= False,
-      testCase "enterFilterMode sets hsFilterActive" $
-        view hsFilterActive (enterFilterMode testState) @?= True,
+      testCase "enterFilterMode sets mFilterActive" $
+        view mFilterActive (enterFilterMode testState) @?= True,
       testCase "typing after a set query appends at the end" $
-        editorQuery (typeInFilter "x" (reconcile (testState & hsFilterQuery .~ "ab") initialUi)) @?= "abx",
+        editorQuery (typeInFilter "x" (reconcile (testState & mFilterQuery .~ "ab") initialUi)) @?= "abx",
       testCase "ctrl-w deletes the previous word" $
-        editorQuery (reconcile (testState & hsFilterQuery .~ "foo bar") initialUi & uiEditor %~ applyEdit deletePrevWord) @?= "foo ",
+        editorQuery (reconcile (testState & mFilterQuery .~ "foo bar") initialUi & uiEditor %~ applyEdit deletePrevWord) @?= "foo ",
       testCase "the editor is written only when it differs from the query" $ do
         -- Mid-typing the two agree, so the cursor stays off the end, where
         -- the keys put it.
         let typing = typeInFilter "abc" (reconcile testState initialUi) & uiEditor %~ applyEdit (Z.moveLeft . Z.moveLeft)
-            typed = testState & hsFilterQuery .~ "abc"
+            typed = testState & mFilterQuery .~ "abc"
             cursor = view (uiEditor . editContentsL . to Z.cursorPosition)
         (editorQuery (reconcile typed typing), cursor (reconcile typed typing)) @?= ("abc", (0, 1))
-        let written = reconcile (typed & hsFilterQuery .~ "agent") typing
+        let written = reconcile (typed & mFilterQuery .~ "agent") typing
         (editorQuery written, cursor written) @?= ("agent", (0, 5)),
-      testCase "reconcile shows what is visible, with the selection on hsSelected" $ do
-        let model = settle (insertItems [filterTestBookmark, filterOtherBookmark] testState) & hsSelected ?~ BookmarkItemId "filter-other"
+      testCase "reconcile shows what is visible, with the selection on mSelected" $ do
+        let model = settle (insertItems [filterTestBookmark, filterOtherBookmark] testState) & mSelected ?~ BookmarkItemId "filter-other"
             shown = reconcile model initialUi
-        V.toList (V.map _biId (shown ^. uiList . L.listElementsL)) @?= V.toList (V.map _biId (model ^. hsVisible))
+        V.toList (V.map _biId (shown ^. uiList . L.listElementsL)) @?= V.toList (V.map _biId (model ^. mVisible))
         fmap (_biId . snd) (L.listSelectedElement (shown ^. uiList)) @?= Just (BookmarkItemId "filter-other"),
       testCase "cancelFilter clears query and exits editing" $
-        let s = cancelFilter (enterFilterMode testState & hsFilterQuery .~ "x")
-         in (view hsFilterActive s, view hsFilterQuery s) @?= (False, ""),
+        let s = cancelFilter (enterFilterMode testState & mFilterQuery .~ "x")
+         in (view mFilterActive s, view mFilterQuery s) @?= (False, ""),
       testCase "lockFilter exits editing but preserves query" $
-        let s = lockFilter (enterFilterMode testState & hsFilterQuery .~ "x")
-         in (view hsFilterActive s, view hsFilterQuery s) @?= (False, "x"),
+        let s = lockFilter (enterFilterMode testState & mFilterQuery .~ "x")
+         in (view mFilterActive s, view mFilterQuery s) @?= (False, "x"),
       testCase "settle applies fuzzy text filter" $
         let base = insertItems [filterTestBookmark, filterOtherBookmark] testState
-            filtered = settle (base & hsFilterQuery .~ "uniquetitle")
-            elems = view hsVisible filtered
+            filtered = settle (base & mFilterQuery .~ "uniquetitle")
+            elems = view mVisible filtered
          in V.toList (V.map _biId elems) @?= [BookmarkItemId "filter-1"],
       testCase "text filter composes with video filter" $
         let base = insertItems [filterTestBookmark, filterVideoBookmark] testState
             filtered =
               settle
                 ( base
-                    & hsVideoFilter .~ ShowOnlyVideos
-                    & hsFilterQuery .~ "unique"
+                    & mVideoFilter .~ ShowOnlyVideos
+                    & mFilterQuery .~ "unique"
                 )
-            elems = view hsVisible filtered
+            elems = view mVisible filtered
          in V.toList (V.map _biId elems) @?= [BookmarkItemId "filter-video"]
     ]
 
@@ -700,20 +700,20 @@ agentSnapshotTests =
       testCase "setPendingAction is idempotent (replace, not toggle)" $ do
         -- Flag archive, then re-flag archive: must not flip to None.
         let s = setPendingAction (BookmarkItemId "ag1") ToBeArchived $ insertItems [agentItemA] testState
-        fst <$> Map.lookup (BookmarkItemId "ag1") (s ^. hsContents) @?= Just ToBeArchived,
+        fst <$> Map.lookup (BookmarkItemId "ag1") (s ^. mContents) @?= Just ToBeArchived,
       testCase "setFilterQuery replaces the query and clears filter-input mode" $ do
         let s = setFilterQuery "haskell" (enterFilterMode testState)
-        s ^. hsFilterQuery @?= "haskell"
-        s ^. hsFilterActive @?= False,
+        s ^. mFilterQuery @?= "haskell"
+        s ^. mFilterActive @?= False,
       testCase "setVideoFilterMode is a plain assignment" $ do
         let s = setVideoFilterMode ShowOnlyVideos testState
-        s ^. hsVideoFilter @?= ShowOnlyVideos,
+        s ^. mVideoFilter @?= ShowOnlyVideos,
       testCase "setShowFutureReminders is a plain assignment" $ do
         let s = setShowFutureReminders True testState
-        s ^. hsShowFutureReminders @?= True,
+        s ^. mShowFutureReminders @?= True,
       testCase "setAgentClients sets the header count" $ do
         let s = setAgentClients 2 testState
-        s ^. hsAgentClients @?= 2
+        s ^. mAgentClients @?= 2
     ]
 
 agentProtocolTests :: TestTree

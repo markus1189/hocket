@@ -39,22 +39,22 @@ propertyTests =
         snap <- forAll genAgentSnapshot
         tripping snap A.encode (fmap unWire . A.eitherDecode),
       testProperty "settle keeps the selection visible, or Nothing exactly when nothing is (I4)" $ property $ do
-        start <- forAllWith (show . (^. hsContents)) genModel
+        start <- forAllWith (show . (^. mContents)) genModel
         -- Any prior selection: visible, hidden, unknown, or none.
-        prior <- forAll (Gen.maybe (Gen.choice (genBookmarkItemId : [Gen.element (Map.keys (start ^. hsContents)) | not (Map.null (start ^. hsContents))])))
-        let settled = settle (settle start & hsSelected .~ prior)
-            visibleIds = V.map (^. biId) (settled ^. hsVisible)
-        case settled ^. hsSelected of
+        prior <- forAll (Gen.maybe (Gen.choice (genBookmarkItemId : [Gen.element (Map.keys (start ^. mContents)) | not (Map.null (start ^. mContents))])))
+        let settled = settle (settle start & mSelected .~ prior)
+            visibleIds = V.map (^. biId) (settled ^. mVisible)
+        case settled ^. mSelected of
           Nothing -> V.null visibleIds === True
           Just bid -> V.elem bid visibleIds === True
-        (settle settled ^. hsSelected, settle settled ^. hsVisible) === (settled ^. hsSelected, settled ^. hsVisible),
+        (settle settled ^. mSelected, settle settled ^. mVisible) === (settled ^. mSelected, settled ^. mVisible),
       testProperty "insertItems is order-independent and keeps existing flags" $ property $ do
-        start <- forAllWith (show . (^. hsContents)) genModel
-        items <- forAll (genItemVersions (Map.keys (start ^. hsContents)))
+        start <- forAllWith (show . (^. mContents)) genModel
+        items <- forAll (genItemVersions (Map.keys (start ^. mContents)))
         shuffled <- forAll (Gen.shuffle items)
-        let result = insertItems items start ^. hsContents
-        insertItems shuffled start ^. hsContents === result
-        Map.map fst (start ^. hsContents) === Map.map fst (Map.intersection result (start ^. hsContents))
+        let result = insertItems items start ^. mContents
+        insertItems shuffled start ^. mContents === result
+        Map.map fst (start ^. mContents) === Map.map fst (Map.intersection result (start ^. mContents))
     ]
 
 -- | Several versions per id with distinct 'biLastUpdate': Raindrop never

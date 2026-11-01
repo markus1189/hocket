@@ -23,8 +23,8 @@ item :: Text -> BookmarkItem
 item i = BookmarkItem (BookmarkItemId i) "" "" "" "link" [] False t7 t7 "" "" 0 [] (-1) False Nothing
 
 -- | Ids chosen so text order ("10" < "9") differs from numeric order.
-withFlags :: [(Text, PendingAction)] -> HocketState
-withFlags fs = initialState & hsContents .~ Map.fromList [(BookmarkItemId i, (a, item i)) | (i, a) <- fs]
+withFlags :: [(Text, PendingAction)] -> Model
+withFlags fs = initialModel & mContents .~ Map.fromList [(BookmarkItemId i, (a, item i)) | (i, a) <- fs]
 
 ids :: [Text] -> [BookmarkItemId]
 ids = map BookmarkItemId
@@ -45,8 +45,8 @@ planTests =
         planBatch (withFlags [("1", ToBeArchived), ("2", ToBeReminded t7), ("3", ReminderToBeRemoved), ("4", None)])
           @?= Just (BatchPlan (ids ["1"]) [(BookmarkItemId "2", t7)] (ids ["3"])),
       testProperty "no plan exactly when no step has work; ids match the flags" $ property $ do
-        s <- forAllWith (show . (^. hsContents)) genModel
-        let flaggedAs p = [k | (k, (a, _)) <- Map.toList (s ^. hsContents), p a]
+        s <- forAllWith (show . (^. mContents)) genModel
+        let flaggedAs p = [k | (k, (a, _)) <- Map.toList (s ^. mContents), p a]
             plan = planBatch s
         isNothing plan === null (batchStepsWithWork s)
         fmap bpArchive plan === emptyToNothing (flaggedAs (== ToBeArchived)) plan

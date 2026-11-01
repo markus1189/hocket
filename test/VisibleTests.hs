@@ -30,7 +30,7 @@ instance Show Inputs where
   show (Inputs f v q c) = show (f, v, q, c)
 
 genInputs :: Gen Inputs
-genInputs = Inputs <$> Gen.bool <*> genVideoFilterMode <*> genQuery <*> ((^. hsContents) <$> genModel)
+genInputs = Inputs <$> Gen.bool <*> genVideoFilterMode <*> genQuery <*> ((^. mContents) <$> genModel)
 
 passes :: Inputs -> BookmarkItem -> Bool
 passes (Inputs showFuture video query _) item =

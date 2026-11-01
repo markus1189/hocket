@@ -2,7 +2,7 @@
 
 -- | The agent wire pinned byte for byte (I7). The golden was recorded from
 -- master's list-based takeSnapshot (before Phase 4 commit 6), so a match
--- shows the move to hsSelected/hsVisible left the wire unchanged.
+-- shows the move to mSelected/mVisible left the wire unchanged.
 module SnapshotGoldenTests (snapshotGoldenTests) where
 
 import Control.Lens ((&), (.~), (?~), (^.))
@@ -26,10 +26,10 @@ item i link tags created rem' =
 
 -- | Every flag, a reminder hidden by the future-reminder filter, a video
 -- hidden by the video filter, the second visible item selected, a status.
-state :: HocketState
+state :: Model
 state =
   let s0 =
-        initialState
+        initialModel
           & insertItems
             [ item "1" "https://example.org/1" [] "2026-10-01 10:00:00 UTC" Nothing,
               item "2" "https://example.org/2" ["haskell"] "2026-10-02 10:00:00 UTC" Nothing,
@@ -42,10 +42,10 @@ state =
           & setPendingAction (BookmarkItemId "4") ReminderToBeRemoved
           & setVideoFilterMode HideVideos
           & setShowFutureReminders False
-          & hsStatus ?~ "archive ok"
-          & hsLastUpdated ?~ 1790000000
+          & mStatus ?~ "archive ok"
+          & mLastUpdated ?~ 1790000000
           & settle
-   in settle (s0 & hsSelected ?~ ((s0 ^. hsVisible) V.! 1 ^. biId))
+   in settle (s0 & mSelected ?~ ((s0 ^. mVisible) V.! 1 ^. biId))
 
 snapshotGoldenTests :: TestTree
 snapshotGoldenTests =
