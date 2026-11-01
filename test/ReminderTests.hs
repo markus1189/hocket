@@ -27,6 +27,9 @@ reminderTests =
       testCase "evening before the Europe/Berlin change, CEST offset" $
         -- fixed-offset TimeZone: 06:00 CET wall clock after the change; see plan §11 #15
         reminderPolicy cest (utc "2026-10-24 20:00:00 UTC") @?= utc "2026-10-25 05:00:00 UTC",
+      testCase "evening before the spring change, CET offset" $
+        -- fixed-offset TimeZone: 08:00 CEST wall clock after the change; see plan §11 #15
+        reminderPolicy cet (utc "2026-03-28 21:00:00 UTC") @?= utc "2026-03-29 06:00:00 UTC",
       testCase "evening of the change, CET offset" $
         reminderPolicy cet (utc "2026-10-25 21:00:00 UTC") @?= utc "2026-10-26 06:00:00 UTC",
       testProperty "07:00 local on the next local day, always in the future" $ property $ do
