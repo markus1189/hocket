@@ -383,7 +383,7 @@ filterOtherBookmark =
 --
 -- Each item has distinct text across title/domain/excerpt/note and a distinct
 -- creation date that ascends with the id (t01 oldest .. t10 newest). Because
--- 'syncForRender' sorts descending by 'getSortDate' (reminder if present, else
+-- 'settle' sorts descending by 'getSortDate' (reminder if present, else
 -- '_biCreated'), the default render order is newest-first: t10, t09, .. t01.
 --
 -- All reminders are Nothing, so every item is visible under the default state
@@ -426,7 +426,7 @@ tuningBookmarks =
 runTuning :: Text -> [BookmarkItem]
 runTuning q =
   let base = insertItems tuningBookmarks testState
-      filtered = syncForRender (base & hsFilterQuery .~ q)
+      filtered = settle (base & hsFilterQuery .~ q)
    in V.toList (view (itemList . L.listElementsL) filtered)
 
 -- | True iff the list is in non-increasing order (the render invariant).
@@ -496,15 +496,15 @@ filterStateTests =
       testCase "lockFilter exits editing but preserves query" $
         let s = lockFilter (typeInFilter "x" (enterFilterMode testState))
          in (view hsFilterActive s, view hsFilterQuery s) @?= (False, "x"),
-      testCase "syncForRender applies fuzzy text filter" $
+      testCase "settle applies fuzzy text filter" $
         let base = insertItems [filterTestBookmark, filterOtherBookmark] testState
-            filtered = syncForRender (base & hsFilterQuery .~ "uniquetitle")
+            filtered = settle (base & hsFilterQuery .~ "uniquetitle")
             elems = view (itemList . L.listElementsL) filtered
          in V.toList (V.map _biId elems) @?= [BookmarkItemId "filter-1"],
       testCase "text filter composes with video filter" $
         let base = insertItems [filterTestBookmark, filterVideoBookmark] testState
             filtered =
-              syncForRender
+              settle
                 ( base
                     & hsVideoFilter .~ ShowOnlyVideos
                     & hsFilterQuery .~ "unique"
@@ -646,17 +646,17 @@ agentItemRem =
     }
 
 agentSnapAB :: AgentSnapshot
-agentSnapAB = takeSnapshot 1 (syncForRender (insertItems [agentItemA, agentItemB] testState))
+agentSnapAB = takeSnapshot 1 (settle (insertItems [agentItemA, agentItemB] testState))
 
 agentSnapFlagged :: AgentSnapshot
 agentSnapFlagged =
   takeSnapshot 1 $
-    syncForRender $
+    settle $
       setPendingAction (BookmarkItemId "ag1") ToBeArchived $
         insertItems [agentItemA, agentItemB] testState
 
 agentSnapWithRem :: AgentSnapshot
-agentSnapWithRem = takeSnapshot 1 (syncForRender (insertItems [agentItemA, agentItemRem] testState))
+agentSnapWithRem = takeSnapshot 1 (settle (insertItems [agentItemA, agentItemRem] testState))
 
 agentSnapshotTests :: TestTree
 agentSnapshotTests =
@@ -816,7 +816,7 @@ agentSockItem i t =
 buildTestSnapshot :: Int -> AgentSnapshot
 buildTestSnapshot v =
   takeSnapshot v $
-    syncForRender $
+    settle $
       insertItems
         [ agentSockItem "in-1" "first bookmark",
           agentSockItem "in-2" "second bookmark"

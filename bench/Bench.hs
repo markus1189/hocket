@@ -82,7 +82,7 @@ mkItem i =
 
 mkState :: Int -> HocketState
 mkState n =
-  syncForRender $
+  settle $
     insertItems (map mkItem [1 .. n]) initialState
 
 itemId :: Int -> BookmarkItemId
@@ -93,7 +93,7 @@ flagMany is s0 = foldl' step s0 is
   where
     step st i = case validateWrite (takeSnapshot 0 st) (CmdSetFlag (itemId i) FlagArchive) of
       Left e -> error (T.unpack e)
-      Right _ -> syncForRender (setPendingAction (itemId i) ToBeArchived st)
+      Right _ -> settle (setPendingAction (itemId i) ToBeArchived st)
 
 sizes :: [Int]
 sizes = [1000, 5000, 20000]
@@ -111,12 +111,12 @@ main =
         (show n)
         [ bgroup
             "syncForRender"
-            [ bench name $ nf (visibleCount . syncForRender . setFilterQuery q) s
+            [ bench name $ nf (visibleCount . settle . setFilterQuery q) s
             | (name, q) <- queries
             ],
           bgroup
             "videoFilter"
-            [ bench name $ nf (visibleCount . syncForRender . setVideoFilterMode m) s
+            [ bench name $ nf (visibleCount . settle . setVideoFilterMode m) s
             | (name, m) <- [("only", ShowOnlyVideos), ("hide", HideVideos)]
             ],
           bgroup
@@ -126,7 +126,7 @@ main =
               -- What the server + TUI do per flag write: validate against the
               -- current snapshot, apply, re-render, re-snapshot.
               bench "flag 100 (validate+sync)" $ nf (visibleCount . flagMany [1 .. 100]) s,
-              bench "flag 100 (sync only)" $ nf (visibleCount . foldl' (\st i -> syncForRender (setPendingAction (itemId i) ToBeArchived st)) s) [1 .. 100]
+              bench "flag 100 (sync only)" $ nf (visibleCount . foldl' (\st i -> settle (setPendingAction (itemId i) ToBeArchived st)) s) [1 .. 100]
             ],
           bench "hsNumItems" $ nf (\st -> let c = hsNumItems st in c ^. icNone + c ^. icFutureReminders) s,
           -- SnapshotItem fields are strict, so WHNF of each list cell forces the projection.

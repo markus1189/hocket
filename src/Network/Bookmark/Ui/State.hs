@@ -69,7 +69,9 @@ module Network.Bookmark.Ui.State
     updateItemsWithReminder,
     removeReminderFromItems,
     SortByUpdated,
-    syncForRender,
+    settle,
+    hsVisible,
+    hsSelected,
     visibleItems,
     getSortDate,
     isVideoBookmark,
@@ -80,7 +82,6 @@ import qualified Brick.Focus as F
 import Brick.Widgets.Edit (Editor, applyEdit, editorText, getEditContents)
 import Brick.Widgets.List (List)
 import qualified Brick.Widgets.List as L
-import Control.Applicative ((<|>))
 import Control.Lens
 import qualified Data.Text.Zipper as Z
 #if MIN_VERSION_base(4,20,0)
@@ -89,10 +90,9 @@ import Data.Foldable (maximumBy)
 import Data.Foldable (foldl', maximumBy)
 #endif
 import Data.Function (on)
-import Data.Functor (($>))
 import Data.Map (Map)
 import qualified Data.Map as Map
-import Data.Maybe (isJust)
+import Data.Maybe (fromMaybe, isJust)
 import Data.Ord (Down (..), comparing)
 import qualified Data.SortedList as SL
 import Data.Text (Text)
@@ -100,6 +100,7 @@ import qualified Data.Text as T
 import Data.Time (UTCTime)
 import Data.Time.Clock.POSIX (POSIXTime)
 import qualified Data.Vector as V
+import qualified Network.Bookmark.App.Nav as Nav
 import Network.Bookmark.Types
 import Network.Bookmark.Ui.Widgets
 
@@ -133,7 +134,12 @@ data HocketState = HocketState
     _hsAgentClients :: !Int,
     -- | Set when the agent socket server died; the shared status line is
     -- overwritten within a frame, so the header carries this instead.
-    _hsAgentError :: !(Maybe Text)
+    _hsAgentError :: !(Maybe Text),
+    -- | What the list shows, in order; only 'settle' writes it.
+    _hsVisible :: !(V.Vector BookmarkItem),
+    -- | The selection, by id: always visible, or 'Nothing' when nothing is
+    -- (I4). The brick list follows it, never the other way round.
+    _hsSelected :: !(Maybe BookmarkItemId)
   }
 
 makeLenses ''HocketState
@@ -225,6 +231,8 @@ initialState =
     (editorText FilterEditorName (Just 1) "")
     0
     Nothing
+    V.empty
+    Nothing
 
 insertItem :: BookmarkItem -> HocketState -> HocketState
 insertItem bit s =
@@ -267,9 +275,7 @@ focusedList :: HocketState -> Maybe (L.List Name BookmarkItem)
 focusedList s = s ^? itemList
 
 focusedItem :: HocketState -> Maybe BookmarkItem
-focusedItem s = do
-  list <- focusedList s
-  snd <$> L.listSelectedElement list
+focusedItem s = s ^. hsSelected >>= \bid -> s ^? hsContents . ix bid . _2
 
 getPendingActionForItem :: BookmarkItemId -> HocketState -> PendingAction
 getPendingActionForItem bid s =
@@ -277,21 +283,26 @@ getPendingActionForItem bid s =
     Just (action, _) -> action
     Nothing -> None
 
+-- | The cursor's move after a key's flag change: the next visible item.
+-- Flags do not change what is visible, so the move sees the same list.
+selectNext :: HocketState -> HocketState
+selectNext s = s & hsSelected .~ Nav.navigate 0 Nav.Down (s ^. hsVisible) (`getPendingActionForItem` s) (s ^. hsSelected)
+
 -- | The key-path toggles: flip the flag, then move the cursor down.
 shiftItem :: BookmarkItemId -> HocketState -> HocketState
-shiftItem bid = (itemList %~ L.listMoveDown) . togglePendingAction bid
+shiftItem bid = selectNext . togglePendingAction bid
 
 -- | Archive from any flag; 'shiftItem' would clear a reminder flag instead.
 archiveItem :: BookmarkItemId -> HocketState -> HocketState
-archiveItem bid = (itemList %~ L.listMoveDown) . setPendingAction bid ToBeArchived
+archiveItem bid = selectNext . setPendingAction bid ToBeArchived
 
 -- | Key @u@: what 'shiftItem' and 'shiftItemReminder' do to a flagged item,
 -- which ends at 'None' whatever the reminder time.
 unflagItem :: BookmarkItemId -> HocketState -> HocketState
-unflagItem bid = (itemList %~ L.listMoveDown) . setPendingAction bid None
+unflagItem bid = selectNext . setPendingAction bid None
 
 shiftItemReminder :: BookmarkItemId -> UTCTime -> HocketState -> HocketState
-shiftItemReminder bid reminderTime = (itemList %~ L.listMoveDown) . togglePendingActionToReminder bid reminderTime
+shiftItemReminder bid reminderTime = selectNext . togglePendingActionToReminder bid reminderTime
 
 -- | Idempotent flag assignment for the agent socket: unlike the keyboard
 -- toggles this cannot flip the wrong way when the caller's view is stale.
@@ -419,14 +430,23 @@ removeReminderFromItems bids s =
     s
     bids
 
-syncForRender :: HocketState -> HocketState
-syncForRender s =
+-- | Recompute what is visible and keep the selection valid (plan D2): the
+-- selected item stays selected while it is visible; when it disappears the
+-- item now at its index takes over (clamped at the end); with no selection
+-- the first item is selected. The brick list is derived from both.
+settle :: HocketState -> HocketState
+settle s =
   s
-    & itemList . L.listElementsL .~ allSortedItems
-    & itemList . L.listSelectedL .~ (view (itemList . L.listSelectedL) s <|> (allSortedItems ^? _head $> 0))
-    & itemList %~ adjustFocus
+    & hsVisible .~ visible
+    & hsSelected .~ selected
+    & itemList . L.listElementsL .~ visible
+    & itemList . L.listSelectedL .~ (selected >>= indexIn visible)
   where
-    allSortedItems = visibleItems (s ^. hsShowFutureReminders) (s ^. hsVideoFilter) (s ^. hsFilterQuery) (s ^. hsContents)
+    visible = visibleItems (s ^. hsShowFutureReminders) (s ^. hsVideoFilter) (s ^. hsFilterQuery) (s ^. hsContents)
+    indexIn items bid = V.findIndex ((== bid) . view biId) items
+    selected = case s ^. hsSelected of
+      Just bid | isJust (indexIn visible bid) -> Just bid
+      prev -> view biId <$> visible V.!? clamp 0 (V.length visible - 1) (fromMaybe 0 (prev >>= indexIn (s ^. hsVisible)))
 
 -- | The items the list shows, newest sort date ('getSortDate') first: the
 -- future-reminder, video and text filters, in that order.
@@ -461,11 +481,3 @@ visibleItems showFutureReminders videoFilter query contents =
       case view biReminder item of
         Nothing -> False
         Just _reminderTime -> True
-
-adjustFocus :: L.List n a -> L.List n a
-adjustFocus l =
-  if n > 0
-    then l & L.listSelectedL . _Just %~ clamp 0 (n - 1)
-    else l & L.listSelectedL .~ Nothing
-  where
-    n = length (l ^. L.listElementsL)

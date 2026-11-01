@@ -137,6 +137,7 @@ import Network.Bookmark.Ui.State
     hsFilterQuery,
     hsLastUpdated,
     hsNumItems,
+    hsSelected,
     hsStatus,
     hsVideoFilter,
     icFutureReminders,
@@ -148,7 +149,7 @@ import Network.Bookmark.Ui.State
     isReminderAction,
     itemList,
     lockFilter,
-    syncForRender,
+    settle,
   )
 import Network.Bookmark.Ui.Widgets (sanitizeForDisplay)
 import Network.Raindrop (servantPort)
@@ -356,8 +357,8 @@ vtyEventHandler env e = do
       -- keystrokes the editor already applied synchronously.
       EvKey KEsc [] -> id %= cancelFilter
       EvKey KEnter [] -> id %= lockFilter
-      EvKey KUp [] -> zoom itemList (handleListEventVi handleListEvent e)
-      EvKey KDown [] -> zoom itemList (handleListEventVi handleListEvent e)
+      EvKey KUp [] -> zoom itemList (handleListEventVi handleListEvent e) >> followList
+      EvKey KDown [] -> zoom itemList (handleListEventVi handleListEvent e) >> followList
       -- Brick's editor has no Ctrl-W.
       EvKey (KChar 'w') [MCtrl] -> hsFilterEditor %= applyEdit deletePrevWord
       _ -> zoom hsFilterEditor (handleEditorEvent (VtyEvent e))
@@ -384,12 +385,12 @@ vtyEventHandlerNormal ::
 vtyEventHandlerNormal (EvKey (KChar 'J') []) = do
   s <- use id
   case findNextFlaggedItem s of
-    Just newIdx -> itemList %= L.listMoveTo newIdx
+    Just newIdx -> (itemList %= L.listMoveTo newIdx) >> followList
     Nothing -> pure ()
 vtyEventHandlerNormal (EvKey (KChar 'K') []) = do
   s <- use id
   case findPrevFlaggedItem s of
-    Just newIdx -> itemList %= L.listMoveTo newIdx
+    Just newIdx -> (itemList %= L.listMoveTo newIdx) >> followList
     Nothing -> pure ()
 vtyEventHandlerNormal (EvKey (KChar '/') []) =
   -- Flip into filter mode synchronously so the very next keystroke is already
@@ -398,6 +399,15 @@ vtyEventHandlerNormal (EvKey (KChar '/') []) =
   id %= enterFilterMode
 vtyEventHandlerNormal e = do
   zoom itemList (handleListEventVi handleListEvent e)
+  followList
+
+-- | Until the keymap moves the selection itself (Navigate), brick's list
+-- moves the cursor and the selection follows it once, right after; settle
+-- then derives the list from the selection again.
+followList :: EventM Name HocketState ()
+followList = do
+  l <- use itemList
+  hsSelected .= (view biId . snd <$> L.listSelectedElement l)
 
 myEventHandler ::
   Env ->
@@ -548,7 +558,7 @@ app tz isFixture env mSnapVar =
           else Focus.focusRingCursor (view focusRing) s,
       appHandleEvent = \e -> do
         myEventHandler env e
-        id %= syncForRender
+        id %= settle
         -- Mirror the post-render state for the agent socket. Persistent
         -- data sharing keeps this cheap; the item projection is only fully
         -- forced by a server thread that actually serves it.

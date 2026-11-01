@@ -67,12 +67,12 @@ updateTests =
         flags ClearAllFlags @?= [None, None]
         flags FlagAllArchive @?= [ToBeArchived, ToBeArchived],
       testCase "Select moves to a visible item; a hidden or unknown one changes nothing" $ do
-        let selected s' = s' ^. itemList . L.listSelectedL
-        selected (after (Intent (Select (BookmarkItemId "b"))) twoItems) @?= Just 1
+        let selected s' = s' ^. hsSelected
+        selected (after (Intent (Select (BookmarkItemId "b"))) twoItems) @?= Just (BookmarkItemId "b")
         -- Items with a reminder are hidden unless future reminders are shown.
-        let hidden = syncForRender (twoItems & hsContents . ix (BookmarkItemId "b") . _2 . biReminder ?~ t0)
+        let hidden = settle (twoItems & hsContents . ix (BookmarkItemId "b") . _2 . biReminder ?~ t0)
         selected (after (Intent (Select (BookmarkItemId "b"))) hidden) @?= selected hidden
-        selected (after (Intent (Select (BookmarkItemId "zz"))) twoItems) @?= Just 0,
+        selected (after (Intent (Select (BookmarkItemId "zz"))) twoItems) @?= Just (BookmarkItemId "a"),
       testCase "SetFilter replaces the query, locks the editor and refilters the list" $ do
         let (s', fx) = update (Intent (SetFilter "title b")) (twoItems & enterFilterMode)
         (fx, s' ^. hsFilterQuery, s' ^. hsFilterActive, visibleIds s') @?= ([], "title b", False, [BookmarkItemId "b"]),
@@ -160,4 +160,4 @@ flagOf i s = s ^? hsContents . ix (BookmarkItemId i) . _1
 
 -- | "a" sorts first by its later creation date, so it holds the focus.
 twoItems :: HocketState
-twoItems = syncForRender (insertItems [item "a" (-1) & biCreated .~ read "2030-01-01 00:00:00 UTC", item "b" (-1)] emptyState)
+twoItems = settle (insertItems [item "a" (-1) & biCreated .~ read "2030-01-01 00:00:00 UTC", item "b" (-1)] emptyState)

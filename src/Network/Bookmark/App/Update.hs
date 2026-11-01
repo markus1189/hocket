@@ -5,7 +5,6 @@
 -- the agent or a worker, and what the shell should do about it.
 module Network.Bookmark.App.Update (update) where
 
-import qualified Brick.Widgets.List as L
 import Control.Lens
 import Data.Text (Text)
 import Data.Time (UTCTime)
@@ -27,7 +26,7 @@ update msg s = case msg of
   Intent (EditInRaindrop t) -> (s, [OpenUrl XdgOpen (editUrl bit) | bit <- target t])
   Intent (CopyUrl t) -> (s, [CopyText (bit ^. biLink) | bit <- target t])
   Intent (OpenAndFlag bid) -> case s ^? hsContents . ix bid . _2 of
-    Just bit -> (syncForRender (setPendingAction bid ToBeArchived s), [OpenUrl Firefox (bit ^. biLink)])
+    Just bit -> (settle (setPendingAction bid ToBeArchived s), [OpenUrl Firefox (bit ^. biLink)])
     Nothing -> (s, [])
   -- The key intents carry no guard (keyIntents); the no-ops of the old key
   -- handlers live here, and a no-op does not move the cursor either.
@@ -38,7 +37,8 @@ update msg s = case msg of
   Intent (SetFlag bid act now) -> (setPendingAction bid (flagFor now act) s, [])
   Intent ClearAllFlags -> (clearAllFlags s, [])
   Intent FlagAllArchive -> (setAllFlagsToArchive s, [])
-  Intent (Select bid) -> (s & itemList %~ selectById bid, [])
+  -- Agent @select_item@: only an item the list shows can be selected.
+  Intent (Select bid) -> (s & hsSelected %~ \cur -> if V.any ((== bid) . (^. biId)) (s ^. hsVisible) then Just bid else cur, [])
   Intent (SetFilter q) -> refilter (setFilterQuery q)
   Intent (SetVideoFilter m) -> refilter (setVideoFilterMode m)
   Intent ToggleVideoOnly -> refilter toggleVideoFilter
@@ -68,7 +68,7 @@ update msg s = case msg of
     lastUpdated = s ^. hsLastUpdated
     since = maybe "" (\t -> " since: " <> formatPOSIXTime (t - 86400)) lastUpdated
     -- What is visible changes, so the list follows at once, as before.
-    refilter f = (syncForRender (f s), [])
+    refilter f = (settle (f s), [])
     target = maybe [] pure . targetItem s
     -- Apply the change the item's flag calls for, if any.
     onTarget t change = case targetItem s t of
@@ -91,10 +91,6 @@ applyStep = \case
   Archived o -> applyArchived (o ^. soOk)
   RemindersSetAt o -> applyRemindersSet (o ^. soOk)
   RemindersRemoved o -> applyRemindersRemoved (o ^. soOk)
-
--- | Agent @select_item@: only an item the list shows can be selected.
-selectById :: BookmarkItemId -> L.List Name BookmarkItem -> L.List Name BookmarkItem
-selectById bid l = maybe l (`L.listMoveTo` l) (V.findIndex ((== bid) . (^. biId)) (l ^. L.listElementsL))
 
 reminderAt :: Now -> UTCTime
 reminderAt now = reminderPolicy (nowZone now) (nowUtc now)

@@ -10,6 +10,7 @@ import Data.Aeson.Types (Parser)
 import qualified Data.Map as Map
 import Data.Text (Text)
 import Data.Time.Clock (addUTCTime)
+import qualified Data.Vector as V
 import Gen
 import Hedgehog
 import qualified Hedgehog.Gen as Gen
@@ -37,6 +38,16 @@ propertyTests =
       testProperty "AgentSnapshot JSON round-trips" $ property $ do
         snap <- forAll genAgentSnapshot
         tripping snap A.encode (fmap unWire . A.eitherDecode),
+      testProperty "settle keeps the selection visible, or Nothing exactly when nothing is (I4)" $ property $ do
+        start <- forAllWith (show . (^. hsContents)) genModel
+        -- Any prior selection: visible, hidden, unknown, or none.
+        prior <- forAll (Gen.maybe (Gen.choice (genBookmarkItemId : [Gen.element (Map.keys (start ^. hsContents)) | not (Map.null (start ^. hsContents))])))
+        let settled = settle (settle start & hsSelected .~ prior)
+            visibleIds = V.map (^. biId) (settled ^. hsVisible)
+        case settled ^. hsSelected of
+          Nothing -> V.null visibleIds === True
+          Just bid -> V.elem bid visibleIds === True
+        (settle settled ^. hsSelected, settle settled ^. hsVisible) === (settled ^. hsSelected, settled ^. hsVisible),
       testProperty "insertItems is order-independent and keeps existing flags" $ property $ do
         start <- forAllWith (show . (^. hsContents)) genModel
         items <- forAll (genItemVersions (Map.keys (start ^. hsContents)))
