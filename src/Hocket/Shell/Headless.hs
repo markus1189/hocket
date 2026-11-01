@@ -12,10 +12,11 @@ where
 
 import Brick.BChan (readBChan)
 import Control.Concurrent.STM
+import Control.Monad (when)
 import Data.Maybe (isNothing)
 import Hocket.Agent.Snapshot (AgentSnapshot, asAsyncOp, emptySnapshot)
 import Hocket.App.Model (Model, settle)
-import Hocket.App.Msg (Intent (Refresh), Msg (Intent))
+import Hocket.App.Msg (Intent (Refresh), Msg (Intent), publishes)
 import Hocket.Shell.Interpret (Env (..), publishSTM, step, tookMsg)
 
 data Loop = Loop
@@ -52,7 +53,9 @@ runHeadless env loop = run (Intent Refresh)
       let settled = settle s'
       -- One transaction: no observer sees busy cleared with the old
       -- snapshot (an Execute's async_op not yet published).
-      atomically (publishSTM (loopSnapshot loop) settled >> writeTVar (loopBusy loop) False)
+      atomically $ do
+        when (publishes m) (publishSTM (loopSnapshot loop) settled)
+        writeTVar (loopBusy loop) False
       if halted
         then pure settled
         else do

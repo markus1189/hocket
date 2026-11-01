@@ -319,9 +319,10 @@ agentServerIntegrationTests =
                   KM.lookup (AKey.fromText "injected") r @?= Just (A.Bool True)
                 _ -> assertFailure "set_filter result missing"
             _ -> assertFailure "set_filter response not an object"
-          -- The injected event must be a SetFilterQuery "haskell".
+          -- The first write gets seq 1, in the reply and on the message.
+          resultField "seq" resp @?= Just (1 :: Int)
           injected <- readAgentInjected events
-          injected @?= I.Intent (I.SetFilter "haskell"),
+          injected @?= I.AgentWrite 1 (I.SetFilter "haskell"),
       testCase "wait_version unblocks once the snapshot version advances" $
         withAgentServer $ \snapVar events path -> do
           atomically (modifyTVar' snapVar (const (buildTestSnapshot 4)))
@@ -371,7 +372,7 @@ agentServerIntegrationTests =
               KM.lookup (AKey.fromText "ok") o @?= Just (A.Bool True)
             Right _ -> assertFailure "client response not an object"
           injected <- readAgentInjected events
-          injected @?= I.Intent (I.SetFlag (BookmarkItemId "in-1") FlagArchive testNow),
+          injected @?= I.AgentWrite 1 (I.SetFlag (BookmarkItemId "in-1") FlagArchive testNow),
       testCase "the shipped client reports an unreachable socket" $ do
         res <- callAgent "/nonexistent/hocket-agent-absent.sock" (ARead CmdGetState)
         assertBool "expected a transport error" (isLeft res),

@@ -117,6 +117,9 @@ agentProtocolTests =
       testCase "decodeCmd: wait_version defaults its timeout" $
         decodeCmd "wait_version" (Just (A.object ["after" A..= (3 :: Int)]))
           @?= Right (AWait 3 10000),
+      testCase "decodeCmd: wait_applied defaults its timeout" $
+        decodeCmd "wait_applied" (Just (A.object ["seq" A..= (5 :: Int)]))
+          @?= Right (AWaitApplied 5 10000),
       testCase "decodeCmd: set_flag archive" $
         decodeCmd
           "set_flag"

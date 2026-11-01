@@ -6,7 +6,8 @@
 -- newline-delimited JSON. Reads are answered from the snapshot mirror
 -- without touching the Brick event loop; validated writes are injected into
 -- the same 'BChan' the keyboard uses, so every TUI invariant holds for the
--- agent as well.
+-- agent as well. Each injected write gets the next seq, which the model
+-- records as applied once update has run it ('wait_applied').
 module Hocket.Shell.Agent.Server
   ( AgentEnv (..),
     runAgentServer,
@@ -22,6 +23,7 @@ where
 
 import Control.Concurrent (forkFinally, threadDelay)
 import Control.Concurrent.Async (withAsync)
+import Control.Concurrent.MVar (MVar, newMVar, withMVarMasked)
 import Control.Concurrent.STM
   ( TVar,
     atomically,
@@ -30,6 +32,7 @@ import Control.Concurrent.STM
     newTVarIO,
     readTVar,
     readTVarIO,
+    writeTVar,
   )
 import Control.Exception (IOException, SomeException, bracket, finally, try)
 import Control.Monad (forever, unless, void, when)
@@ -52,8 +55,8 @@ import Hocket.Agent.Protocol
     stateView,
     validateWrite,
   )
-import Hocket.Agent.Snapshot (AgentSnapshot, asVersion, emptySnapshot)
-import Hocket.App.Msg (Intent (SetStatus), Msg (AgentClients, AgentServerDied, Intent), Now)
+import Hocket.Agent.Snapshot (AgentSnapshot, asAppliedSeq, asVersion, emptySnapshot)
+import Hocket.App.Msg (Intent (SetStatus), Msg (AgentClients, AgentServerDied, AgentWrite, Intent), Now)
 import Hocket.Shell.Interpret (Env (..), injectMsg, postMsg)
 import Hocket.Shell.Worker (exceptionMessage, trySync)
 import Network.Socket
@@ -91,6 +94,13 @@ data AgentEnv = AgentEnv
     aeInject :: !(Msg -> IO Bool),
     -- | The clock, sampled once per write (reminders: same policy as 's').
     aeNow :: !(IO Now)
+  }
+
+-- | The seq of the last write the channel took, shared by every client.
+data Seqs = Seqs
+  { seqIssued :: !(TVar Int),
+    -- | Held from taking a seq until it is committed or given back.
+    seqLock :: !(MVar ())
   }
 
 -- | Reclaim a stale socket file left over from a crash or hard kill, but
@@ -181,6 +191,7 @@ runAgentServer (BoundSocket ref) path env = do
   unless dirExisted (setFileMode dir 0o700)
   reclaimStaleSocket path
   clients <- newTVarIO (0 :: Int)
+  seqs <- Seqs <$> newTVarIO 0 <*> newMVar ()
   bracket (socket AF_UNIX Stream defaultProtocol) close $ \sock -> do
     bind sock (SockAddrUnix path)
     st <- getSymbolicLinkStatus path
@@ -194,7 +205,7 @@ runAgentServer (BoundSocket ref) path env = do
       count clients 1
       void $
         forkFinally
-          (serveClient env conn)
+          (serveClient env seqs conn)
           (\_ -> count clients (-1))
   where
     count clients d = atomically (modifyTVar' clients (+ d))
@@ -217,8 +228,8 @@ runAgentServer (BoundSocket ref) path env = do
     -- Best effort: if posting is what fails, this can fail the same way.
     report t = void (trySync (aeInject env (Intent (SetStatus t))))
 
-serveClient :: AgentEnv -> Socket -> IO ()
-serveClient env conn = do
+serveClient :: AgentEnv -> Seqs -> Socket -> IO ()
+serveClient env seqs conn = do
   h <- socketToHandle conn ReadWriteMode
   hSetBuffering h LineBuffering
   loop h `finally` void (try @SomeException (hClose h))
@@ -231,19 +242,19 @@ serveClient env conn = do
         Right line
           | BS.all isSpace line -> loop h
           | otherwise -> do
-              resp <- handleLine env line
+              resp <- handleLine env seqs line
               BSL.hPutStrLn h (encode resp)
               loop h
 
-handleLine :: AgentEnv -> BS.ByteString -> IO Value
-handleLine env line = case eitherDecodeStrict line of
+handleLine :: AgentEnv -> Seqs -> BS.ByteString -> IO Value
+handleLine env seqs line = case eitherDecodeStrict line of
   Left err -> pure (errResponse Nothing ("bad request: " <> T.pack err))
   Right raw -> case decodeCmd (rawMethod raw) (rawParams raw) of
     Left err -> pure (errResponse (rawId raw) err)
-    Right cmd -> dispatch env (rawId raw) cmd
+    Right cmd -> dispatch env seqs (rawId raw) cmd
 
-dispatch :: AgentEnv -> Maybe Value -> AgentCmd -> IO Value
-dispatch env rid = \case
+dispatch :: AgentEnv -> Seqs -> Maybe Value -> AgentCmd -> IO Value
+dispatch env seqs rid = \case
   ARead r -> do
     snap <- readTVarIO (aeSnapshot env)
     pure (either (errResponse rid) (okResponse rid) (serveRead snap r))
@@ -252,20 +263,29 @@ dispatch env rid = \case
     pure $ case msnap of
       Nothing -> errResponse rid "timeout waiting for state change"
       Just snap -> okResponse rid (stateView snap)
+  -- A writer learns its seq only after the commit, so a seq above the last
+  -- issued one was never handed out (or not yet): waiting would not help.
+  AWaitApplied n timeoutMs -> do
+    issued <- readTVarIO (seqIssued seqs)
+    if n > issued
+      then pure (errResponse rid ("unknown seq " <> tshow n <> ": last issued " <> tshow issued))
+      else do
+        msnap <- awaitSnapshot (aeSnapshot env) timeoutMs ((>= n) . asAppliedSeq)
+        pure $ case msnap of
+          Nothing -> errResponse rid ("timeout waiting for write " <> tshow n)
+          Just snap -> okResponse rid (stateView snap)
   AWrite w -> do
     snap <- readTVarIO (aeSnapshot env)
     case validateWrite snap w of
       Left err -> pure (errResponse rid err)
       Right w' -> do
-        evt <- writeMsg env w'
-        accepted <- aeInject env evt
-        pure $
-          if accepted
-            then
-              okResponse
-                rid
-                (object ["injected" .= True, "version" .= asVersion snap])
-            else errResponse rid "event channel full, retry"
+        mseq <- injectWrite env seqs =<< writeIntent env w'
+        pure $ case mseq of
+          -- version: the snapshot the write was validated against.
+          Just n -> okResponse rid (object ["injected" .= True, "version" .= asVersion snap, "seq" .= n])
+          Nothing -> errResponse rid "event channel full, retry"
+  where
+    tshow = T.pack . show
 
 -- | The first snapshot that passes, within the timeout clamped to
 -- [0, 60000] ms. Checked once before the timed wait: 'timeout' 0 gives up
@@ -281,8 +301,22 @@ awaitSnapshot snapVar timeoutMs ok = do
 
 -- | A validated write as the Intent the keyboard would produce. The clock is
 -- sampled here, in the shell, once per write.
-writeMsg :: AgentEnv -> WriteCmd -> IO Msg
-writeMsg env cmd = Intent . (`toIntent` cmd) <$> aeNow env
+writeIntent :: AgentEnv -> WriteCmd -> IO Intent
+writeIntent env cmd = (`toIntent` cmd) <$> aeNow env
+
+-- | Inject a write under the next seq; the seq if the channel took it. One
+-- lock from taking the seq to committing it, so the channel holds the
+-- writes in seq order and applied_seq >= N covers every write before N; a
+-- refused write gives its seq back, which keeps the seqs dense. Masked, so
+-- an exception cannot land between the inject and the commit and hand the
+-- injected seq out again.
+injectWrite :: AgentEnv -> Seqs -> Intent -> IO (Maybe Int)
+injectWrite env seqs intent = withMVarMasked (seqLock seqs) $ \() -> do
+  n <- (+ 1) <$> readTVarIO (seqIssued seqs)
+  accepted <- aeInject env (AgentWrite n intent)
+  if accepted
+    then Just n <$ atomically (writeTVar (seqIssued seqs) n)
+    else pure Nothing
 
 -- | Serve the agent socket at this path for the length of the action, which
 -- gets the snapshot its loop must publish to. On the way out the server

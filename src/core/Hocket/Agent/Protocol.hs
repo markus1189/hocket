@@ -82,6 +82,8 @@ data AgentCmd
   | AWrite !WriteCmd
   | -- | wait until stateVersion exceeds the first field, timeout ms second
     AWait !Int !Int
+  | -- | wait until the write with this seq is applied, timeout ms second
+    AWaitApplied !Int !Int
   deriving (Show, Eq)
 
 -- | The wire shape of a request; the method/params are decoded separately by
@@ -107,6 +109,8 @@ decodeCmd method mparams = case method of
   "get_item" -> withParams (fmap (ARead . CmdGetItem) . itemIdP)
   "wait_version" -> withParams $ \o ->
     AWait <$> o .: "after" <*> o .:? "timeout_ms" .!= 10000
+  "wait_applied" -> withParams $ \o ->
+    AWaitApplied <$> o .: "seq" <*> o .:? "timeout_ms" .!= 10000
   "set_flag" -> withParams $ \o -> do
     bid <- itemIdP o
     actTxt <- o .: "action"
@@ -161,6 +165,8 @@ encodeCmd = \case
   ARead (CmdGetItem bid) -> ("get_item", itemIdParams bid)
   AWait after timeoutMs ->
     ("wait_version", object ["after" .= after, "timeout_ms" .= timeoutMs])
+  AWaitApplied n timeoutMs ->
+    ("wait_applied", object ["seq" .= n, "timeout_ms" .= timeoutMs])
   AWrite (CmdSetFlag bid act) ->
     ("set_flag", object ["id" .= itemIdText bid, "action" .= flagActionToText act])
   AWrite CmdClearFlags -> ("clear_all_flags", object [])
@@ -231,7 +237,8 @@ findItem snap bid = find ((== bid) . siId) (asItems snap)
 unknownItem :: BookmarkItemId -> Text
 unknownItem bid = "unknown item id: " <> itemIdText bid
 
--- | The compact header view served by get_state and wait_version.
+-- | The compact header view served by get_state, wait_version and
+-- wait_applied.
 stateView :: AgentSnapshot -> Value
 stateView snap =
   object

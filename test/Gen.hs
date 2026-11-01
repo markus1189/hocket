@@ -215,6 +215,7 @@ genAgentCmd =
       ARead <$> (CmdListItems <$> Gen.bool <*> Gen.bool),
       ARead . CmdGetItem <$> genBookmarkItemId,
       AWait <$> Gen.int (Range.linear 0 100000) <*> Gen.int (Range.linear 0 60000),
+      AWaitApplied <$> Gen.int (Range.linear (-5) 100000) <*> Gen.int (Range.linear 0 60000),
       AWrite <$> (CmdSetFlag <$> genBookmarkItemId <*> genFlagAction),
       pure (AWrite CmdClearFlags),
       pure (AWrite CmdFlagAllArchive),

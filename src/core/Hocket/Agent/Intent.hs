@@ -10,7 +10,7 @@ import Hocket.Agent.Protocol (WriteCmd (..))
 import Hocket.App.Msg
 
 -- | The Intent a write stands for, the one its key produces, so an agent
--- reaches no state a key could not. The server's @writeMsg@ samples 'Now'
+-- reaches no state a key could not. The server's @writeIntent@ samples 'Now'
 -- once per write.
 toIntent :: Now -> WriteCmd -> Intent
 toIntent now = \case

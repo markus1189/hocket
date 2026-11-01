@@ -53,6 +53,7 @@ import Hocket.App.Model
 import Hocket.App.Msg
   ( Intent (FilterCancel, FilterLock, FilterText, Navigate, Refresh),
     Msg (..),
+    publishes,
   )
 import Hocket.App.Nav (Nav (..))
 import Hocket.Port (RaindropPort (..), SystemPort)
@@ -158,13 +159,18 @@ app tz isFixture env mSnapVar =
           else const Nothing,
       appHandleEvent = \e -> do
         myEventHandler env e
-        model %= settle
-        settled <- use model
-        ui %= reconcile settled
-        for_ mSnapVar $ \snapVar -> liftIO . publish snapVar =<< use model
+        afterEvent (case e of AppEvent m -> publishes m; _ -> True)
         case e of
           AppEvent _ -> liftIO (atomically (tookMsg env))
           _ -> pure (),
-      appStartEvent = applyMsg env (Intent Refresh),
+      -- Published like any event: until then the socket serves the empty
+      -- snapshot, and no later event may come to replace it.
+      appStartEvent = applyMsg env (Intent Refresh) >> afterEvent True,
       appAttrMap = const hocketAttrMap
     }
+  where
+    afterEvent publishing = do
+      model %= settle
+      settled <- use model
+      ui %= reconcile settled
+      when publishing $ for_ mSnapVar $ \snapVar -> liftIO (publish snapVar settled)

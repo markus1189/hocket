@@ -680,7 +680,7 @@ document remains the normative spec.
 | Protocol decode / validate / serve | `src/core/Hocket/Agent/Protocol.hs` | `decodeCmd`, `validateWrite`, `serveRead`, `stateView`; total & pure |
 | Snapshot mirror + JSON | `src/core/Hocket/Agent/Snapshot.hs` | `AgentSnapshot`, `takeSnapshot`, `ToJSON` |
 | Client (CLI + IO shell) | `src/Hocket/Shell/Agent/Client.hs` | `callAgent`, `runAgentCommand`; requests built via `encodeCmd` |
-| Socket server (IO shell) | `src/Hocket/Shell/Agent/Server.hs` | `runAgentServer`, `resolveAgentSocketPath`, `reclaimStaleSocket`, `handleLine` / `dispatch` / `writeMsg` |
+| Socket server (IO shell) | `src/Hocket/Shell/Agent/Server.hs` | `runAgentServer`, `resolveAgentSocketPath`, `reclaimStaleSocket`, `handleLine` / `dispatch` / `writeIntent` / `injectWrite` |
 | Writes as Intents | `src/core/Hocket/Agent/Intent.hs` | `toIntent :: Now -> WriteCmd -> Intent`; total & pure |
 | TUI core | `src/core/Hocket/App/{Msg,Effect,Update}.hs` | `Intent`, `Msg`, `Effect`; the one pure `update` keys and agent writes go through |
 | Wiring, rendering mirror, cleanup | `main/hocket.hs` | `startAgentServer`, `app` snapshot rebuild, `cleanupAgentSocket` |

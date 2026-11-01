@@ -178,6 +178,7 @@ agentMethods =
       meth "list_items" "List items (visible ones only, unless --all)" listItemsP,
       meth "get_item" "Fetch one item by id (hidden items included)" (ARead . CmdGetItem <$> itemIdArg),
       meth "wait_version" "Long-poll until the state version passes --after" waitP,
+      meth "wait_applied" "Long-poll until the write with seq --seq is applied" waitAppliedP,
       meth "set_flag" "Stage a pending action on one item" setFlagP,
       meth "clear_all_flags" "Drop every staged action (the 'U' key)" (pure (AWrite CmdClearFlags)),
       meth "flag_all_archive" "Stage archive on every item" (pure (AWrite CmdFlagAllArchive)),
@@ -202,14 +203,20 @@ agentMethods =
     waitP =
       AWait
         <$> option Opt.auto (long "after" <> metavar "N" <> help "Return once the version exceeds N")
-        <*> option
-          Opt.auto
-          ( long "timeout-ms"
-              <> metavar "MS"
-              <> value 10000
-              <> showDefault
-              <> help "Server-side timeout, clamped to [0, 60000]"
-          )
+        <*> timeoutP
+    waitAppliedP =
+      AWaitApplied
+        <$> option Opt.auto (long "seq" <> metavar "N" <> help "The seq a write answered with")
+        <*> timeoutP
+    timeoutP =
+      option
+        Opt.auto
+        ( long "timeout-ms"
+            <> metavar "MS"
+            <> value 10000
+            <> showDefault
+            <> help "Server-side timeout, clamped to [0, 60000]"
+        )
     setFlagP =
       fmap AWrite $
         CmdSetFlag
