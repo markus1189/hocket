@@ -1106,6 +1106,18 @@ agentServerIntegrationTests =
           fmap (either (const "failed") (const "ran")) r @?= Just "failed"
           pathIsSymbolicLink path >>= (@?= True)
           readFile target >>= (@?= "precious"),
+      testCase "cleanup leaves a socket another instance bound at the same path (B7b)" $
+        withSystemTempDirectory "hk" $ \root -> do
+          let path = root </> "s.sock"
+          bound1 <- newBoundSocket
+          withAsync (runAgentServer bound1 path quietEnv) $ \_ -> do
+            waitUntilReachable 100 path
+            removeFile path
+            bound2 <- newBoundSocket
+            withAsync (runAgentServer bound2 path quietEnv) $ \_ -> do
+              waitUntilReachable 100 path
+              cleanupAgentSocket bound1 False path
+              waitUntilReachable 1 path,
       testCase "a losing second instance does not unlink the live socket (B7b)" $
         withAgentServer $ \_ _ path -> do
           bound2 <- newBoundSocket
