@@ -20,6 +20,7 @@ library
   exposed-modules:     Network.Raindrop
                      , Network.Bookmark.App.Effect
                      , Network.Bookmark.App.Msg
+                     , Network.Bookmark.App.Plan
                      , Network.Bookmark.App.Update
                      , Network.Bookmark.Batch
                      , Network.Bookmark.Port
@@ -117,6 +118,7 @@ test-suite test
                      , FixtureTests
                      , Gen
                      , IntentTests
+                     , PlanTests
                      , ReminderTests
                      , Keys
                      , Signals

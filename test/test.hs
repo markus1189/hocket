@@ -61,6 +61,7 @@ import Network.Socket
     socket,
     socketToHandle,
   )
+import PlanTests (planTests)
 import Properties (propertyTests)
 import ReminderTests (reminderTests)
 import Signals (Terminated (..), exitOnTerminated, unwindOnTermination)
@@ -90,7 +91,7 @@ import WorkerTests (workerTests)
 main = defaultMain tests
 
 tests :: TestTree
-tests = testGroup "Tests" [xKeyBatchConcurrencyTests, propertyTests, intentTests, systemTests, fakeTests, fixtureTests, reminderTests, hocketStateTests, raindropParsingTests, raindropApiBodyTests, classifyTests, characterizationTests, updateTests, workerTests, batchTests, dateTimeParsingTests, jsonRoundtripTests, sanitizeForDisplayTests, fuzzyMatchTests, fuzzyFilterMatchTests, filterStateTests, filterTuningTests, agentSnapshotTests, agentProtocolTests, agentServerIntegrationTests]
+tests = testGroup "Tests" [xKeyBatchConcurrencyTests, propertyTests, intentTests, planTests, systemTests, fakeTests, fixtureTests, reminderTests, hocketStateTests, raindropParsingTests, raindropApiBodyTests, classifyTests, characterizationTests, updateTests, workerTests, batchTests, dateTimeParsingTests, jsonRoundtripTests, sanitizeForDisplayTests, fuzzyMatchTests, fuzzyFilterMatchTests, filterStateTests, filterTuningTests, agentSnapshotTests, agentProtocolTests, agentServerIntegrationTests]
 
 -- Expected bodies are what the pre-servant wreq client sent.
 raindropApiBodyTests :: TestTree
