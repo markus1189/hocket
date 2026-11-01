@@ -61,4 +61,8 @@ data Msg
     SystemFailed !Text
   | -- | The cleaned URL that reached the clipboard.
     Copied !Text
+  | -- | Clients connected to the agent socket right now.
+    AgentClients !Int
+  | -- | The agent socket server stopped; the reason stays in the header.
+    AgentServerDied !Text
   deriving (Show, Eq)

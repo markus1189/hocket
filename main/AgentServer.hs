@@ -41,12 +41,6 @@ import Events
   ( HocketEvent (HocketMsg),
     executeBatchEvt,
     fetchItemsEvt,
-    selectItemEvt,
-    setAgentClientsEvt,
-    setFilterQueryEvt,
-    setShowFutureRemindersEvt,
-    setStatusEvt,
-    setVideoFilterModeEvt,
   )
 import Network.Bookmark.Agent.Intent (toIntent)
 import Network.Bookmark.Agent.Protocol
@@ -61,7 +55,7 @@ import Network.Bookmark.Agent.Protocol
     validateWrite,
   )
 import Network.Bookmark.Agent.Snapshot (AgentSnapshot, asVersion)
-import Network.Bookmark.App.Msg (Msg (Intent), Now)
+import Network.Bookmark.App.Msg (Msg (AgentClients, Intent), Now)
 import Network.Socket
   ( Family (AF_UNIX),
     SockAddr (SockAddrUnix),
@@ -200,7 +194,7 @@ runAgentServer (BoundSocket ref) path env = do
     -- Track connected clients and mirror the count into the TUI header.
     announce clients d = do
       n <- atomically (modifyTVar' clients (+ d) >> readTVar clients)
-      void (aeInject env (setAgentClientsEvt n))
+      void (aeInject env (HocketMsg (AgentClients n)))
 
 serveClient :: AgentEnv -> Socket -> IO ()
 serveClient env conn = do
@@ -263,10 +257,5 @@ toEvent :: AgentEnv -> WriteCmd -> IO HocketEvent
 toEvent env cmd = case cmd of
   CmdExecute -> pure executeBatchEvt
   CmdRefresh -> pure fetchItemsEvt
-  CmdSetFilter q -> pure (setFilterQueryEvt q)
-  CmdSetVideoFilter m -> pure (setVideoFilterModeEvt m)
-  CmdSetShowFutureReminders b -> pure (setShowFutureRemindersEvt b)
-  CmdSelectItem bid -> pure (selectItemEvt bid)
-  CmdSetStatus t -> pure (setStatusEvt (Just ("agent: " <> t)))
   -- The groups Phase 3 has moved go through update, as the same Intent.
   _ -> HocketMsg . Intent . (`toIntent` cmd) <$> aeNow env

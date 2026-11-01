@@ -97,11 +97,7 @@ import Events
     fetchItemsEvt,
     remindersRemovedEvt,
     remindersSetEvt,
-    setAgentErrorEvt,
     setStatusEvt,
-    toggleInvertedVideoFilterEvt,
-    toggleRemindersEvt,
-    toggleVideoFilterEvt,
   )
 import Fixture (FixtureOpts (..), fixtureParser, fixtureStore)
 import Formatting (sformat, (%))
@@ -180,15 +176,7 @@ import Network.Bookmark.Ui.State
     isReminderAction,
     itemList,
     lockFilter,
-    setAgentClients,
-    setAgentError,
-    setFilterQuery,
-    setShowFutureReminders,
-    setVideoFilterMode,
     syncForRender,
-    toggleInvertedVideoFilter,
-    toggleShowFutureReminders,
-    toggleVideoFilter,
     tryAcquireAsyncOp,
   )
 import Network.Bookmark.Ui.Sync
@@ -464,15 +452,6 @@ vtyEventHandlerNormal _ (EvKey (KChar 'K') []) = do
   case findPrevFlaggedItem s of
     Just newIdx -> itemList %= L.listMoveTo newIdx
     Nothing -> pure ()
-vtyEventHandlerNormal es (EvKey (KChar 'S') []) = do
-  liftIO $ es `trigger` toggleRemindersEvt
-  pure ()
-vtyEventHandlerNormal es (EvKey (KChar 'v') []) = do
-  liftIO $ es `trigger` toggleVideoFilterEvt
-  pure ()
-vtyEventHandlerNormal es (EvKey (KChar 'V') []) = do
-  liftIO $ es `trigger` toggleInvertedVideoFilterEvt
-  pure ()
 vtyEventHandlerNormal _ (EvKey (KChar '/') []) =
   -- Flip into filter mode synchronously so the very next keystroke is already
   -- seen under the editing guard; routing this through the BChan would leave a
@@ -573,30 +552,6 @@ uiCommandEventHandler ::
   UiCommand ->
   EventM Name HocketState ()
 uiCommandEventHandler _ (SetStatus t) = hsStatus .= t
-uiCommandEventHandler _ ToggleReminders = do
-  id %= toggleShowFutureReminders
-  id %= syncForRender
-uiCommandEventHandler _ ToggleVideoFilter = do
-  id %= toggleVideoFilter
-  id %= syncForRender
-uiCommandEventHandler _ ToggleInvertedVideoFilter = do
-  id %= toggleInvertedVideoFilter
-  id %= syncForRender
-uiCommandEventHandler _ (SetFilterQuery q) = do
-  id %= setFilterQuery q
-  id %= syncForRender
-uiCommandEventHandler _ (SetVideoFilterMode m) = do
-  id %= setVideoFilterMode m
-  id %= syncForRender
-uiCommandEventHandler _ (SetShowFutureReminders b) = do
-  id %= setShowFutureReminders b
-  id %= syncForRender
-uiCommandEventHandler _ (SelectItem bid) = do
-  s <- use id
-  let mIdx = V.findIndex (\bit -> view biId bit == bid) (s ^. itemList . L.listElementsL)
-  for_ mIdx $ \i -> itemList %= L.listMoveTo i
-uiCommandEventHandler _ (SetAgentClients n) = id %= setAgentClients n
-uiCommandEventHandler _ (SetAgentError e) = id %= setAgentError e
 
 myEventHandler ::
   Env ->
@@ -702,16 +657,7 @@ startAgentServer events opt = do
   _ <- async $ do
     r <- try @SomeException (runAgentServer bound path env)
     case r of
-      Left e -> do
-        -- The status line is single-lane and gets overwritten by the very
-        -- next status write (the startup fetch, typically within the same
-        -- second), so also latch the failure into the header.
-        void
-          ( writeBChanNonBlocking
-              events
-              (setStatusEvt (Just ("agent socket failed: " <> T.pack (show e))))
-          )
-        void (writeBChanNonBlocking events (setAgentErrorEvt (Just (T.pack (show e)))))
+      Left e -> void (writeBChanNonBlocking events (HocketMsg (AgentServerDied (T.pack (show e)))))
       Right () -> pure ()
   pure ((path, ours, bound), snapVar)
 

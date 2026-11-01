@@ -846,7 +846,7 @@ readAgentInjected :: BChan HocketEvent -> IO HocketEvent
 readAgentInjected ch = do
   ev <- readBChan ch
   case ev of
-    HocketUi (SetAgentClients _) -> readAgentInjected ch
+    HocketMsg (I.AgentClients _) -> readAgentInjected ch
     _ -> pure ev
 
 -- | What the agent server's clock reads in these tests.
@@ -985,7 +985,7 @@ agentServerIntegrationTests =
             _ -> assertFailure "set_filter response not an object"
           -- The injected event must be a SetFilterQuery "haskell".
           injected <- readAgentInjected events
-          injected @?= HocketUi (SetFilterQuery "haskell"),
+          injected @?= HocketMsg (I.Intent (I.SetFilter "haskell")),
       testCase "wait_version unblocks once the snapshot version advances" $
         withAgentServer $ \snapVar events path -> do
           atomically (modifyTVar' snapVar (const (buildTestSnapshot 4)))

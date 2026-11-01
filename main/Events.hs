@@ -11,15 +11,6 @@ module Events
     remindersSetEvt,
     remindersRemovedEvt,
     setStatusEvt,
-    toggleRemindersEvt,
-    toggleVideoFilterEvt,
-    toggleInvertedVideoFilterEvt,
-    setFilterQueryEvt,
-    setVideoFilterModeEvt,
-    setShowFutureRemindersEvt,
-    selectItemEvt,
-    setAgentClientsEvt,
-    setAgentErrorEvt,
   )
 where
 
@@ -28,7 +19,6 @@ import Data.Time (UTCTime)
 import Network.Bookmark.App.Msg (Msg)
 import Network.Bookmark.Batch (StepOutcome)
 import Network.Bookmark.Types
-import Network.Bookmark.Ui.State (VideoFilterMode)
 
 data HocketEvent
   = HocketAsync !AsyncCommand
@@ -51,18 +41,8 @@ data AsyncCommand
   | RemindersRemoved !(StepOutcome BookmarkItemId Text)
   deriving (Show, Eq)
 
-data UiCommand
-  = SetStatus !(Maybe Text)
-  | ToggleReminders
-  | ToggleVideoFilter
-  | ToggleInvertedVideoFilter
-  | -- Agent-socket commands: idempotent variants of the keyboard toggles.
-    SetFilterQuery !Text
-  | SetVideoFilterMode !VideoFilterMode
-  | SetShowFutureReminders !Bool
-  | SelectItem !BookmarkItemId
-  | SetAgentClients !Int
-  | SetAgentError !(Maybe Text)
+-- | A worker's progress line; the fetch and batch steps move it into update.
+newtype UiCommand = SetStatus (Maybe Text)
   deriving (Show, Eq)
 
 fetchItemsEvt :: HocketEvent
@@ -91,30 +71,3 @@ remindersRemovedEvt outcome = HocketAsync (RemindersRemoved outcome)
 
 setStatusEvt :: Maybe Text -> HocketEvent
 setStatusEvt mstatus = HocketUi (SetStatus mstatus)
-
-toggleRemindersEvt :: HocketEvent
-toggleRemindersEvt = HocketUi ToggleReminders
-
-toggleVideoFilterEvt :: HocketEvent
-toggleVideoFilterEvt = HocketUi ToggleVideoFilter
-
-toggleInvertedVideoFilterEvt :: HocketEvent
-toggleInvertedVideoFilterEvt = HocketUi ToggleInvertedVideoFilter
-
-setFilterQueryEvt :: Text -> HocketEvent
-setFilterQueryEvt q = HocketUi (SetFilterQuery q)
-
-setVideoFilterModeEvt :: VideoFilterMode -> HocketEvent
-setVideoFilterModeEvt m = HocketUi (SetVideoFilterMode m)
-
-setShowFutureRemindersEvt :: Bool -> HocketEvent
-setShowFutureRemindersEvt b = HocketUi (SetShowFutureReminders b)
-
-selectItemEvt :: BookmarkItemId -> HocketEvent
-selectItemEvt bid = HocketUi (SelectItem bid)
-
-setAgentClientsEvt :: Int -> HocketEvent
-setAgentClientsEvt n = HocketUi (SetAgentClients n)
-
-setAgentErrorEvt :: Maybe Text -> HocketEvent
-setAgentErrorEvt e = HocketUi (SetAgentError e)

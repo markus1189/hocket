@@ -6,8 +6,10 @@
 -- still handled the old way (its producer still posts the old event).
 module Network.Bookmark.App.Update (update) where
 
+import qualified Brick.Widgets.List as L
 import Control.Lens
 import Data.Time (UTCTime)
+import qualified Data.Vector as V
 import Network.Bookmark.Agent.Protocol (FlagAction (..))
 import Network.Bookmark.App.Effect
 import Network.Bookmark.App.Msg
@@ -33,10 +35,23 @@ update msg s = case msg of
   Intent (SetFlag bid act now) -> Just (setPendingAction bid (flagFor now act) s, [])
   Intent ClearAllFlags -> Just (clearAllFlags s, [])
   Intent FlagAllArchive -> Just (setAllFlagsToArchive s, [])
+  Intent (Select bid) -> Just (s & itemList %~ selectById bid, [])
+  Intent (SetFilter q) -> refilter (setFilterQuery q)
+  Intent (SetVideoFilter m) -> refilter (setVideoFilterMode m)
+  Intent ToggleVideoOnly -> refilter toggleVideoFilter
+  Intent ToggleHideVideos -> refilter toggleInvertedVideoFilter
+  Intent ToggleFutureReminders -> refilter toggleShowFutureReminders
+  Intent (SetShowFutureReminders b) -> refilter (setShowFutureReminders b)
+  Intent (SetStatus t) -> Just (s & hsStatus ?~ t, [])
+  AgentClients n -> Just (setAgentClients n s, [])
+  -- The status line is overwritten within a frame, so the header keeps it.
+  AgentServerDied err -> Just (s & hsStatus ?~ ("agent socket failed: " <> err) & setAgentError (Just err), [])
   SystemFailed err -> Just (s & hsStatus ?~ err, [])
   Copied url -> Just (s & hsStatus ?~ ("Copied: " <> url), [])
   _ -> Nothing
   where
+    -- What is visible changes, so the list follows at once, as before.
+    refilter f = Just (syncForRender (f s), [])
     target = maybe [] pure . targetItem s
     -- Apply the change the item's flag calls for, if any.
     onTarget t change = case targetItem s t of
@@ -45,6 +60,10 @@ update msg s = case msg of
         [] -> (s, [])
       Nothing -> (s, [])
     editUrl bit = "https://app.raindrop.io/my/-1/item/" <> bit ^. biId . _BookmarkItemId <> "/edit"
+
+-- | Agent @select_item@: only an item the list shows can be selected.
+selectById :: BookmarkItemId -> L.List Name BookmarkItem -> L.List Name BookmarkItem
+selectById bid l = maybe l (`L.listMoveTo` l) (V.findIndex ((== bid) . (^. biId)) (l ^. L.listElementsL))
 
 reminderAt :: Now -> UTCTime
 reminderAt now = reminderPolicy (nowZone now) (nowUtc now)

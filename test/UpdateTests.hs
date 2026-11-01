@@ -4,7 +4,7 @@ module UpdateTests (updateTests) where
 
 import qualified Brick.Widgets.List as L
 import CharacterizationTests (emptyState, item)
-import Control.Lens (ix, (&), (.~), (^.), (^?), _1)
+import Control.Lens (ix, (&), (.~), (?~), (^.), (^..), (^?), _1, _2)
 import Data.Foldable (for_)
 import qualified Data.Map as Map
 import Data.Maybe (isJust)
@@ -72,6 +72,31 @@ updateTests =
         let flagged = twoItems & setPendingAction (BookmarkItemId "a") ReminderToBeRemoved
         (map fst . Map.elems . (^. hsContents) . fst <$> update (Intent ClearAllFlags) flagged) @?= Just [None, None]
         (map fst . Map.elems . (^. hsContents) . fst <$> update (Intent FlagAllArchive) flagged) @?= Just [ToBeArchived, ToBeArchived],
+      testCase "Select moves to a visible item; a hidden or unknown one changes nothing" $ do
+        let selected s' = s' ^. itemList . L.listSelectedL
+        (selected . fst <$> update (Intent (Select (BookmarkItemId "b"))) twoItems) @?= Just (Just 1)
+        -- Items with a reminder are hidden unless future reminders are shown.
+        let hidden = syncForRender (twoItems & hsContents . ix (BookmarkItemId "b") . _2 . biReminder ?~ t0)
+        (selected . fst <$> update (Intent (Select (BookmarkItemId "b"))) hidden) @?= Just (selected hidden)
+        (selected . fst <$> update (Intent (Select (BookmarkItemId "zz"))) twoItems) @?= Just (Just 0),
+      testCase "SetFilter replaces the query, locks the editor and refilters the list" $ do
+        let Just (s', fx) = update (Intent (SetFilter "title b")) (twoItems & enterFilterMode)
+        (fx, s' ^. hsFilterQuery, s' ^. hsFilterActive, visibleIds s') @?= ([], "title b", False, [BookmarkItemId "b"]),
+      testCase "the video and future-reminder settings refilter the list" $ do
+        let setting i f = f . fst <$> update (Intent i) twoItems
+        setting (SetVideoFilter HideVideos) (^. hsVideoFilter) @?= Just HideVideos
+        setting ToggleVideoOnly (^. hsVideoFilter) @?= Just ShowOnlyVideos
+        setting ToggleHideVideos (^. hsVideoFilter) @?= Just HideVideos
+        setting ToggleFutureReminders (^. hsShowFutureReminders) @?= Just True
+        setting (SetShowFutureReminders True) (^. hsShowFutureReminders) @?= Just True
+        -- Only-videos hides both items, and the list shows it right away.
+        setting ToggleVideoOnly visibleIds @?= Just [],
+      testCase "SetStatus shows the text as given" $
+        (^. hsStatus) . fst <$> update (Intent (SetStatus "agent: hi")) twoItems @?= Just (Just "agent: hi"),
+      testCase "AgentClients and AgentServerDied go to the header" $ do
+        (^. hsAgentClients) . fst <$> update (AgentClients 2) twoItems @?= Just 2
+        ((\s' -> (s' ^. hsAgentError, s' ^. hsStatus)) . fst <$> update (AgentServerDied "bind: busy") twoItems)
+          @?= Just (Just "bind: busy", Just "agent socket failed: bind: busy"),
       testCase "SystemFailed and Copied go to the status line" $ do
         (^. hsStatus) . fst <$> update (SystemFailed "no firefox") emptyState @?= Just (Just "no firefox")
         (^. hsStatus) . fst <$> update (Copied "https://example.com/a") emptyState @?= Just (Just "Copied: https://example.com/a")
@@ -94,12 +119,20 @@ migrated =
     Unflag Selected,
     SetFlag (BookmarkItemId "b") FlagReminder now0,
     ClearAllFlags,
-    FlagAllArchive
+    FlagAllArchive,
+    Select (BookmarkItemId "b"),
+    SetFilter "x",
+    SetVideoFilter ShowOnlyVideos,
+    ToggleVideoOnly,
+    ToggleHideVideos,
+    ToggleFutureReminders,
+    SetShowFutureReminders True,
+    SetStatus "agent: hi"
   ]
 
 -- | The keys hocket.hs sends through keyIntents and update so far.
 routedKeys :: [Char]
-routedKeys = "asu\n eyUQ"
+routedKeys = "asu\n eyUQSvV"
 
 keyOf :: Char -> Vty.Key
 keyOf '\n' = Vty.KEnter
@@ -112,7 +145,12 @@ routedWrites =
     CmdClearFlags,
     CmdFlagAllArchive,
     CmdOpenItem (BookmarkItemId "b"),
-    CmdOpenAndFlag (BookmarkItemId "b")
+    CmdOpenAndFlag (BookmarkItemId "b"),
+    CmdSetFilter "x",
+    CmdSetVideoFilter HideVideos,
+    CmdSetShowFutureReminders True,
+    CmdSelectItem (BookmarkItemId "b"),
+    CmdSetStatus "hi"
   ]
 
 now0 :: Now
@@ -120,6 +158,9 @@ now0 = Now (read "2026-11-01 12:00:00 UTC") (minutesToTimeZone 60)
 
 t0 :: UTCTime
 t0 = read "2026-11-02 06:00:00 UTC"
+
+visibleIds :: HocketState -> [BookmarkItemId]
+visibleIds s = s ^.. itemList . L.listElementsL . traverse . biId
 
 flagOf :: Text -> HocketState -> Maybe PendingAction
 flagOf i s = s ^? hsContents . ix (BookmarkItemId i) . _1
