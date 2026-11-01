@@ -25,7 +25,7 @@ import qualified Data.ByteString.Char8 as BSC
 import qualified Data.ByteString.Lazy.Char8 as LBS
 import Data.Either (isLeft)
 import Data.Foldable (for_)
-import Data.IORef (newIORef, readIORef, writeIORef)
+import Data.IORef (atomicModifyIORef', newIORef, readIORef, writeIORef)
 import Data.List (find, head, intercalate, isInfixOf, last)
 import Data.Map (Map)
 import qualified Data.Map as Map
@@ -970,6 +970,10 @@ reachableOr what path instances = do
       ids <- traverse (\(n, b) -> (\i -> n <> " = " <> show i) <$> boundSocketId b) instances
       assertFailure (what <> "; path holds " <> at' <> "; " <> intercalate ", " ids <> "; " <> unwords (lines (displayException e)))
 
+reportsFailure :: I.Msg -> Bool
+reportsFailure (I.Intent (I.SetStatus t)) = "inject broke" `T.isInfixOf` t
+reportsFailure _ = False
+
 agentServerIntegrationTests :: TestTree
 agentServerIntegrationTests =
   testGroup
@@ -1194,6 +1198,26 @@ agentServerIntegrationTests =
         for_ [(sigTERM, 143), (sigHUP, 129)] $ \(sig, code) -> do
           r <- try @ExitCode (exitOnTerminated (throwIO (Terminated sig) :: IO ()))
           r @?= Left (ExitFailure code),
+      testCase "a failing announce neither stops the accept loop nor goes unreported" $
+        withSystemTempDirectory "hk" $ \root -> do
+          let path = root </> "s.sock"
+          injected <- newIORef []
+          calls <- newIORef (0 :: Int)
+          snapVar <- newTVarIO (buildTestSnapshot 1)
+          let inject m = do
+                n <- atomicModifyIORef' calls (\c -> (c + 1, c))
+                if n == 0 then throwIO (userError "inject broke") else atomicModifyIORef' injected (\ms -> (m : ms, True))
+              env = AgentEnv {aeSnapshot = snapVar, aeInject = inject, aeNow = pure testNow}
+          bound <- newBoundSocket
+          withAsync (runAgentServer bound path env) $ \_ -> do
+            waitUntilReachable 100 path
+            h <- connectAgentClient path
+            resp <- sendRequest h "{\"id\":1,\"method\":\"get_state\"}"
+            case resp of
+              A.Object o -> KM.lookup (AKey.fromText "ok") o @?= Just (A.Bool True)
+              _ -> assertFailure "no answer after a failed announce"
+            ms <- readIORef injected
+            assertBool ("the failure was not reported: " <> show ms) (any reportsFailure ms),
       testCase "a second server on the same path fails instead of hijacking" $
         withAgentServer $ \snapVar events path -> do
           -- First server is live on `path`. Attempt to start a second one on

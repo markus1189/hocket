@@ -51,7 +51,7 @@ import Network.Bookmark.Agent.Protocol
     validateWrite,
   )
 import Network.Bookmark.Agent.Snapshot (AgentSnapshot, asVersion)
-import Network.Bookmark.App.Msg (Msg (AgentClients, Intent), Now)
+import Network.Bookmark.App.Msg (Intent (SetStatus), Msg (AgentClients, Intent), Now)
 import Network.Socket
   ( Family (AF_UNIX),
     SockAddr (SockAddrUnix),
@@ -80,6 +80,7 @@ import System.Posix.Files (deviceID, fileID, getSymbolicLinkStatus, isSocket, se
 import System.Posix.Types (DeviceID, FileID)
 import System.Posix.User (getEffectiveUserID)
 import System.Timeout (timeout)
+import Worker (exceptionMessage, trySync)
 
 data AgentEnv = AgentEnv
   { aeSnapshot :: !(TVar AgentSnapshot),
@@ -185,12 +186,21 @@ runAgentServer (BoundSocket ref) path env = do
     listen sock 5
     forever $ do
       (conn, _) <- accept sock
-      announce clients 1
+      -- One connection's failure must not end the loop: the listener would
+      -- close and leave a silently dead socket file. Async exceptions (the
+      -- cancel on exit) still propagate.
+      tracked clients 1
       void $
         forkFinally
           (serveClient env conn)
-          (\_ -> announce clients (-1))
+          (\_ -> tracked clients (-1))
   where
+    -- The count is only for the header, so a failure to post it is
+    -- reported and the client served anyway.
+    tracked clients d =
+      trySync (announce clients d) >>= either (report . ("agent: client tracking failed: " <>) . exceptionMessage) pure
+    -- Best effort: if posting is what fails, this can fail the same way.
+    report t = void (trySync (aeInject env (Intent (SetStatus t))))
     -- Track connected clients and mirror the count into the TUI header.
     announce clients d = do
       n <- atomically (modifyTVar' clients (+ d) >> readTVar clients)
