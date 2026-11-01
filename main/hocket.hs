@@ -53,7 +53,6 @@ import Control.Lens.Combinators (use)
 import Control.Lens.Operators
   ( (%=),
     (.=),
-    (?=),
     (^.),
   )
 import Control.Monad (unless, void)
@@ -84,7 +83,6 @@ import Data.Time.LocalTime
 import Data.Traversable (for)
 import qualified Data.Vector as V
 import Dhall (auto, input)
-import Events (HocketEvent (..))
 import Fixture (FixtureOpts (..), fixtureParser, fixtureStore)
 import Formatting (sformat, (%))
 import qualified Formatting as F
@@ -101,12 +99,9 @@ import Network.Bookmark.Agent.Protocol
     ReadCmd (..),
     WriteCmd (..),
   )
--- Qualified while the old event constructors of the same names still exist.
-
 import Network.Bookmark.Agent.Snapshot (AgentSnapshot, asVersion, emptySnapshot, takeSnapshot)
 import Network.Bookmark.App.Effect (Effect (..))
-import Network.Bookmark.App.Msg (Msg (..))
-import qualified Network.Bookmark.App.Msg as I
+import Network.Bookmark.App.Msg (Intent (Refresh), Msg (..), Now (..))
 import Network.Bookmark.App.Update (update)
 import Network.Bookmark.Fake (encodeFixtureDump, fakePort)
 import Network.Bookmark.Port (RaindropPort (..))
@@ -367,64 +362,49 @@ vtyEventHandler env e = do
       EvKey (KChar 'w') [MCtrl] -> hsFilterEditor %= applyEdit deletePrevWord
       _ -> zoom hsFilterEditor (handleEditorEvent (VtyEvent e))
     else do
-      now <- liftIO (I.Now <$> getCurrentTime <*> getCurrentTimeZone)
+      now <- liftIO (Now <$> getCurrentTime <*> getCurrentTimeZone)
       case keyIntents now e s of
-        -- A key whose intents update already covers; the groups Phase 3
-        -- has not moved yet still take the old path.
-        Just intents
-          | all (\i -> isJust (update (Intent i) s)) intents ->
-              traverse_ (applyMsg env . Intent) intents
-        _ -> vtyEventHandlerNormal (envEvents env) e
+        Just intents -> traverse_ (applyMsg env . Intent) intents
+        -- Navigation and the switch to filter mode stay with the shell.
+        Nothing -> vtyEventHandlerNormal e
 
 -- | Run one message through 'update', its effects through 'interpret', and
 -- what those answer right away through 'update' again.
 applyMsg :: Env -> Msg -> EventM Name HocketState ()
 applyMsg env m = do
-  s <- use id
-  case update m s of
-    -- A producer posted a group Phase 3 has not moved yet: say so rather
-    -- than drop the key or agent write.
-    Nothing -> hsStatus ?= ("unhandled: " <> T.pack (show m))
-    Just (s', effects) -> do
-      id .= s'
-      for_ effects $ \case
-        Halt -> halt
-        effect -> liftIO (interpret env effect) >>= traverse_ (applyMsg env)
+  (s', effects) <- update m <$> use id
+  id .= s'
+  for_ effects $ \case
+    Halt -> halt
+    effect -> liftIO (interpret env effect) >>= traverse_ (applyMsg env)
 
 vtyEventHandlerNormal ::
-  BChan HocketEvent ->
   Event ->
   EventM Name HocketState ()
-vtyEventHandlerNormal _ (EvKey (KChar 'J') []) = do
+vtyEventHandlerNormal (EvKey (KChar 'J') []) = do
   s <- use id
   case findNextFlaggedItem s of
     Just newIdx -> itemList %= L.listMoveTo newIdx
     Nothing -> pure ()
-vtyEventHandlerNormal _ (EvKey (KChar 'K') []) = do
+vtyEventHandlerNormal (EvKey (KChar 'K') []) = do
   s <- use id
   case findPrevFlaggedItem s of
     Just newIdx -> itemList %= L.listMoveTo newIdx
     Nothing -> pure ()
-vtyEventHandlerNormal _ (EvKey (KChar '/') []) =
+vtyEventHandlerNormal (EvKey (KChar '/') []) =
   -- Flip into filter mode synchronously so the very next keystroke is already
   -- seen under the editing guard; routing this through the BChan would leave a
   -- one-event window where a fast 'Q'/paste leaks to normal mode and quits.
   id %= enterFilterMode
-vtyEventHandlerNormal _ e = do
+vtyEventHandlerNormal e = do
   zoom itemList (handleListEventVi handleListEvent e)
-
-internalEventHandler ::
-  Env ->
-  HocketEvent ->
-  EventM Name HocketState ()
-internalEventHandler env (HocketMsg m) = applyMsg env m
 
 myEventHandler ::
   Env ->
-  BrickEvent Name HocketEvent ->
+  BrickEvent Name Msg ->
   EventM Name HocketState ()
 myEventHandler env (VtyEvent e) = vtyEventHandler env e
-myEventHandler env (AppEvent e) = internalEventHandler env e
+myEventHandler env (AppEvent m) = applyMsg env m
 myEventHandler _ _ = pure ()
 
 getConfigPath :: IO FilePath
@@ -506,7 +486,7 @@ runTui mAgentOpt isFixture port s0 = do
 -- Server failures surface in the TUI status bar instead of killing the app.
 -- The path comes back with what cleanup needs: whether hocket owns its
 -- directory, and the socket it bound.
-startAgentServer :: BChan HocketEvent -> AgentSocketOpt -> IO ((FilePath, Bool, BoundSocket), TVar AgentSnapshot)
+startAgentServer :: BChan Msg -> AgentSocketOpt -> IO ((FilePath, Bool, BoundSocket), TVar AgentSnapshot)
 startAgentServer events opt = do
   path <- case opt of
     AgentSocketDefault -> resolveAgentSocketPath
@@ -518,12 +498,12 @@ startAgentServer events opt = do
         AgentEnv
           { aeSnapshot = snapVar,
             aeInject = writeBChanNonBlocking events,
-            aeNow = I.Now <$> getCurrentTime <*> getCurrentTimeZone
+            aeNow = Now <$> getCurrentTime <*> getCurrentTimeZone
           }
   _ <- async $ do
     r <- try @SomeException (runAgentServer bound path env)
     case r of
-      Left e -> void (writeBChanNonBlocking events (HocketMsg (AgentServerDied (T.pack (show e)))))
+      Left e -> void (writeBChanNonBlocking events (AgentServerDied (T.pack (show e))))
       Right () -> pure ()
   pure ((path, ours, bound), snapVar)
 
@@ -558,7 +538,7 @@ main = exitOnTerminated $ do
     AddBookmarkCmd url mCollection tags -> runAddCommand url mCollection tags
     AgentCall mpath agentCmd -> runAgentCommand mpath agentCmd
 
-app :: TimeZone -> Bool -> Env -> Maybe (TVar AgentSnapshot) -> App HocketState HocketEvent Name
+app :: TimeZone -> Bool -> Env -> Maybe (TVar AgentSnapshot) -> App HocketState Msg Name
 app tz isFixture env mSnapVar =
   App
     { appDraw = drawGui tz isFixture,
@@ -576,7 +556,7 @@ app tz isFixture env mSnapVar =
           s <- use id
           liftIO . atomically . modifyTVar' snapVar $ \old ->
             takeSnapshot (asVersion old + 1) s,
-      appStartEvent = applyMsg env (Intent I.Refresh),
+      appStartEvent = applyMsg env (Intent Refresh),
       appAttrMap = const hocketAttrMap
     }
 

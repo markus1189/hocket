@@ -65,10 +65,11 @@ Two properties make this safe and simple:
   event loop is never touched on a read path. `wait_version` is a blocking
   STM `check` that parks the agent's own thread, not the TUI.
 - **Writes are just keystrokes.** A validated write is transcribed into the
-  exact `HocketEvent` the corresponding keybinding would have produced and
-  injected into the same `BChan` the keyboard feeds. The agent cannot
-  produce a state that a human at the keyboard could not, so every TUI
-  invariant holds for the agent automatically.
+  `Intent` the corresponding keybinding produces, and both go through the
+  same pure `update`: keys as they arrive, agent writes queued on the TUI's
+  event channel. The agent cannot produce a state that a human at the
+  keyboard could not, so every TUI invariant holds for the agent
+  automatically.
 
 Because the protocol is newline-delimited JSON, the server can be driven
 straight from a shell (`socat`, `nc -U`) with no client library.
@@ -219,7 +220,9 @@ version is the agent-side equivalent of a TUI screen repaint.
 
 - It counts successful renders, so it increases even when nothing that
   matters to the agent changed (e.g. a keypress that only moves the cursor
-  past the same item still bumps it).
+  past the same item still bumps it). A key press is one render; every
+  agent connection adds two of its own (connect and disconnect update the
+  client count), so how far it moves per action is not a fixed number.
 - It is **not** an absolute state hash and never resets within a session
   (starts at `0` from `emptySnapshot`).
 - `wait_version` and the `version` field are the only places the version is
@@ -347,10 +350,10 @@ decode → validate → transcribe → inject
    facts (item identity, whether a reminder already exists, whether an item
    is visible), never on cursor-level state. Validation failures return an
    error and **nothing** is injected.
-3. **transcribe** (`toEvent`) — the validated command becomes the
-   `HocketEvent` the keyboard would have produced. For `set_flag`
-   `reminder`, the reminder clock (`nextDayAt7AM`) is sampled *here*, in the
-   server thread, exactly matching the `s` key.
+3. **transcribe** (`toIntent`) — the validated command becomes the
+   `Intent` the keyboard produces. The clock (`Now`, time and zone) is
+   sampled *here*, in the server thread, once per write; `set_flag`
+   `reminder` then gets 07:00 on the next local day, exactly as the `s` key.
 4. **inject** — the event is written non-blocking into the TUI `BChan`
    (capacity **10**). Injection returns a boolean:
    - `true` → the event is queued; response is
@@ -606,7 +609,7 @@ echo '{"id":2,"method":"wait_version","params":{"after":42,"timeout_ms":30000}}'
 echo '{"id":3,"method":"set_flag","params":{"id":"101","action":"archive"}}' \
   | socat - UNIX-CONNECT:$SOCK
 
-# 4. wait for it to render (injected version, then +1)
+# 4. wait for it to render (any version past the injected one)
 echo '{"id":4,"method":"wait_version","params":{"after":43}}' \
   | socat - UNIX-CONNECT:$SOCK
 
@@ -653,6 +656,7 @@ document remains the normative spec.
 | Snapshot mirror + JSON | `src/Network/Bookmark/Agent/Snapshot.hs` | `AgentSnapshot`, `takeSnapshot`, `ToJSON` |
 | Client (CLI + IO shell) | `main/AgentClient.hs` | `callAgent`, `runAgentCommand`; requests built via `encodeCmd` |
 | Socket server (IO shell) | `main/AgentServer.hs` | `runAgentServer`, `resolveAgentSocketPath`, `reclaimStaleSocket`, `handleLine` / `dispatch` / `toEvent` |
-| Event types + injection | `main/Events.hs` | agent write events; `setAgentClientsEvt` |
+| Writes as Intents | `src/Network/Bookmark/Agent/Intent.hs` | `toIntent :: Now -> WriteCmd -> Intent`; total & pure |
+| TUI core | `src/Network/Bookmark/App/{Msg,Effect,Update}.hs` | `Intent`, `Msg`, `Effect`; the one pure `update` keys and agent writes go through |
 | Wiring, rendering mirror, cleanup | `main/hocket.hs` | `startAgentServer`, `app` snapshot rebuild, `cleanupAgentSocket` |
 | Tests | `test/test.hs` | protocol round-trips and IO-shell behaviour |

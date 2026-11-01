@@ -63,9 +63,9 @@ fetchEmissionTests =
 -- | Refresh, then the worker's one message, both through update: whether
 -- the fetch slot is held after each.
 fetchTrace :: Msg -> [Bool]
-fetchTrace terminal = map asyncOpRunning [started, maybe started fst (update terminal started)]
+fetchTrace terminal = map asyncOpRunning [started, fst (update terminal started)]
   where
-    Just (started, _) = update (Intent Refresh) emptyState
+    started = fst (update (Intent Refresh) emptyState)
 
 -- | Held through every event but the last, which frees it.
 freedByLastOnly :: [Bool] -> [Bool]
@@ -129,8 +129,8 @@ batchTime = read "2026-11-02 06:00:00 UTC"
 batchTrace :: [Msg] -> [(Bool, Maybe T.Text)]
 batchTrace = map (\s -> (asyncOpRunning s, s ^. hsStatus)) . drop 1 . scanl deliver started
   where
-    Just (started, _) = update (Intent Execute) batchState
-    deliver s m = maybe s fst (update m s)
+    started = fst (update (Intent Execute) batchState)
+    deliver s m = fst (update m s)
 
 -- | What the batch worker posts for these step results, ending with its
 -- one BatchFinished.

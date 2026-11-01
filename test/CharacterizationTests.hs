@@ -193,9 +193,7 @@ press key s0 = case keyIntents keyNow (keyEvent key) start of
      in (syncForRender s, mapMaybe opened effects)
   where
     start = syncForRender s0
-    apply (s, effects) i = case update (Intent i) s of
-      Just (s', more) -> (s', effects <> more)
-      Nothing -> error ("unhandled: " <> show i)
+    apply (s, effects) i = let (s', more) = update (Intent i) s in (s', effects <> more)
     opened (OpenUrl Firefox url) = T.stripPrefix "https://example.com/" url
     opened _ = Nothing
 

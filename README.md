@@ -398,7 +398,8 @@ cabal build --ghc-options="-Wall -Werror"
 hocket/
 ├── main/                   # Main application
 │   ├── hocket.hs          # Entry point and UI logic
-│   └── Events.hs          # Event system definitions
+│   ├── Interpret.hs       # Runs update's effects (workers, browser, clipboard)
+│   └── Keys.hs            # Keys as Intents
 ├── src/Network/
 │   ├── Raindrop.hs        # API client implementation
 │   └── Bookmark/

@@ -41,7 +41,6 @@ import Data.Time.Clock.POSIX (POSIXTime)
 import Data.Time.Format.ISO8601 (iso8601ParseM)
 import Data.Time.LocalTime (utc)
 import qualified Data.Vector as V
-import Events
 import FakeTests (fakeTests)
 import FixtureTests (fixtureTests)
 import IntentTests (intentTests)
@@ -842,11 +841,11 @@ sendRequest h line = do
 
 -- | Observe the next, non-announcement event injected into the event
 -- channel (blocking). Skips SetAgentClients connect/disconnect bookkeeping.
-readAgentInjected :: BChan HocketEvent -> IO HocketEvent
+readAgentInjected :: BChan I.Msg -> IO I.Msg
 readAgentInjected ch = do
   ev <- readBChan ch
   case ev of
-    HocketMsg (I.AgentClients _) -> readAgentInjected ch
+    I.AgentClients _ -> readAgentInjected ch
     _ -> pure ev
 
 -- | What the agent server's clock reads in these tests.
@@ -877,7 +876,7 @@ waitUntilReachable attempts path
 -- handing both that TVar and the event BChan to the action so the test can
 -- bump versions and observe injected writes.
 withAgentServer ::
-  (TVar AgentSnapshot -> BChan HocketEvent -> FilePath -> IO a) ->
+  (TVar AgentSnapshot -> BChan I.Msg -> FilePath -> IO a) ->
   IO a
 withAgentServer action = withSystemTempDirectory "hk" $ \dir -> do
   let path = dir </> "s.sock"
@@ -974,7 +973,7 @@ agentServerIntegrationTests =
             _ -> assertFailure "set_filter response not an object"
           -- The injected event must be a SetFilterQuery "haskell".
           injected <- readAgentInjected events
-          injected @?= HocketMsg (I.Intent (I.SetFilter "haskell")),
+          injected @?= I.Intent (I.SetFilter "haskell"),
       testCase "wait_version unblocks once the snapshot version advances" $
         withAgentServer $ \snapVar events path -> do
           atomically (modifyTVar' snapVar (const (buildTestSnapshot 4)))
@@ -1017,7 +1016,7 @@ agentServerIntegrationTests =
               KM.lookup (AKey.fromText "ok") o @?= Just (A.Bool True)
             Right _ -> assertFailure "client response not an object"
           injected <- readAgentInjected events
-          injected @?= HocketMsg (I.Intent (I.SetFlag (BookmarkItemId "in-1") FlagArchive testNow)),
+          injected @?= I.Intent (I.SetFlag (BookmarkItemId "in-1") FlagArchive testNow),
       testCase "the shipped client reports an unreachable socket" $ do
         res <- callAgent "/nonexistent/hocket-agent-absent.sock" (ARead CmdGetState)
         assertBool "expected a transport error" (isLeft res),

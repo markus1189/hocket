@@ -29,7 +29,9 @@ Hocket is a terminal-based bookmark manager for Raindrop.io built with Haskell a
 
 ### Key Components
 - **main/hocket.hs** - Main application entry point, UI event handling, and TUI rendering using Brick
-- **main/Events.hs** - Event system definitions for async operations and UI commands
+- **src/Network/Bookmark/App/{Msg,Effect,Update}.hs** - The TUI core: keys, agent writes and worker results arrive as `Msg`; the pure `update` answers the new state and `Effect`s
+- **main/Interpret.hs** - Runs `Effect`s: fetch and batch workers, browser, clipboard
+- **main/Keys.hs** - Normal-mode keys as `Intent`s (`keyIntents`)
 - **src/Network/Raindrop.hs** - HTTP client implementation for Raindrop.io REST API
 - **src/Network/Bookmark/Types.hs** - Core data types, JSON serialization, and bookmark model
 - **src/Network/Bookmark/Ui/State.hs** - Application state management and UI state synchronization

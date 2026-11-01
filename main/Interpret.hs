@@ -20,7 +20,6 @@ import Data.Text (Text)
 import qualified Data.Text as T
 import Data.Time (UTCTime)
 import Data.Time.Clock.POSIX (utcTimeToPOSIXSeconds)
-import Events (HocketEvent (HocketMsg))
 import Network.Bookmark.App.Effect
 import Network.Bookmark.App.Msg
 import Network.Bookmark.App.Plan (BatchPlan (..), planSteps)
@@ -34,7 +33,7 @@ import System (browseItem, cleanUrl, copyToClipboard)
 import Worker (errorMessageFromException, exceptionMessage, fetchResult, runBatch, runCalls, runStep, trySync)
 
 -- | Where to post events, and Raindrop.
-data Env = Env {envEvents :: !(BChan HocketEvent), envPort :: !RaindropPort}
+data Env = Env {envEvents :: !(BChan Msg), envPort :: !RaindropPort}
 
 -- | Run one effect. What the TUI waits for (browser, clipboard) answers
 -- with messages for the same event, so the status line is as quick as the
@@ -54,7 +53,7 @@ interpret env = \case
       result <- trySync (retrieveItems (envPort env) (plan ^. spSearch) (plan ^. spCollection))
       let rendered = either (Left . Just . exceptionMessage) (first errorMessageFromException) result
       post (fetchResult (plan ^. spKind == IncrementalAll) rendered)
-    post = writeBChan (envEvents env) . HocketMsg
+    post = writeBChan (envEvents env)
     port = envPort env
     -- The batch worker: one BatchFinished at the end, also if the steps
     -- throw (runCalls already catches per call) or the thread is cancelled.

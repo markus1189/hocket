@@ -37,9 +37,6 @@ import Data.Char (isSpace)
 import Data.Foldable (traverse_)
 import Data.IORef (IORef, newIORef, readIORef, writeIORef)
 import qualified Data.Text as T
-import Events
-  ( HocketEvent (HocketMsg),
-  )
 import Network.Bookmark.Agent.Intent (toIntent)
 import Network.Bookmark.Agent.Protocol
   ( AgentCmd (..),
@@ -86,7 +83,7 @@ import System.Timeout (timeout)
 data AgentEnv = AgentEnv
   { aeSnapshot :: !(TVar AgentSnapshot),
     -- | Non-blocking injection into the TUI event channel; False = full.
-    aeInject :: !(HocketEvent -> IO Bool),
+    aeInject :: !(Msg -> IO Bool),
     -- | The clock, sampled once per write (reminders: same policy as 's').
     aeNow :: !(IO Now)
   }
@@ -192,7 +189,7 @@ runAgentServer (BoundSocket ref) path env = do
     -- Track connected clients and mirror the count into the TUI header.
     announce clients d = do
       n <- atomically (modifyTVar' clients (+ d) >> readTVar clients)
-      void (aeInject env (HocketMsg (AgentClients n)))
+      void (aeInject env (AgentClients n))
 
 serveClient :: AgentEnv -> Socket -> IO ()
 serveClient env conn = do
@@ -251,5 +248,5 @@ dispatch env rid = \case
 
 -- | A validated write as the Intent the keyboard would produce. The clock is
 -- sampled here, in the shell, once per write.
-toEvent :: AgentEnv -> WriteCmd -> IO HocketEvent
-toEvent env cmd = HocketMsg . Intent . (`toIntent` cmd) <$> aeNow env
+toEvent :: AgentEnv -> WriteCmd -> IO Msg
+toEvent env cmd = Intent . (`toIntent` cmd) <$> aeNow env
